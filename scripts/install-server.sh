@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPO="bakunity/RDP"
-REF="${HERMES_RDP_REF:-main}"
+REF="${BAKUNITY_RDP_REF:-${HERMES_RDP_REF:-main}}"
 HOST=""
 TELEGRAM_TOKEN=""
 TELEGRAM_CHAT_ID=""
@@ -26,7 +26,7 @@ Options:
   --port-start PORT     first RDP port (default: 53389)
   --port-end PORT       last RDP port (default: 53420)
   --trusted-rdp-cert    enable trusted public-IP RDP certificate lifecycle
-  --migrate             replace an existing Hermes FRP installation
+  --migrate             replace an existing legacy FRP installation
 EOF
 }
 
@@ -176,6 +176,13 @@ export PYTHONPATH=/opt/hermes-rdp/app
 exec /usr/bin/python3 -m hermes_rdp.cli "$@"
 EOF
 chmod 0755 /usr/local/bin/hermes-rdpctl
+# New public CLI; legacy wrapper remains for existing automations.
+cat > /usr/local/bin/bakunity-rdpctl <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exec /usr/bin/python3 -m hermes_rdp.cli "$@"
+EOF
+chmod 0755 /usr/local/bin/bakunity-rdpctl
 
 cat > /usr/local/bin/hermes-rdp-authorized-keys <<'EOF'
 #!/usr/bin/env bash
@@ -406,6 +413,6 @@ if ((TRUSTED_RDP_CERT == 1)); then
 fi
 echo
 echo "Create the first PC code while preserving port $PORT_START:"
-echo "  sudo hermes-rdpctl pair create --name 'Windows-PC-01' --port $PORT_START"
+echo "  sudo bakunity-rdpctl pair create --name 'Windows-PC-01' --port $PORT_START"
 echo
 echo "Then send /start to the Telegram bot."
