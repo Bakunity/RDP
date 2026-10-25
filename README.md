@@ -1,4 +1,4 @@
-# Hermes RDP
+# Bakunity RDP
 
 <p align="center">
   <strong>Self-hosted multi-PC RDP gateway через один публичный Linux-сервер с управлением из Telegram.</strong>
@@ -14,22 +14,22 @@
 </p>
 
 <p align="center">
-  <a href="https://hermes-rdp.vercel.app/">Сайт</a> ·
+  <a href="https://rdp.bakunity.com/">Сайт</a> ·
   <a href="https://github.com/bakunity/RDP/releases/latest">Релизы</a> ·
   <a href="docs/INDEX.md">Документация</a> ·
   <a href="docs/SECURITY.md">Безопасность</a> ·
   <a href="docs/VALIDATED_SCENARIOS.md">Проверенные сценарии</a>
 </p>
 
-Hermes RDP публикует RDP нескольких Windows-компьютеров через один Linux-сервер с публичным IP или DNS. Каждый Windows-ПК сам поднимает исходящий reverse OpenSSH-туннель, получает постоянный внешний endpoint и управляется из одного Telegram dashboard.
+Bakunity RDP публикует RDP нескольких Windows-компьютеров через один Linux-сервер с публичным IP или DNS. Каждый Windows-ПК сам поднимает исходящий reverse OpenSSH-туннель, получает постоянный внешний endpoint и управляется из одного Telegram dashboard.
 
 На домашнем или офисном роутере Windows-ПК не требуется пробрасывать входящий RDP-порт: соединение к Hermes инициирует сам Windows-клиент.
 
 > **Главный принцип проекта:** все Windows-компьютеры равноправны. Для каждого используется один installer и один Hermes Agent. Специальным узлом является только Linux-сервер Hermes.
 
-> **Stable release:** [Hermes RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
+> **Stable release:** [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
 
-## Что умеет Hermes RDP
+## Что умеет Bakunity RDP
 
 - несколько независимых Windows-ПК через один сервер;
 - постоянные endpoints вида `SERVER:53389`, `SERVER:53390`, `SERVER:53391`;
@@ -250,8 +250,8 @@ sudo systemctl status hermes-rdp-sshd.service hermes-rdp.service --no-pager
 Windows diagnostics:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Agent'
-Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
+Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
+Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation' -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Get-Process ssh -ErrorAction SilentlyContinue
 ```
@@ -278,7 +278,7 @@ Get-Process ssh -ErrorAction SilentlyContinue
 ## Релизы
 
 - [Последний релиз](https://github.com/bakunity/RDP/releases/latest)
-- [Hermes RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0)
+- [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0)
 - [Release notes v1.3.0](docs/releases/v1.3.0.md)
 - [Полная история v1.3.0](docs/releases/history/v1.3.0-full.md)
 - [Предыдущий v1.2.1](https://github.com/bakunity/RDP/releases/tag/v1.2.1)

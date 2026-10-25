@@ -1,6 +1,6 @@
 {
-  "name": "Hermes RDP",
-  "short_name": "Hermes RDP",
+  "name": "Bakunity RDP",
+  "short_name": "Bakunity RDP",
   "description": "Self-hosted multi-PC RDP gateway powered by system OpenSSH and Telegram control.",
   "start_url": "/",
   "display": "standalone",

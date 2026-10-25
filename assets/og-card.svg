@@ -24,7 +24,7 @@
     <path d="M26 37h22M37 26v22" stroke="url(#accent)" stroke-width="3" stroke-linecap="round"/>
   </g>
 
-  <text x="210" y="145" fill="#f1f8f5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="42" font-weight="700">Hermes <tspan fill="#55e6ad">RDP</tspan></text>
+  <text x="210" y="145" fill="#f1f8f5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="42" font-weight="700">Bakunity <tspan fill="#55e6ad">RDP</tspan></text>
   <text x="110" y="255" fill="#f4faf7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="68" font-weight="760" letter-spacing="-3">Один сервер.</text>
   <text x="110" y="330" fill="url(#accent)" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="68" font-weight="760" letter-spacing="-3">Несколько Windows‑ПК.</text>
   <text x="110" y="398" fill="#91a59f" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="27">System OpenSSH · Telegram control · persistent RDP ports</text>
@@ -38,7 +38,7 @@
 
   <g transform="translate(830 184)">
     <rect width="254" height="292" rx="24" fill="#08110f" stroke="#8affd3" stroke-opacity=".22"/>
-    <text x="24" y="42" fill="#55e6ad" font-family="Consolas,monospace" font-size="12" letter-spacing="2">HERMES CONTROL</text>
+    <text x="24" y="42" fill="#55e6ad" font-family="Consolas,monospace" font-size="12" letter-spacing="2">BAKUNITY CONTROL</text>
     <g transform="translate(20 67)"><rect width="214" height="58" rx="13" fill="#55e6ad" fill-opacity=".08" stroke="#55e6ad" stroke-opacity=".24"/><circle cx="25" cy="29" r="8" fill="#55e6ad"/><text x="46" y="25" fill="#eff9f5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">Home-PC</text><text x="46" y="43" fill="#71867e" font-family="Consolas,monospace" font-size="10">SSH ONLINE · :53389</text></g>
     <g transform="translate(20 136)"><rect width="214" height="58" rx="13" fill="#ffffff" fill-opacity=".025" stroke="#ffffff" stroke-opacity=".06"/><circle cx="25" cy="29" r="8" fill="#55e6ad"/><text x="46" y="25" fill="#eff9f5" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">Office-PC</text><text x="46" y="43" fill="#71867e" font-family="Consolas,monospace" font-size="10">SSH ONLINE · :53390</text></g>
     <g transform="translate(20 205)"><rect width="214" height="58" rx="13" fill="#ffffff" fill-opacity=".02" stroke="#ffffff" stroke-opacity=".05"/><circle cx="25" cy="29" r="8" fill="#667a72"/><text x="46" y="25" fill="#a5b4af" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" font-weight="650">Laptop</text><text x="46" y="43" fill="#63756f" font-family="Consolas,monospace" font-size="10">OFFLINE · :53391</text></g>

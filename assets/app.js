@@ -1,6 +1,41 @@
 (() => {
   'use strict';
 
+  const rainCanvas = document.querySelector('[data-matrix-rain]');
+  if (rainCanvas && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const ctx = rainCanvas.getContext('2d');
+    if (ctx) {
+      const alphabet = '01BAKUNITY<>[]{}';
+      let columns = [], width = 0, height = 0, interval = 0;
+      const resize = () => {
+        const rect = rainCanvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        width = Math.max(1, Math.round(rect.width)); height = Math.max(1, Math.round(rect.height));
+        rainCanvas.width = Math.round(width * dpr); rainCanvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        columns = Array.from({length: Math.ceil(width / 22)}, () => -Math.random() * 42);
+        ctx.clearRect(0, 0, width, height);
+      };
+      resize();
+      const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(resize) : null;
+      observer?.observe(rainCanvas);
+      window.addEventListener('resize', resize, { passive: true });
+      const frame = () => {
+        if (document.hidden) return;
+        ctx.fillStyle = 'rgba(3,6,4,.12)'; ctx.fillRect(0, 0, width, height);
+        ctx.font = '15px monospace';
+        columns.forEach((position, index) => {
+          const char = alphabet[Math.floor(Math.random() * alphabet.length)];
+          ctx.fillStyle = Math.random() > .96 ? '#d9ffe1' : '#14cb50';
+          ctx.fillText(char, index * 22, position * 22);
+          columns[index] = position * 22 > height && Math.random() > .965 ? -Math.random() * 25 : position + .72;
+        });
+      };
+      interval = window.setInterval(frame, 65);
+      window.addEventListener('pagehide', () => { window.clearInterval(interval); observer?.disconnect(); }, { once: true });
+    }
+  }
+
   const header = document.querySelector('[data-header]');
   const nav = document.querySelector('[data-nav]');
   const navToggle = document.querySelector('[data-nav-toggle]');
