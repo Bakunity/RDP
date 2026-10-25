@@ -626,3 +626,15 @@ svg { display: block; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .reveal { opacity: 1; transform: none; }
 }
+
+/* Bakunity RDP — dark/green design language */
+:root{--bg:#030604;--bg-soft:#08110b;--panel:rgba(3,12,6,.88);--panel-strong:#0a170e;--line:rgba(31,255,94,.16);--line-strong:rgba(31,255,94,.38);--text:#f1fff3;--muted:#a0b5a4;--accent:#18f65b;--accent-strong:#00ca42;--accent-soft:rgba(24,246,91,.10)}
+body{background:#030604}
+.hero{isolation:isolate}
+.matrix-rain{position:absolute;inset:0;width:100%;height:100%;z-index:-1;pointer-events:none;opacity:.56}
+.hero-grid{opacity:.11}
+.site-header.scrolled{background:rgba(0,5,1,.92)}
+.device-card,.feature-card,.button,.release-pill{transition:border-color .25s ease,box-shadow .25s ease,transform .25s ease}
+.device-card:hover,.feature-card:hover,.release-pill:hover{border-color:rgba(24,246,91,.5);box-shadow:0 0 27px rgba(24,246,91,.09);transform:translateY(-2px)}
+.brand:hover .brand-mark{filter:drop-shadow(0 0 10px rgba(24,246,91,.8))}
+@media (prefers-reduced-motion:reduce){.matrix-rain{display:none}.device-card:hover,.feature-card:hover,.release-pill:hover{transform:none}}

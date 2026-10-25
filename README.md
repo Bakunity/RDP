@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://hermes-rdp.vercel.app/">Сайт</a> ·
+  <a href="https://rdp.bakunity.com/">Сайт</a> ·
   <a href="https://github.com/bakunity/RDP/releases/latest">Релизы</a> ·
   <a href="docs/INDEX.md">Документация</a> ·
   <a href="docs/SECURITY.md">Безопасность</a> ·
