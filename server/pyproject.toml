@@ -12,6 +12,8 @@ authors = [{name = "Bakunity"}]
 dependencies = []
 
 [project.scripts]
+bakunity-rdp = "hermes_rdp.service:main"
+bakunity-rdpctl = "hermes_rdp.cli:main"
 hermes-rdp = "hermes_rdp.service:main"
 hermes-rdpctl = "hermes_rdp.cli:main"
 

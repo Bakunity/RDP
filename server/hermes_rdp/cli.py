@@ -14,7 +14,7 @@ from .tunnel import close_tunnel
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hermes-rdpctl")
+    parser = argparse.ArgumentParser(prog="bakunity-rdpctl")
     sub = parser.add_subparsers(dest="command", required=True)
 
     pair = sub.add_parser("pair", help="manage one-time pairing codes")
