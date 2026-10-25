@@ -1,4 +1,4 @@
-# Hermes RDP vX.Y.Z — <short release title>
+# Bakunity RDP vX.Y.Z — <short release title>
 
 One short paragraph: what this release is and why it matters.
 

@@ -8,7 +8,7 @@
 
 - чистая установка Linux-сервера;
 - `hermes-rdp-sshd.service` и `hermes-rdp.service` active/enabled;
-- отдельный Hermes `sshd` на `7000/tcp` не зависит от admin SSH `:22`;
+- отдельный Bakunity `sshd` на `7000/tcp` не зависит от admin SSH `:22`;
 - FRP отсутствует из текущего runtime;
 - SQLite registry и OpenSSH device fields работают;
 - сервер после reboot восстанавливает controller/tunnel services, а Windows agents переподключаются автоматически.
@@ -17,7 +17,7 @@
 
 - fresh pairing создаёт локальный Ed25519 keypair;
 - private key остаётся на Windows, сервер получает только public key;
-- Scheduled Task `Hermes RDP Agent` работает от `SYSTEM`;
+- Scheduled Task `Bakunity RDP Agent` работает от `SYSTEM`;
 - Windows 10 x64 из 32-битного PowerShell корректно использует native OpenSSH через Sysnative;
 - Windows Server 2019 проходит fresh install и end-to-end RDP;
 - повторный `Добавить ПК` на уже установленной машине не выполняет destructive actions;
@@ -38,10 +38,10 @@ remote client → Linux server → reverse SSH → Windows RDP
 
 ### Telegram control
 
-- `OFF` закрывает публичный listener и прерывает Hermes RDP access;
+- `OFF` закрывает публичный listener и прерывает Bakunity RDP access;
 - agent heartbeat остаётся отдельным от состояния доступа;
 - `ON` восстанавливает listener и возможность подключения;
-- `RESTART` заменяет Hermes SSH transport и возвращает ровно один tunnel;
+- `RESTART` заменяет Bakunity SSH transport и возвращает ровно один tunnel;
 - dashboard автоматически обновляет command/tunnel state;
 - mobile layout кнопок принят в live usage.
 
@@ -51,7 +51,7 @@ remote client → Linux server → reverse SSH → Windows RDP
 - Linux server reboot recovery — PASS;
 - временный Windows-side transport loss восстанавливается автоматически;
 - controller restart не требует перезапуска RDP transport;
-- dedicated Hermes sshd restart восстанавливает Windows tunnels;
+- dedicated Bakunity sshd restart восстанавливает Windows tunnels;
 - повторные sshd reconnect cycles не оставили server-side duplicate/orphan sessions;
 - hard delete отзывает API-token/public key, закрывает listener и освобождает порт;
 - освобождённый порт безопасно используется следующим fresh pairing;
@@ -62,9 +62,9 @@ remote client → Linux server → reverse SSH → Windows RDP
 - per-device Ed25519 identities изолированы;
 - cross-device SSH access не разрешён;
 - Telegram control ограничен owner chat/user ID;
-- admin SSH `:22` и Hermes tunnel SSH `:7000` имеют отдельные service/config/process boundaries;
-- Hermes не добавляет Microsoft Defender exclusions и не требует отключения Defender;
-- на acceptance fixtures real-time protection работала вместе с Hermes RDP.
+- admin SSH `:22` и Bakunity tunnel SSH `:7000` имеют отдельные service/config/process boundaries;
+- Bakunity не добавляет Microsoft Defender exclusions и не требует отключения Defender;
+- на acceptance fixtures real-time protection работала вместе с Bakunity RDP.
 
 ### Trusted public-IP RDP certificate lifecycle
 
@@ -93,7 +93,7 @@ remote client → Linux server → reverse SSH → Windows RDP
 
 ### Automatic certificate rotation worker
 
-- отдельный Windows Scheduled Task `Hermes RDP Certificate Rotation` работает от LocalSystem SID `S-1-5-18`;
+- отдельный Windows Scheduled Task `Bakunity RDP Certificate Rotation` работает от LocalSystem SID `S-1-5-18`;
 - worker выполняет lightweight authenticated status check до PFX retrieval;
 - при unchanged thumbprint полный certificate package не передаётся;
 - global mutex ACL ограничен LocalSystem + Builtin Administrators;
@@ -105,7 +105,7 @@ remote client → Linux server → reverse SSH → Windows RDP
 - тяжёлые WMI/NetTCPIP операции убраны из ordinary fast path;
 - измеренный fast core выполнялся за десятки миллисекунд, а не занимал большую часть telemetry interval;
 - `НАБЛЮДАТЬ 60с` включает более частую heavy telemetry только на bounded lease;
-- пользовательская работа через Hermes RDP после оптимизации подтверждена как плавная без заметных прежних микрофризов.
+- пользовательская работа через Bakunity RDP после оптимизации подтверждена как плавная без заметных прежних микрофризов.
 
 ### Transactional update
 
@@ -132,14 +132,14 @@ remote client → Linux server → reverse SSH → Windows RDP
 
 На отдельной disposable Windows 10 Pro x64 fixture с PowerShell 5.1 и включённым Defender подтверждено:
 
-- до установки Hermes base/tasks/processes отсутствовали;
+- до установки Bakunity base/tasks/processes отсутствовали;
 - fresh installer автоматически создал основной Agent runtime и certificate rotation companion;
 - rotation task работает как LocalSystem SID `S-1-5-18`;
 - trusted CUSTOM RDP listener применён автоматически;
-- ровно один Hermes Agent и один Hermes SSH transport;
-- Defender остался включён, Hermes exclusion не добавлялся;
-- внешний Microsoft Remote Desktop через назначенный Hermes endpoint подключился успешно и без self-signed warning;
-- normal uninstall удалил обе Hermes Scheduled Tasks и остановил Agent/rotation/SSH runtime;
+- ровно один Bakunity Agent и один Bakunity SSH transport;
+- Defender остался включён, Bakunity exclusion не добавлялся;
+- внешний Microsoft Remote Desktop через назначенный Bakunity endpoint подключился успешно и без self-signed warning;
+- normal uninstall удалил обе Bakunity Scheduled Tasks и остановил Agent/rotation/SSH runtime;
 - active `C:\ProgramData\HermesRDP` был архивирован/удалён;
 - Defender real-time protection остался включён;
 - финальный marker `CERT-013_UNINSTALL=PASS`.

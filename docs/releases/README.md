@@ -1,4 +1,4 @@
-# Hermes RDP release notes
+# Bakunity RDP release notes
 
 Release history has **two layers**:
 

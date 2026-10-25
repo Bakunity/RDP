@@ -1,6 +1,6 @@
-# Тестирование Hermes RDP от А до Я
+# Тестирование Bakunity RDP от А до Я
 
-Этот checklist предназначен для тестового сервера перед постоянной эксплуатацией и обязательно включает проверку **внешнего RDP** через Hermes endpoint.
+Этот checklist предназначен для тестового сервера перед постоянной эксплуатацией и обязательно включает проверку **внешнего RDP** через Bakunity endpoint.
 
 Не повторяйте destructive или issuance-heavy проверки на production без конкретной regression-причины. Фактически принятые сценарии перечислены в [VALIDATED_SCENARIOS.md](VALIDATED_SCENARIOS.md).
 
@@ -39,20 +39,20 @@
 - [ ] `=== ГОТОВО ===` отображается.
 - [ ] Созданы `device.json`, `known_hosts` и Ed25519 keypair.
 - [ ] ACL secrets доступны только `SYSTEM` и Administrators.
-- [ ] Scheduled Task `Hermes RDP Agent` активна.
-- [ ] Microsoft Defender real-time protection остаётся включённой; Hermes exclusion не требуется.
+- [ ] Scheduled Task `Bakunity RDP Agent` активна.
+- [ ] Microsoft Defender real-time protection остаётся включённой; Bakunity exclusion не требуется.
 
 При включённом trusted RDP certificate lifecycle:
 
 - [ ] Созданы `HermesRdpCertRotation.ps1` и `sync-rdp-certificate.ps1`.
-- [ ] Scheduled Task `Hermes RDP Certificate Rotation` работает как LocalSystem SID `S-1-5-18`.
+- [ ] Scheduled Task `Bakunity RDP Certificate Rotation` работает как LocalSystem SID `S-1-5-18`.
 - [ ] Windows RDP listener имеет CUSTOM certificate binding (`SSLCertificateSHA1HashType = 3`).
 - [ ] TCP `3389` остаётся listening.
 
 ## D. Туннель
 
 - [ ] `ssh.exe` запущен.
-- [ ] Для устройства работает ровно один Hermes SSH transport.
+- [ ] Для устройства работает ровно один Bakunity SSH transport.
 - [ ] Назначенный порт слушается на сервере.
 - [ ] Другой порт из пула не занят этим ключом.
 - [ ] Telegram показывает ONLINE и LIVE-метрики.
@@ -117,9 +117,9 @@
 
 ## K. Uninstall
 
-- [ ] `Hermes RDP Agent` unregister-ен.
-- [ ] `Hermes RDP Certificate Rotation` unregister-ен, если существовал.
-- [ ] Hermes Agent/rotation/SSH processes отсутствуют.
+- [ ] `Bakunity RDP Agent` unregister-ен.
+- [ ] `Bakunity RDP Certificate Rotation` unregister-ен, если существовал.
+- [ ] Bakunity Agent/rotation/SSH processes отсутствуют.
 - [ ] Active `C:\ProgramData\HermesRDP` архивирован/удалён согласно uninstall behavior.
 - [ ] Defender остаётся включён.
 - [ ] После локального uninstall устройство удалено в Telegram для server-side revoke и освобождения endpoint.
