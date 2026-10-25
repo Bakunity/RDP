@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#071310">
   <meta name="color-scheme" content="dark">
-  <title>Hermes RDP — удалённый доступ к нескольким Windows‑ПК через OpenSSH</title>
-  <meta name="description" content="Hermes RDP v1.3.0: self-hosted RDP-шлюз, системный OpenSSH, постоянные endpoints, Telegram control и trusted RDP certificate lifecycle.">
-  <meta name="keywords" content="RDP, OpenSSH, Windows, Linux, Telegram, remote desktop, self-hosted, reverse SSH, trusted RDP certificate, Hermes RDP">
+  <title>Bakunity RDP — удалённый доступ к нескольким Windows‑ПК через OpenSSH</title>
+  <meta name="description" content="Bakunity RDP v1.3.0: self-hosted RDP-шлюз, системный OpenSSH, постоянные endpoints, Telegram control и trusted RDP certificate lifecycle.">
+  <meta name="keywords" content="RDP, OpenSSH, Windows, Linux, Telegram, remote desktop, self-hosted, reverse SSH, trusted RDP certificate, Bakunity RDP">
   <meta name="author" content="Bakunity">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://hermes-rdp.vercel.app/">
@@ -17,14 +17,14 @@
 
   <meta property="og:type" content="website">
   <meta property="og:locale" content="ru_RU">
-  <meta property="og:site_name" content="Hermes RDP">
-  <meta property="og:title" content="Hermes RDP v1.3.0 — multi-PC RDP через системный OpenSSH">
+  <meta property="og:site_name" content="Bakunity RDP">
+  <meta property="og:title" content="Bakunity RDP v1.3.0 — multi-PC RDP через системный OpenSSH">
   <meta property="og:description" content="Один публичный Linux-сервер, несколько Windows-ПК, постоянные RDP-порты, Telegram-панель и automatic trusted RDP TLS lifecycle.">
   <meta property="og:url" content="https://hermes-rdp.vercel.app/">
   <meta property="og:image" content="https://hermes-rdp.vercel.app/assets/og-card.svg">
 
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hermes RDP v1.3.0">
+  <meta name="twitter:title" content="Bakunity RDP v1.3.0">
   <meta name="twitter:description" content="Self-hosted multi-PC RDP gateway powered by system OpenSSH.">
   <meta name="twitter:image" content="https://hermes-rdp.vercel.app/assets/og-card.svg">
 
@@ -32,7 +32,7 @@
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    "name": "Hermes RDP",
+    "name": "Bakunity RDP",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Debian or Ubuntu server, Windows 10 or 11 client",
     "softwareVersion": "1.3.0",
@@ -48,11 +48,11 @@
 
   <header class="site-header" data-header>
     <div class="container header-inner">
-      <a class="brand" href="#top" aria-label="Hermes RDP — главная">
+      <a class="brand" href="#top" aria-label="Bakunity RDP — главная">
         <span class="brand-mark" aria-hidden="true">
           <svg viewBox="0 0 40 40"><path d="M20 3 34 10v10c0 8-5 13.7-14 16.5C11 33.7 6 28 6 20V10L20 3Z" fill="currentColor" opacity=".18"/><path d="M20 7 30 12v7.6c0 5.9-3.3 10-10 12.4-6.7-2.4-10-6.5-10-12.4V12L20 7Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M14 20h12M20 14v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </span>
-        <span>Hermes <strong>RDP</strong></span>
+        <span>Bakunity <strong>RDP</strong></span>
       </a>
 
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" data-nav-toggle>
@@ -86,7 +86,7 @@
           </a>
 
           <h1>Один сервер.<br><span>Несколько Windows‑ПК.</span></h1>
-          <p class="hero-lead">Hermes RDP публикует удалённый рабочий стол нескольких компьютеров через один Linux-сервер. Каждый ПК получает свой endpoint, отдельную identity, LIVE-состояние и управление из Telegram. v1.3.0 также автоматически управляет trusted сертификатом Windows RDP listener.</p>
+          <p class="hero-lead">Bakunity RDP публикует удалённый рабочий стол нескольких компьютеров через один Linux-сервер. Каждый ПК получает свой endpoint, отдельную identity, LIVE-состояние и управление из Telegram. v1.3.0 также автоматически управляет trusted сертификатом Windows RDP listener.</p>
 
           <div class="hero-actions">
             <a class="button button-primary" href="#start">Развернуть Hermes</a>
@@ -101,7 +101,7 @@
           </div>
         </div>
 
-        <div class="dashboard-shell reveal reveal-delay" aria-label="Пример Telegram-панели Hermes RDP">
+        <div class="dashboard-shell reveal reveal-delay" aria-label="Пример Telegram-панели Bakunity RDP">
           <div class="window-bar">
             <div class="window-dots"><span></span><span></span><span></span></div>
             <div class="window-title">Hermes Control · LIVE</div>
@@ -109,7 +109,7 @@
           </div>
           <div class="dashboard-body">
             <div class="dashboard-head">
-              <div><small>HERMES RDP</small><h2>Компьютеры</h2></div>
+              <div><small>BAKUNITY RDP</small><h2>Компьютеры</h2></div>
               <span class="live-badge"><i></i> LIVE</span>
             </div>
 
@@ -273,16 +273,16 @@ mstsc.exe /v:SERVER_IP_OR_DOMAIN:53389</code></pre></div></div>
           <details><summary>Можно ли подключить несколько компьютеров?<span>＋</span></summary><p>Да. Multi-device endpoints, одновременные RDP-сессии и failure isolation live-проверены.</p></details>
           <details><summary>Нужны ли исключения Microsoft Defender?<span>＋</span></summary><p>Нет. Hermes использует системные <code>ssh.exe</code> и <code>ssh-keygen.exe</code>; Defender coexistence проверен с real-time protection.</p></details>
           <details><summary>Что убирает предупреждение сертификата RDP?<span>＋</span></summary><p>Не HTTPS API certificate, а certificate самого Windows RDP listener. v1.3.0 умеет автоматически получать, доставлять, привязывать и ротировать trusted public-IP certificate.</p></details>
-          <details><summary>Что сейчас stable?<span>＋</span></summary><p>Hermes RDP v1.3.0. Для production используйте immutable release tag.</p></details>
+          <details><summary>Что сейчас stable?<span>＋</span></summary><p>Bakunity RDP v1.3.0. Для production используйте immutable release tag.</p></details>
         </div>
       </div>
     </section>
 
-    <section class="cta-section"><div class="container cta-card reveal"><div><span class="eyebrow">OPEN SOURCE · MIT</span><h2>Соберите собственную RDP-инфраструктуру</h2><p>Один сервер, отдельные identities на устройства, стандартный Microsoft Remote Desktop и понятный lifecycle без стороннего tunnel agent.</p></div><div class="cta-actions"><a class="button button-primary" href="https://github.com/bakunity/RDP/releases/tag/v1.3.0" target="_blank" rel="noreferrer">Hermes RDP v1.3.0</a><a class="button button-secondary" href="https://github.com/bakunity/RDP/blob/v1.3.0/docs/VALIDATED_SCENARIOS.md" target="_blank" rel="noreferrer">Что проверено</a></div></div></section>
+    <section class="cta-section"><div class="container cta-card reveal"><div><span class="eyebrow">OPEN SOURCE · MIT</span><h2>Соберите собственную RDP-инфраструктуру</h2><p>Один сервер, отдельные identities на устройства, стандартный Microsoft Remote Desktop и понятный lifecycle без стороннего tunnel agent.</p></div><div class="cta-actions"><a class="button button-primary" href="https://github.com/bakunity/RDP/releases/tag/v1.3.0" target="_blank" rel="noreferrer">Bakunity RDP v1.3.0</a><a class="button button-secondary" href="https://github.com/bakunity/RDP/blob/v1.3.0/docs/VALIDATED_SCENARIOS.md" target="_blank" rel="noreferrer">Что проверено</a></div></div></section>
   </main>
 
   <footer class="site-footer">
-    <div class="container footer-main"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">H</span><span>Hermes <strong>RDP</strong></span></a><p>Self-hosted multi-PC RDP gateway powered by system OpenSSH.</p><div class="footer-links"><a href="https://github.com/bakunity/RDP" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/bakunity/RDP/releases/tag/v1.3.0" target="_blank" rel="noreferrer">v1.3.0</a><a href="https://github.com/bakunity/RDP/blob/v1.3.0/docs/INDEX.md" target="_blank" rel="noreferrer">Docs</a><a href="https://github.com/bakunity/RDP/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a></div></div>
+    <div class="container footer-main"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">H</span><span>Bakunity <strong>RDP</strong></span></a><p>Self-hosted multi-PC RDP gateway powered by system OpenSSH.</p><div class="footer-links"><a href="https://github.com/bakunity/RDP" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/bakunity/RDP/releases/tag/v1.3.0" target="_blank" rel="noreferrer">v1.3.0</a><a href="https://github.com/bakunity/RDP/blob/v1.3.0/docs/INDEX.md" target="_blank" rel="noreferrer">Docs</a><a href="https://github.com/bakunity/RDP/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License</a></div></div>
     <div class="container footer-bottom"><span>© <span data-year></span> Bakunity</span><span>OpenSSH transport · trusted lifecycle · predictable remote access.</span></div>
   </footer>
 
