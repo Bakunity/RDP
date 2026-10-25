@@ -1,6 +1,6 @@
 # Процесс релиза
 
-Hermes RDP использует Semantic Versioning и автоматическую публикацию GitHub Release после merge релизного PR в `main`.
+Bakunity RDP использует Semantic Versioning и автоматическую публикацию GitHub Release после merge релизного PR в `main`.
 
 ## Источники версии
 
@@ -101,9 +101,9 @@ https://github.com/bakunity/RDP/releases/latest
 ```bash
 VERSION="$(tr -d '\r\n' < VERSION)"
 TAG="v$VERSION"
-git tag -a "$TAG" -m "Hermes RDP $TAG"
+git tag -a "$TAG" -m "Bakunity RDP $TAG"
 git push origin "$TAG"
-gh release create "$TAG" --title "Hermes RDP $TAG" --notes-file "docs/releases/$TAG.md" --verify-tag
+gh release create "$TAG" --title "Bakunity RDP $TAG" --notes-file "docs/releases/$TAG.md" --verify-tag
 ```
 
 ## Stable install URLs

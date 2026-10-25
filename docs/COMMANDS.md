@@ -14,8 +14,8 @@ sudo hermes-rdpctl dashboard reset
 ## Windows
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Agent'
-Start-ScheduledTask -TaskName 'Hermes RDP Agent'
-Stop-ScheduledTask -TaskName 'Hermes RDP Agent'
+Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
+Start-ScheduledTask -TaskName 'Bakunity RDP Agent'
+Stop-ScheduledTask -TaskName 'Bakunity RDP Agent'
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 50
 ```

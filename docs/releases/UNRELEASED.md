@@ -1,4 +1,4 @@
-# Hermes RDP — Unreleased
+# Bakunity RDP — Unreleased
 
 Base release: **v1.3.0**
 
@@ -36,7 +36,7 @@ Do not regress:
 - Windows Server support;
 - Defender coexistence without exclusions/disablement;
 - per-device Ed25519 identities;
-- admin SSH isolation from Hermes tunnel sshd;
+- admin SSH isolation from Bakunity tunnel sshd;
 - transactional server/client update rollback;
 - existing-device Repair identity boundary;
 - main Agent fast path without certificate work in the 3-second loop.

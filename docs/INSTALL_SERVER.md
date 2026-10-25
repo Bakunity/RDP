@@ -7,7 +7,7 @@ Debian/Ubuntu, root или sudo, systemd, OpenSSH Server, UFW и Python 3.11+.
 ## Порты
 
 - `22/tcp` — административный SSH сервера, установщик его не меняет;
-- `7000/tcp` — отдельный Hermes OpenSSH daemon;
+- `7000/tcp` — отдельный Bakunity OpenSSH daemon;
 - `7443/tcp` — HTTPS API;
 - `53389–53420/tcp` — RDP endpoints;
 - `80/tcp` — нужен только при включённом trusted RDP certificate lifecycle для ACME HTTP-01.
@@ -17,9 +17,9 @@ Debian/Ubuntu, root или sudo, systemd, OpenSSH Server, UFW и Python 3.11+.
 До публикации следующего release tag используйте проверенный immutable source ref, а не изменяемый `main`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/REF/scripts/install-server.sh -o /tmp/install-hermes-rdp.sh
+curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/REF/scripts/install-server.sh -o /tmp/install-bakunity-rdp.sh
 read -rsp 'Telegram bot token: ' TG_TOKEN; echo
-sudo env HERMES_RDP_REF=REF bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=REF bash /tmp/install-bakunity-rdp.sh \
   --host SERVER_IP_OR_DOMAIN \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID \
@@ -28,17 +28,17 @@ sudo env HERMES_RDP_REF=REF bash /tmp/install-hermes-rdp.sh \
   --port-start 53389 \
   --port-end 53420
 unset TG_TOKEN
-rm -f /tmp/install-hermes-rdp.sh
+rm -f /tmp/install-bakunity-rdp.sh
 ```
 
 ## Trusted RDP certificate
 
-Hermes умеет отдельно от HTTPS API управлять публично доверенным сертификатом **Windows RDP listener**. Это нужно, чтобы стандартный Microsoft Remote Desktop не показывал предупреждение о self-signed сертификате при подключении к публичному endpoint.
+Bakunity умеет отдельно от HTTPS API управлять публично доверенным сертификатом **Windows RDP listener**. Это нужно, чтобы стандартный Microsoft Remote Desktop не показывал предупреждение о self-signed сертификате при подключении к публичному endpoint.
 
 Для этого server install запускается с дополнительным флагом:
 
 ```bash
-sudo env HERMES_RDP_REF=REF bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=REF bash /tmp/install-bakunity-rdp.sh \
   --host PUBLIC_IPV4 \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID \
@@ -52,7 +52,7 @@ sudo env HERMES_RDP_REF=REF bash /tmp/install-hermes-rdp.sh \
 - сервер должен иметь доступ к Let’s Encrypt;
 - не запускайте второй HTTP service на `:80` во время standalone ACME issuance/renewal.
 
-При включении lifecycle Hermes:
+При включении lifecycle Bakunity:
 
 - устанавливает изолированный Certbot в `/opt/certbot`;
 - сначала выполняет staging validation;
@@ -76,7 +76,7 @@ HTTPS API certificate и Windows RDP listener certificate — **разные tru
 - `hermes-rdp-sshd.service`;
 - системные пользователи `hermes-rdp` и `hermes-tunnel`.
 
-При `--trusted-rdp-cert` дополнительно создаются Hermes certificate helpers/state и systemd renewal service/timer.
+При `--trusted-rdp-cert` дополнительно создаются Bakunity certificate helpers/state и systemd renewal service/timer.
 
 ## Проверка
 

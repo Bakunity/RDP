@@ -1,4 +1,4 @@
-# Диагностика Hermes RDP
+# Диагностика Bakunity RDP
 
 ## Сервер не проходит `doctor`
 
@@ -48,7 +48,7 @@ C:\ProgramData\HermesRDP
 ## `SSH-туннель не запустился`
 
 ```powershell
-Get-ScheduledTaskInfo -TaskName 'Hermes RDP Agent'
+Get-ScheduledTaskInfo -TaskName 'Bakunity RDP Agent'
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Get-Process ssh -ErrorAction SilentlyContinue
 Test-NetConnection SERVER_IP_OR_DOMAIN -Port 7000
@@ -67,7 +67,7 @@ Test-NetConnection SERVER_IP_OR_DOMAIN -Port 7000
 Проверьте:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Agent'
+Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Test-NetConnection SERVER_IP_OR_DOMAIN -Port 7443
 ```
@@ -103,7 +103,7 @@ Get-NetFirewallRule -Name 'RemoteDesktop-*' -ErrorAction SilentlyContinue
 - отсутствие блокировки учётной записи;
 - актуальные Windows updates.
 
-Hermes не обходит Windows authentication.
+Bakunity не обходит Windows authentication.
 
 ## Pairing-код не принимается
 

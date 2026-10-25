@@ -1,4 +1,4 @@
-# Разработка Hermes RDP
+# Разработка Bakunity RDP
 
 Документ предназначен для будущих разработчиков и ревьюеров. Перед изменением кода прочитай [ARCHITECTURE.md](ARCHITECTURE.md) и [SECURITY.md](SECURITY.md).
 

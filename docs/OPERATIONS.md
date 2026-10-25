@@ -1,4 +1,4 @@
-# Эксплуатация Hermes RDP
+# Эксплуатация Bakunity RDP
 
 ## Быстрая проверка состояния
 
@@ -46,7 +46,7 @@ Certificate renewal timer не входит в обычный restart controller
 - systemd units;
 - текущий repository ref.
 
-При включённом trusted RDP lifecycle дополнительно учитывайте `/etc/letsencrypt` и Hermes certificate renewal units/helpers. Эти данные содержат private key material и требуют более строгого хранения.
+При включённом trusted RDP lifecycle дополнительно учитывайте `/etc/letsencrypt` и Bakunity certificate renewal units/helpers. Эти данные содержат private key material и требуют более строгого хранения.
 
 Базовый backup:
 
@@ -85,8 +85,8 @@ Normal `update-client.ps1` теперь управляет не только о�
 Успешный update должен оставить:
 
 - Device ID / API-token / Ed25519 identity / `known_hosts` / RDP port неизменными;
-- `Hermes RDP Agent` здоровым;
-- `Hermes RDP Certificate Rotation` здоровым, если trusted lifecycle включён;
+- `Bakunity RDP Agent` здоровым;
+- `Bakunity RDP Certificate Rotation` здоровым, если trusted lifecycle включён;
 - trusted CUSTOM listener сохранённым;
 - TCP 3389 слушающим.
 
@@ -104,7 +104,7 @@ Server-side timer периодически запускает bounded renewal pa
 
 После реального изменения certificate thumbprint:
 
-1. Hermes обновляет non-secret server certificate state.
+1. Bakunity обновляет non-secret server certificate state.
 2. Windows rotation worker видит новый desired thumbprint.
 3. Только тогда authenticated клиент получает новый certificate package.
 4. Windows worker импортирует certificate и обновляет CUSTOM RDP listener binding.
@@ -114,7 +114,7 @@ Server-side timer периодически запускает bounded renewal pa
 ## Windows certificate diagnostics
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation'
+Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation'
 Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'" | Select-Object SSLCertificateSHA1Hash,SSLCertificateSHA1HashType
 ```
 
@@ -141,9 +141,9 @@ sudo ss -H -ltn 'sport = :53389'
 
 Normal uninstall:
 
-- unregister-ит `Hermes RDP Agent`;
-- unregister-ит `Hermes RDP Certificate Rotation`;
-- останавливает Hermes Agent/rotation/SSH processes;
+- unregister-ит `Bakunity RDP Agent`;
+- unregister-ит `Bakunity RDP Certificate Rotation`;
+- останавливает Bakunity Agent/rotation/SSH processes;
 - архивирует активный `C:\ProgramData\HermesRDP`.
 
 После локального uninstall удалите устройство в Telegram, чтобы завершить server-side revoke и port release.
@@ -168,7 +168,7 @@ sudo hermes-rdpctl doctor
 - ONLINE в Telegram;
 - открытый назначенный порт на сервере.
 
-Certificate rotation task работает отдельно и не должна создавать второй Hermes SSH transport.
+Certificate rotation task работает отдельно и не должна создавать второй Bakunity SSH transport.
 
 ## Ротация и очистка
 

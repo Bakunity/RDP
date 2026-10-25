@@ -18,7 +18,7 @@
 Запустите актуальный установщик с явным `--migrate`:
 
 ```bash
-sudo env HERMES_RDP_REF=REF bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=REF bash /tmp/install-bakunity-rdp.sh \
   --host SERVER_IP_OR_DOMAIN \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID \
@@ -36,7 +36,7 @@ systemctl is-enabled frps.service 2>/dev/null || true
 
 Ожидается:
 
-- два Hermes OpenSSH service active;
+- два Bakunity OpenSSH service active;
 - `frps` binary отсутствует;
 - `frps.service` отсутствует или disabled;
 - база содержит SSH-поля;
@@ -63,7 +63,7 @@ systemctl is-enabled frps.service 2>/dev/null || true
 
 1. остановить старые задачи и процессы;
 2. перенести legacy-каталог целиком;
-3. при необходимости применить `takeown`/`icacls` только к каталогу Hermes;
+3. при необходимости применить `takeown`/`icacls` только к каталогу Bakunity;
 4. только после локальной подготовки начинать pairing.
 
 ## После миграции

@@ -1,9 +1,9 @@
-# Лендинг Hermes RDP
+# Лендинг Bakunity RDP
 
 Публичный сайт проекта находится по адресу:
 
 ```text
-https://hermes-rdp.vercel.app/
+https://rdp.bakunity.com/
 ```
 
 Лендинг является частью того же репозитория, что и server/client code. Он не требует Node.js, package manager или отдельной сборки.
@@ -70,11 +70,11 @@ Install Command: пусто
 После привязки production domain проверить:
 
 ```text
-https://hermes-rdp.vercel.app/
-https://hermes-rdp.vercel.app/robots.txt
-https://hermes-rdp.vercel.app/sitemap.xml
-https://hermes-rdp.vercel.app/github
-https://hermes-rdp.vercel.app/release
+https://rdp.bakunity.com/
+https://rdp.bakunity.com/robots.txt
+https://rdp.bakunity.com/sitemap.xml
+https://rdp.bakunity.com/github
+https://rdp.bakunity.com/release
 ```
 
 ## Контент

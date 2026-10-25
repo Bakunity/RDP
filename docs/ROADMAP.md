@@ -1,4 +1,4 @@
-# Roadmap Hermes RDP
+# Roadmap Bakunity RDP
 
 Roadmap описывает направления после v1.0.0. Это не список уже реализованных возможностей.
 
@@ -47,7 +47,7 @@ Roadmap описывает направления после v1.0.0. Это не
 - friendly DNS names для устройств;
 - optional private WireGuard mode;
 - IPv6 support;
-- multiple Hermes servers и failover;
+- multiple Bakunity servers и failover;
 - regional relays.
 
 ## Границы core
