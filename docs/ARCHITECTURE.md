@@ -1,4 +1,4 @@
-# Архитектура Hermes RDP
+# Архитектура Bakunity RDP
 
 ## Общая схема
 
@@ -72,7 +72,7 @@ Certificate lifecycle вынесен из performance-sensitive Agent loop в о
 
 ## Две независимые TLS-границы
 
-Hermes использует два разных сертификатных контура, и их нельзя смешивать.
+Bakunity использует два разных сертификатных контура, и их нельзя смешивать.
 
 ### HTTPS API trust
 
@@ -87,7 +87,7 @@ Hermes использует два разных сертификатных ко�
 Опциональный trusted RDP certificate lifecycle работает отдельно:
 
 ```text
-Let’s Encrypt public-IP certificate on Hermes server
+Let’s Encrypt public-IP certificate on Bakunity server
         |
         | Hermes-owned renewal timer
         v
@@ -135,7 +135,7 @@ Server-side DELETE:
 
 - удаляет основной Agent task/runtime;
 - удаляет certificate rotation task/runtime;
-- архивирует активный Hermes client directory.
+- архивирует активный Bakunity client directory.
 
 После локального uninstall устройство нужно удалить в Telegram для server-side revoke/port release.
 

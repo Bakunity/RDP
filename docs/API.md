@@ -1,4 +1,4 @@
-# Hermes RDP API v1
+# Bakunity RDP API v1
 
 API работает по HTTPS с certificate pinning.
 

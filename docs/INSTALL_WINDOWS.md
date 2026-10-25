@@ -6,7 +6,7 @@
 - PowerShell 5.1+;
 - права локального администратора;
 - Microsoft OpenSSH Client;
-- доступ к Hermes server на API и tunnel ports.
+- доступ к Bakunity server на API и tunnel ports.
 
 Windows Home не поддерживает входящие RDP-сессии штатными средствами.
 
@@ -34,13 +34,13 @@ Installer также автоматически подключает certificate
 - отдельный Ed25519 keypair;
 - отдельный `known_hosts`;
 - `HermesRdpAgent.ps1`;
-- Scheduled Task `Hermes RDP Agent`, работающий от `SYSTEM`.
+- Scheduled Task `Bakunity RDP Agent`, работающий от `SYSTEM`.
 
 При включённом trusted RDP certificate lifecycle дополнительно управляются:
 
 - `HermesRdpCertRotation.ps1`;
 - `sync-rdp-certificate.ps1`;
-- Scheduled Task `Hermes RDP Certificate Rotation` от LocalSystem;
+- Scheduled Task `Bakunity RDP Certificate Rotation` от LocalSystem;
 - trusted certificate в `LocalMachine\My`;
 - CUSTOM certificate binding Windows RDP listener.
 
@@ -53,13 +53,13 @@ Certificate worker работает отдельно от основного 3-�
 Компьютер: office-pc
 RDP: SERVER:53389
 Туннель: OpenSSH
-Задача: Hermes RDP Agent
+Задача: Bakunity RDP Agent
 Сертификат RDP: автоматическое управление
 ```
 
 Если server-side trusted certificate lifecycle включён, после установки ожидаются также работающая rotation task и CUSTOM RDP listener certificate.
 
-## Уже установлен Hermes: используйте Repair
+## Уже установлен Bakunity: используйте Repair
 
 Если ПК уже зарегистрирован в Telegram и локальная identity сохранена, не запускайте новый fresh pairing. В карточке существующего устройства нажмите **🛠 ВОССТАНОВИТЬ КЛИЕНТ**.
 
@@ -70,7 +70,7 @@ Repair сохраняет:
 - `known_hosts`;
 - назначенный RDP-порт.
 
-Repair может восстановить Hermes Agent, основной Scheduled Task и certificate-rotation companion существующего устройства. Он привязан к выбранному Device ID и не создаёт вторую device registration.
+Repair может восстановить Bakunity Agent, основной Scheduled Task и certificate-rotation companion существующего устройства. Он привязан к выбранному Device ID и не создаёт вторую device registration.
 
 Успех основного Repair подтверждается строкой:
 
@@ -101,7 +101,7 @@ Lifecycle wrapper дополнительно подтверждает управ
 Основной runtime:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Agent'
+Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
 Get-Process ssh -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 ```
@@ -109,7 +109,7 @@ Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Certificate lifecycle:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation'
+Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation'
 Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'" | Select-Object SSLCertificateSHA1Hash,SSLCertificateSHA1HashType
 ```
 
@@ -119,15 +119,15 @@ Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGene
 
 ## Uninstall
 
-`scripts/uninstall-client.ps1` удаляет active Hermes runtime локально:
+`scripts/uninstall-client.ps1` удаляет active Bakunity runtime локально:
 
-- останавливает и unregister-ит `Hermes RDP Agent`;
-- останавливает и unregister-ит `Hermes RDP Certificate Rotation`;
-- завершает Hermes Agent/rotation/SSH процессы;
+- останавливает и unregister-ит `Bakunity RDP Agent`;
+- останавливает и unregister-ит `Bakunity RDP Certificate Rotation`;
+- завершает Bakunity Agent/rotation/SSH процессы;
 - переносит активный `C:\ProgramData\HermesRDP` в timestamped removal archive.
 
 После локального uninstall удалите устройство в Telegram, чтобы сервер отозвал API-token/SSH public key и освободил назначенный RDP-порт.
 
 ## Безопасность
 
-Не публикуйте pairing-коды, API-token, private key или PFX material. Hermes не требует ослабления Microsoft Defender для штатной установки, update, Repair или certificate rotation.
+Не публикуйте pairing-коды, API-token, private key или PFX material. Bakunity не требует ослабления Microsoft Defender для штатной установки, update, Repair или certificate rotation.

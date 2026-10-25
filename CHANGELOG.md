@@ -64,7 +64,7 @@ Hotfix release packaging после некорректной точки тега
 
 - `v1.2.1` публикует полный согласованный release tree вместо первого commit, где менялся только `VERSION`;
 - в release tag входят согласованные package version metadata, release notes и полный product README;
-- README снова оформлен как полноценная страница Hermes RDP с badges, архитектурой, quick start, update/repair и security sections.
+- README снова оформлен как полноценная страница Bakunity RDP с badges, архитектурой, quick start, update/repair и security sections.
 
 ### Совместимость
 
@@ -112,7 +112,7 @@ Hotfix release packaging после некорректной точки тега
 
 Релиз: https://github.com/bakunity/RDP/releases/tag/v1.1.0
 
-Крупный релиз: транспорт Hermes RDP переведён с FRP на системный OpenSSH.
+Крупный релиз: транспорт Bakunity RDP переведён с FRP на системный OpenSSH.
 
 ### Добавлено
 
@@ -250,7 +250,7 @@ Hotfix bootstrap Windows-установщика.
 
 ## [1.0.0] — 2026-08-05
 
-Первый публичный релиз Hermes RDP.
+Первый публичный релиз Bakunity RDP.
 
 ### Добавлено
 

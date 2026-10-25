@@ -1,4 +1,4 @@
-# Hermes RDP
+# Bakunity RDP
 
 <p align="center">
   <strong>Self-hosted multi-PC RDP gateway через один публичный Linux-сервер с управлением из Telegram.</strong>
@@ -14,26 +14,26 @@
 </p>
 
 <p align="center">
-  <a href="https://hermes-rdp.vercel.app/">Сайт</a> ·
+  <a href="https://rdp.bakunity.com/">Сайт</a> ·
   <a href="https://github.com/bakunity/RDP/releases/latest">Релизы</a> ·
   <a href="docs/INDEX.md">Документация</a> ·
   <a href="docs/SECURITY.md">Безопасность</a> ·
   <a href="docs/VALIDATED_SCENARIOS.md">Проверенные сценарии</a>
 </p>
 
-Hermes RDP публикует RDP нескольких Windows-компьютеров через один Linux-сервер с публичным IP или DNS. Каждый Windows-ПК сам поднимает исходящий reverse OpenSSH-туннель, получает постоянный внешний endpoint и управляется из одного Telegram dashboard.
+Bakunity RDP публикует RDP нескольких Windows-компьютеров через один Linux-сервер с публичным IP или DNS. Каждый Windows-ПК сам поднимает исходящий reverse OpenSSH-туннель, получает постоянный внешний endpoint и управляется из одного Telegram dashboard.
 
-На домашнем или офисном роутере Windows-ПК не требуется пробрасывать входящий RDP-порт: соединение к Hermes инициирует сам Windows-клиент.
+На домашнем или офисном роутере Windows-ПК не требуется пробрасывать входящий RDP-порт: соединение к Bakunity инициирует сам Windows-клиент.
 
-> **Главный принцип проекта:** все Windows-компьютеры равноправны. Для каждого используется один installer и один Hermes Agent. Специальным узлом является только Linux-сервер Hermes.
+> **Главный принцип проекта:** все Windows-компьютеры равноправны. Для каждого используется один installer и один Bakunity Agent. Специальным узлом является только Linux-сервер Hermes.
 
-> **Stable release:** [Hermes RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
+> **Stable release:** [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
 
-## Что умеет Hermes RDP
+## Что умеет Bakunity RDP
 
 - несколько независимых Windows-ПК через один сервер;
 - постоянные endpoints вида `SERVER:53389`, `SERVER:53390`, `SERVER:53391`;
-- стандартный Microsoft Remote Desktop без отдельного RDP-клиента Hermes;
+- стандартный Microsoft Remote Desktop без отдельного RDP-клиента Bakunity;
 - системный Microsoft OpenSSH вместо стороннего tunnel binary;
 - отдельный Ed25519 keypair, API-token и порт для каждого устройства;
 - Telegram `ON`, `OFF`, `RESTART`, Repair, удаление и LIVE-состояние каждого ПК;
@@ -48,7 +48,7 @@ Hermes RDP публикует RDP нескольких Windows-компьюте�
 
 ```text
 Windows ПК ─┐
-Windows ПК ─┼─ reverse OpenSSH :7000 ─> Hermes Linux server ─> SERVER:RDP_PORT
+Windows ПК ─┼─ reverse OpenSSH :7000 ─> Bakunity Linux server ─> SERVER:RDP_PORT
 Windows ПК ─┘                                  │
                                               ├─ HTTPS API :7443
                                               ├─ SQLite registry
@@ -58,7 +58,7 @@ Microsoft Remote Desktop
   └─ SERVER:RDP_PORT ─> reverse SSH ─> Windows :3389
 ```
 
-Каждый device key ограничен сервером только своим endpoint через `permitlisten`. Административный SSH `:22` и Hermes tunnel sshd `:7000` независимы.
+Каждый device key ограничен сервером только своим endpoint через `permitlisten`. Административный SSH `:22` и Bakunity tunnel sshd `:7000` независимы.
 
 ## Trusted RDP certificate
 
@@ -67,7 +67,7 @@ Microsoft Remote Desktop
 ```text
 Let’s Encrypt public-IP certificate
         ↓
-Hermes renewal timer + non-secret state
+Bakunity renewal timer + non-secret state
         ↓
 authenticated Windows LocalSystem rotation worker
         ↓
@@ -78,7 +78,7 @@ Microsoft Remote Desktop без прежнего self-signed warning
 
 Это отдельная trust boundary от HTTPS API certificate pinning. Сертификат API защищает control plane; сертификат Windows RDP listener видит Microsoft Remote Desktop.
 
-После включения server-side lifecycle normal Fresh Install, Update и Repair автоматически управляют rotation companion. Uninstall удаляет обе Hermes Scheduled Tasks и локальный runtime. Certificate work остаётся вне performance-sensitive 3-second Agent loop.
+После включения server-side lifecycle normal Fresh Install, Update и Repair автоматически управляют rotation companion. Uninstall удаляет обе Bakunity Scheduled Tasks и локальный runtime. Certificate work остаётся вне performance-sensitive 3-second Agent loop.
 
 Требования: глобально маршрутизируемый public IPv4, доступный TCP `80` для ACME HTTP-01 и доступ к Let’s Encrypt.
 
@@ -92,7 +92,7 @@ Microsoft Remote Desktop без прежнего self-signed warning
 
 ```text
 🟢 ON / 🔴 OFF          включить или отключить RDP access
-🔄 RESTART              пересоздать Hermes SSH transport
+🔄 RESTART              пересоздать Bakunity SSH transport
 🛠 ВОССТАНОВИТЬ КЛИЕНТ  восстановить existing Windows client
 🗑 DELETE                отозвать устройство и освободить endpoint
 ```
@@ -104,7 +104,7 @@ Fresh pairing и Repair намеренно разделены. Repair не со�
 | Назначение | Порт |
 |---|---:|
 | Administrative SSH | `22/tcp` |
-| Hermes OpenSSH tunnel | `7000/tcp` |
+| Bakunity OpenSSH tunnel | `7000/tcp` |
 | HTTPS API | `7443/tcp` |
 | RDP endpoints | `53389–53420/tcp` |
 | ACME HTTP-01 | `80/tcp` только для trusted certificate lifecycle |
@@ -126,20 +126,20 @@ Windows Home не является штатным RDP host и не поддер�
 Базовый OpenSSH gateway:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/v1.3.0/scripts/install-server.sh -o /tmp/install-hermes-rdp.sh
+curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/v1.3.0/scripts/install-server.sh -o /tmp/install-bakunity-rdp.sh
 read -rsp 'Telegram bot token: ' TG_TOKEN; echo
-sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-bakunity-rdp.sh \
   --host SERVER_IP_OR_DOMAIN \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID
 unset TG_TOKEN
-rm -f /tmp/install-hermes-rdp.sh
+rm -f /tmp/install-bakunity-rdp.sh
 ```
 
 С trusted public-IP RDP certificate lifecycle добавьте `--trusted-rdp-cert` и используйте public IPv4 в `--host`:
 
 ```bash
-sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-bakunity-rdp.sh \
   --host PUBLIC_IPV4 \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID \
@@ -204,7 +204,7 @@ Windows Update разрешает основной Agent и certificate lifecycl
 
 Потеря обязательной local identity останавливает Repair вместо скрытого re-pair/rekey.
 
-Normal uninstall останавливает и unregister-ит основной Agent и certificate rotation task, завершает Hermes runtime и архивирует активный `C:\ProgramData\HermesRDP`. После локального uninstall удалите устройство в Telegram для server-side revoke и освобождения порта.
+Normal uninstall останавливает и unregister-ит основной Agent и certificate rotation task, завершает Bakunity runtime и архивирует активный `C:\ProgramData\HermesRDP`. После локального uninstall удалите устройство в Telegram для server-side revoke и освобождения порта.
 
 ## Безопасность
 
@@ -216,11 +216,11 @@ Normal uninstall останавливает и unregister-ит основной 
 - `permitlisten` ограничивает device key одним назначенным endpoint;
 - у каждого устройства отдельный API-token, сервер хранит только hash;
 - Telegram control ограничен заданным owner user/chat ID;
-- admin SSH `:22` и Hermes tunnel sshd `:7000` разделены;
-- Hermes не добавляет Defender exclusions;
+- admin SSH `:22` и Bakunity tunnel sshd `:7000` разделены;
+- Bakunity не добавляет Defender exclusions;
 - trusted RDP lifecycle не смешивает API TLS и Windows RDP listener TLS.
 
-**RDP boundary:** Hermes защищает регистрацию, control plane, tunnel и, при включённом trusted lifecycle, TLS identity listener. Windows credentials, NLA, обновления ОС и Windows authorization остаются отдельной границей безопасности.
+**RDP boundary:** Bakunity защищает регистрацию, control plane, tunnel и, при включённом trusted lifecycle, TLS identity listener. Windows credentials, NLA, обновления ОС и Windows authorization остаются отдельной границей безопасности.
 
 Подробнее: [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -236,7 +236,7 @@ Normal uninstall останавливает и unregister-ит основной 
 
 ## Основные команды
 
-Hermes server:
+Bakunity server:
 
 ```bash
 sudo hermes-rdpctl doctor
@@ -250,8 +250,8 @@ sudo systemctl status hermes-rdp-sshd.service hermes-rdp.service --no-pager
 Windows diagnostics:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Hermes RDP Agent'
-Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
+Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
+Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation' -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Get-Process ssh -ErrorAction SilentlyContinue
 ```
@@ -260,7 +260,7 @@ Get-Process ssh -ErrorAction SilentlyContinue
 
 | Документ | Для чего |
 |---|---|
-| [Быстрый старт](docs/QUICKSTART.md) | Развернуть Hermes и подключить первый ПК |
+| [Быстрый старт](docs/QUICKSTART.md) | Развернуть Bakunity и подключить первый ПК |
 | [Установка сервера](docs/INSTALL_SERVER.md) | Server setup, порты и trusted certificate option |
 | [Установка Windows](docs/INSTALL_WINDOWS.md) | Fresh pairing, compatibility и certificate lifecycle |
 | [Архитектура](docs/ARCHITECTURE.md) | Компоненты, data flow и TLS boundaries |
@@ -278,7 +278,7 @@ Get-Process ssh -ErrorAction SilentlyContinue
 ## Релизы
 
 - [Последний релиз](https://github.com/bakunity/RDP/releases/latest)
-- [Hermes RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0)
+- [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0)
 - [Release notes v1.3.0](docs/releases/v1.3.0.md)
 - [Полная история v1.3.0](docs/releases/history/v1.3.0-full.md)
 - [Предыдущий v1.2.1](https://github.com/bakunity/RDP/releases/tag/v1.2.1)

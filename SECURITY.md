@@ -1,6 +1,6 @@
 # Security Policy
 
-Hermes RDP публикует RDP endpoints и управляет credentials устройств. Уязвимости следует сообщать приватно.
+Bakunity RDP публикует RDP endpoints и управляет credentials устройств. Уязвимости следует сообщать приватно.
 
 ## Поддерживаемые версии
 
