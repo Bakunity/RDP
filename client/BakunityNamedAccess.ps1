@@ -46,7 +46,7 @@ function Write-SecureJsonFile {
     # The first sync can run under an elevated Administrator before the
     # LocalSystem task starts. Protect the DACL without forcing SYSTEM owner.
     $Acl.SetSecurityDescriptorSddlForm(
-        'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
+        'D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)'
     )
     Set-Acl -LiteralPath $Temp -AclObject $Acl
     Move-Item -LiteralPath $Temp -Destination $Path -Force
@@ -490,6 +490,67 @@ function Test-MappingSetChanged {
     return $false
 }
 
+function Write-NamedAccessState {
+    param(
+        [object]$Manifest,
+        [array]$Mappings,
+        [string]$RoutingMode
+    )
+
+    $MapForState = [ordered]@{}
+    foreach ($Mapping in $Mappings) {
+        $MapForState[[string]$Mapping.device_id] = [ordered]@{
+            hostname = [string]$Mapping.hostname
+            loopback = [string]$Mapping.loopback
+            server_ipv4 = [string]$Mapping.server_ipv4
+            rdp_port = [int]$Mapping.rdp_port
+            enabled = [bool]$Mapping.enabled
+        }
+    }
+
+    Write-SecureJsonFile -Path $StatePath -Value ([ordered]@{
+        version = 2
+        connector_id = [string]$Manifest.connector.id
+        connector_name = [string]$Manifest.connector.name
+        device_domain = [string]$Manifest.server.device_domain
+        routing_mode = $RoutingMode
+        updated_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        mappings = $MapForState
+    })
+}
+
+function Remove-PortProxyRuntime {
+    param([hashtable]$Existing)
+
+    foreach ($Entry in $Existing.Values) {
+        $Address = [string]$Entry.loopback
+        if (Test-LoopbackAddress -Address $Address) {
+            try {
+                Remove-PortProxy -ListenAddress $Address
+            }
+            catch {
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath $HostsPath) {
+        try {
+            $Original = [IO.File]::ReadAllText($HostsPath)
+            $Clean = Remove-ManagedHostsBlock -Text $Original
+            if ($Clean -ne $Original) {
+                [IO.File]::WriteAllText(
+                    $HostsPath,
+                    $Clean.TrimEnd([char]13, [char]10) + [Environment]::NewLine,
+                    (New-Object Text.UTF8Encoding($false))
+                )
+                & $Ipconfig /flushdns | Out-Null
+            }
+        }
+        catch {
+        }
+    }
+}
+
 function Invoke-NamedAccessSync {
     $Config = Read-JsonFile -Path $ConfigPath
     if (-not $Config) {
@@ -499,10 +560,37 @@ function Invoke-NamedAccessSync {
     $State = Read-JsonFile -Path $StatePath
     $Existing = Convert-StateMappings -State $State
     $Mappings = @(Build-Mappings -Manifest $Manifest -Existing $Existing)
+    $RoutingMode = ([string]$Config.routing_mode).Trim().ToLowerInvariant()
+    if ($RoutingMode -notin @('portproxy', 'launcher')) {
+        throw "Unsupported Named Access routing mode: $RoutingMode"
+    }
 
-    if (-not (Test-MappingSetChanged -Mappings $Mappings -Existing $Existing)) {
+    $MappingsChanged = Test-MappingSetChanged -Mappings $Mappings -Existing $Existing
+    $ModeChanged = ([string]$State.routing_mode) -ne $RoutingMode
+
+    if ($RoutingMode -eq 'launcher') {
+        if ([string]$State.routing_mode -eq 'portproxy') {
+            Remove-PortProxyRuntime -Existing $Existing
+        }
+        if ($MappingsChanged -or $ModeChanged -or -not $State) {
+            Write-NamedAccessState -Manifest $Manifest -Mappings $Mappings -RoutingMode $RoutingMode
+            Write-Log (
+                "SYNC=PASS mode=launcher connector=$($Manifest.connector.id) " +
+                "devices=$($Mappings.Count)"
+            )
+        }
+        else {
+            Write-Log (
+                "SYNC=UNCHANGED mode=launcher connector=$($Manifest.connector.id) " +
+                "devices=$($Mappings.Count)"
+            )
+        }
+        return
+    }
+
+    if (-not $MappingsChanged -and -not $ModeChanged) {
         Write-Log (
-            "SYNC=UNCHANGED connector=$($Manifest.connector.id) " +
+            "SYNC=UNCHANGED mode=portproxy connector=$($Manifest.connector.id) " +
             "devices=$($Mappings.Count)"
         )
         return
@@ -563,27 +651,10 @@ function Invoke-NamedAccessSync {
             }
         }
 
-        $MapForState = [ordered]@{}
-        foreach ($Mapping in $Mappings) {
-            $MapForState[[string]$Mapping.device_id] = [ordered]@{
-                hostname = [string]$Mapping.hostname
-                loopback = [string]$Mapping.loopback
-                server_ipv4 = [string]$Mapping.server_ipv4
-                rdp_port = [int]$Mapping.rdp_port
-                enabled = [bool]$Mapping.enabled
-            }
-        }
-        Write-SecureJsonFile -Path $StatePath -Value ([ordered]@{
-            version = 1
-            connector_id = [string]$Manifest.connector.id
-            connector_name = [string]$Manifest.connector.name
-            device_domain = [string]$Manifest.server.device_domain
-            updated_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-            mappings = $MapForState
-        })
+        Write-NamedAccessState -Manifest $Manifest -Mappings $Mappings -RoutingMode $RoutingMode
 
         Write-Log (
-            "SYNC=PASS connector=$($Manifest.connector.id) " +
+            "SYNC=PASS mode=portproxy connector=$($Manifest.connector.id) " +
             "devices=$($Mappings.Count)"
         )
     }
