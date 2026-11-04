@@ -18,15 +18,20 @@ $ProgressPreference = 'SilentlyContinue'
 $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\BakunityRDP\NamedAccess'
 $WorkerPath = Join-Path $BaseDir 'BakunityNamedAccess.ps1'
+$LauncherPath = Join-Path $BaseDir 'BakunityRdpLaunch.ps1'
 $ConfigPath = Join-Path $BaseDir 'config.json'
 $StatePath = Join-Path $BaseDir 'state.json'
 $ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $TaskName = 'Bakunity RDP Named Access'
+$ShortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Bakunity RDP.lnk'
 $HostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
 $HostsBegin = '# BEGIN BAKUNITY RDP NAMED ACCESS'
 $HostsEnd = '# END BAKUNITY RDP NAMED ACCESS'
 $Candidate = Join-Path ([IO.Path]::GetTempPath()) (
     "BakunityNamedAccess-$([Guid]::NewGuid().ToString('N')).ps1"
+)
+$LauncherCandidate = Join-Path ([IO.Path]::GetTempPath()) (
+    "BakunityRdpLaunch-$([Guid]::NewGuid().ToString('N')).ps1"
 )
 
 function Resolve-RepositorySha {
@@ -66,6 +71,46 @@ function Set-SystemAdminAcl {
         'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
     )
     Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+function Set-UserReadableAcl {
+    param([string]$Path)
+    $Acl = Get-Acl -LiteralPath $Path
+    $Acl.SetSecurityDescriptorSddlForm(
+        'D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)'
+    )
+    Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+function Get-NamedAccessRoutingMode {
+    $Listeners = @(
+        Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+    )
+    foreach ($Listener in $Listeners) {
+        $Address = [string]$Listener.LocalAddress
+        if ($Address -in @('0.0.0.0', '::', '::0', '127.0.0.1')) {
+            return 'launcher'
+        }
+    }
+    return 'portproxy'
+}
+
+function Install-LauncherShortcut {
+    $PowerShell = Get-NativePowerShellPath
+    $Shell = New-Object -ComObject WScript.Shell
+    $Shortcut = $Shell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath = $PowerShell
+    $Shortcut.Arguments = (
+        '-NoProfile -ExecutionPolicy Bypass -File "' +
+        $LauncherPath +
+        '"'
+    )
+    $Shortcut.WorkingDirectory = $BaseDir
+    $Shortcut.Description = 'Bakunity RDP Named Access'
+    $Shortcut.Save()
 }
 
 function Get-NativePowerShellPath {
@@ -169,6 +214,11 @@ $WorkerUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/client/BakunityNamedAccess.ps1"
 )
+$LauncherUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/client/BakunityRdpLaunch.ps1"
+)
+$RoutingMode = Get-NamedAccessRoutingMode
 
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 $ExistingTaskXml = if ($ExistingTask) {
@@ -183,6 +233,13 @@ $ExistingWorker = if (Test-Path -LiteralPath $WorkerPath) {
 else {
     $null
 }
+$ExistingLauncher = if (Test-Path -LiteralPath $LauncherPath) {
+    Get-Content -LiteralPath $LauncherPath -Raw
+}
+else {
+    $null
+}
+$ShortcutExistedBefore = Test-Path -LiteralPath $ShortcutPath
 $ExistingConfig = if (Test-Path -LiteralPath $ConfigPath) {
     Get-Content -LiteralPath $ConfigPath -Raw
 }
@@ -198,7 +255,9 @@ else {
 
 try {
     Invoke-WebRequest -UseBasicParsing -Uri $WorkerUrl -OutFile $Candidate
+    Invoke-WebRequest -UseBasicParsing -Uri $LauncherUrl -OutFile $LauncherCandidate
     Assert-PowerShellFile -Path $Candidate
+    Assert-PowerShellFile -Path $LauncherCandidate
 
     New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
     Stop-TaskBounded
@@ -206,12 +265,15 @@ try {
 
     Copy-Item -LiteralPath $Candidate -Destination $WorkerPath -Force
     Set-SystemAdminAcl -Path $WorkerPath
+    Copy-Item -LiteralPath $LauncherCandidate -Destination $LauncherPath -Force
+    Set-UserReadableAcl -Path $LauncherPath
 
     [ordered]@{
         api_base_url = $ApiBaseUrl
         api_fingerprint = $Fingerprint
         access_token = $AccessToken
         repository_ref = $ResolvedSha
+        routing_mode = $RoutingMode
         installed_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     } |
         ConvertTo-Json -Depth 4 |
@@ -246,6 +308,7 @@ try {
         throw "Initial Named Access sync failed with code $Exit"
     }
 
+    Install-LauncherShortcut
     Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 2
     $Task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -256,6 +319,8 @@ try {
     Write-Host "RESOLVED_REF=$ResolvedSha"
     Write-Host "TASK=$TaskName"
     Write-Host "CONFIG=$ConfigPath"
+    Write-Host "ROUTING_MODE=$RoutingMode"
+    Write-Host "LAUNCHER=$ShortcutPath"
     Write-Host 'NAMED_ACCESS_INSTALL=PASS' -ForegroundColor Green
 }
 catch {
@@ -270,6 +335,18 @@ catch {
         }
         else {
             Remove-Item -LiteralPath $WorkerPath -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($null -ne $ExistingLauncher) {
+            Set-Content -LiteralPath $LauncherPath -Value $ExistingLauncher -Encoding UTF8
+            Set-UserReadableAcl -Path $LauncherPath
+        }
+        else {
+            Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue
+        }
+
+        if (-not $ShortcutExistedBefore) {
+            Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
         }
 
         if ($null -ne $ExistingConfig) {
@@ -308,5 +385,5 @@ catch {
     throw $Failure
 }
 finally {
-    Remove-Item -LiteralPath $Candidate -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Candidate, $LauncherCandidate -Force -ErrorAction SilentlyContinue
 }

@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $BaseDir = 'C:\ProgramData\BakunityRDP\NamedAccess'
 $StatePath = Join-Path $BaseDir 'state.json'
 $TaskName = 'Bakunity RDP Named Access'
+$ShortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Bakunity RDP.lnk'
 $HostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
 $HostsBegin = '# BEGIN BAKUNITY RDP NAMED ACCESS'
 $HostsEnd = '# END BAKUNITY RDP NAMED ACCESS'
@@ -103,6 +104,7 @@ if (Test-Path -LiteralPath $HostsPath) {
     }
 }
 
+Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $BaseDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host 'NAMED_ACCESS_UNINSTALL=PASS' -ForegroundColor Green

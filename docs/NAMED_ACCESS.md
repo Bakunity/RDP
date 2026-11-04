@@ -34,10 +34,12 @@ Windows PC.
 
 ## Architecture
 
-For each device the Connector assigns a stable loopback IPv4 address from the
-private-to-the-machine Bakunity pool `127.77.0.0/16`.
+Named Access has two automatic Windows routing modes.
 
-Example:
+### Transparent mode
+
+If local TCP 3389 is free, each device receives a stable loopback IPv4 address
+from the Bakunity pool `127.77.0.0/16`.
 
 ```text
 mipc.tima.biz
@@ -49,12 +51,24 @@ mipc.tima.biz
   -> MIPC:3389
 ```
 
-The RDP client still connects using the hostname `mipc.tima.biz`, so the
-per-device Let's Encrypt certificate remains matched to that hostname.
+The user can type `mipc.tima.biz` directly into Microsoft Remote Desktop.
 
-Bakunity RDP currently transports the device leg over TCP/OpenSSH, therefore
-the Connector also uses TCP portproxy. It does not open a new public port and
-does not change the remote Windows device.
+### Launcher mode
+
+If the initiating Windows PC already owns TCP 3389 because it is itself an RDP
+host, the installer automatically selects launcher mode. It does not disable or
+move the local RDP listener.
+
+The background task keeps a read-only local cache of `hostname -> RDP port`.
+The **Bakunity RDP** Start Menu shortcut asks only for the Bakunity device name,
+for example `mipc.tima.biz` or simply `mipc`, and starts Microsoft Remote
+Desktop with the correct endpoint internally.
+
+The user never needs to enter the numeric Bakunity RDP port.
+
+In both modes the remote hostname remains the certificate identity, so the
+per-device Let's Encrypt certificate continues to match the device hostname.
+The existing direct `hostname:port` endpoint remains available as a fallback.
 
 ## Server setup
 
@@ -100,7 +114,11 @@ The Connector installs:
 ```text
 C:\ProgramData\BakunityRDP\NamedAccess\
 Bakunity RDP Named Access   (Scheduled Task, LocalSystem)
+Bakunity RDP                (Start Menu shortcut)
 ```
+
+The installer automatically reports either `ROUTING_MODE=portproxy` or
+`ROUTING_MODE=launcher`.
 
 The worker:
 
@@ -113,8 +131,8 @@ The worker:
 - automatically learns newly added devices and slug changes.
 
 If TCP 3389 is already occupied by a normal local RDP listener on the initiating
-PC, the Connector fails closed. It does not disable or move the PC's local RDP
-service automatically.
+PC, the Connector automatically uses launcher mode. It never disables or moves
+the PC's local RDP service.
 
 ## Verification
 
@@ -122,16 +140,22 @@ After installation:
 
 ```powershell
 Get-ScheduledTask -TaskName 'Bakunity RDP Named Access' | Select-Object TaskName,State
-ping -4 mipc.tima.biz
-netsh interface portproxy show v4tov4
+Get-Content 'C:\ProgramData\BakunityRDP\NamedAccess\state.json' -Raw
 ```
 
-The device hostname should resolve locally to `127.77.x.x`.
+For transparent mode, `ping -4 mipc.tima.biz` should resolve locally to
+`127.77.x.x`, and Microsoft Remote Desktop can use `mipc.tima.biz` directly.
 
-Then open Microsoft Remote Desktop and enter only:
+For launcher mode, open **Bakunity RDP** from the Start Menu and enter:
 
 ```text
 mipc.tima.biz
+```
+
+or simply:
+
+```text
+mipc
 ```
 
 ## Manual sync
@@ -147,7 +171,8 @@ one-time check:
 
 Run the repository `scripts/uninstall-named-access.ps1` script as
 Administrator. It removes only the recorded Named Access loopback routes, the
-managed hosts block, the Scheduled Task, and the Named Access directory.
+managed hosts block, the Scheduled Task, the Start Menu shortcut, and the Named
+Access directory.
 
 The server-side token remains valid until it is explicitly revoked with
 `bakunity-rdpctl named-access revoke CONNECTOR_ID`.
