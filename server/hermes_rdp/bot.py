@@ -357,8 +357,14 @@ class TelegramBot:
         last_seen = int(device.get("last_seen") or 0)
         return last_seen > 0 and int(time.time()) - last_seen <= self.config.online_after_seconds
 
+    def _device_domain(self) -> str:
+        getter = getattr(self.registry, "get_device_domain", None)
+        if callable(getter):
+            return str(getter() or "").strip()
+        return str(self.registry.get_setting("device_domain", "") or "").strip()
+
     def _device_host(self, device: dict[str, Any]) -> str:
-        domain = self.registry.get_device_domain()
+        domain = self._device_domain()
         slug = str(device.get("slug") or "").strip()
         if domain and slug:
             return f"{slug}.{domain}"
@@ -370,7 +376,7 @@ class TelegramBot:
     def _home(self) -> tuple[str, dict[str, Any]]:
         devices = self.registry.list_devices()
         online = sum(1 for device in devices if self._online(device))
-        device_domain = self.registry.get_device_domain()
+        device_domain = self._device_domain()
         domain_line = (
             f"Домен устройств: *.{device_domain}\n"
             if device_domain
