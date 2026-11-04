@@ -606,10 +606,18 @@ func (n *nodeRuntime) handleForward(w http.ResponseWriter, r *http.Request) {
         writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
         return
     }
-    pid, _ := peer.Decode(spec.PeerID)
+    path, err := n.probeForward(spec)
+    if err != nil {
+        writeJSON(
+            w,
+            http.StatusServiceUnavailable,
+            map[string]any{"ok": false, "error": err.Error(), "path": path},
+        )
+        return
+    }
     writeJSON(w, http.StatusOK, map[string]any{
         "ok": true,
-        "path": n.pathForPeer(pid),
+        "path": path,
         "listen": spec.Listen,
     })
 }
@@ -664,6 +672,31 @@ func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
     n.forwards[spec.Key] = runtime
     go n.serveForward(runtime)
     return nil
+}
+
+func (n *nodeRuntime) probeForward(spec forwardSpec) (string, error) {
+    pid, err := peer.Decode(spec.PeerID)
+    if err != nil {
+        return "unavailable", err
+    }
+    ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+    defer cancel()
+
+    if err := n.connectPeer(ctx, pid); err != nil {
+        return "unavailable", fmt.Errorf("native path unavailable: %w", err)
+    }
+
+    if spec.Mode == "direct" {
+        deadline := time.Now().Add(3 * time.Second)
+        for time.Now().Before(deadline) {
+            if n.pathForPeer(pid) == "direct" {
+                return "direct", nil
+            }
+            time.Sleep(100 * time.Millisecond)
+        }
+        return n.pathForPeer(pid), errors.New("direct Bakunity path unavailable")
+    }
+    return n.pathForPeer(pid), nil
 }
 
 func (n *nodeRuntime) serveForward(runtime *forwardRuntime) {
