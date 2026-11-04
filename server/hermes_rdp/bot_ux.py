@@ -363,7 +363,7 @@ class TelegramUxBot(TelegramBot):
         return text, {"inline_keyboard": rows}
 
     def _repair(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        repository_ref = self.config.client_ref
+        repository_ref = self._client_ref()
         repair_url = (
             "https://raw.githubusercontent.com/bakunity/RDP/"
             f"{repository_ref}/scripts/repair-client.ps1"
