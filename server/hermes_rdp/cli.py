@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .config import load_config
 from .db import Registry
+from .device_certificates import ensure_device_certificate_target, set_device_slug_with_certificate
 from .tunnel import close_tunnel, endpoint_listener_state
 
 
@@ -213,7 +214,12 @@ def main() -> None:
         return
 
     if args.command == "devices" and args.devices_command == "slug":
-        slug = registry.set_device_slug(args.device_id, args.slug)
+        slug, _ = set_device_slug_with_certificate(
+            config,
+            registry,
+            args.device_id,
+            args.slug,
+        )
         domain = registry.get_device_domain()
         print(f"SLUG={slug}")
         if domain:
@@ -318,34 +324,22 @@ def main() -> None:
                 slug = str(device.get("slug") or "")
                 host = f"{slug}.{domain}" if slug else "-"
                 try:
-                    completed = subprocess.run(
-                        [helper, "--status", str(device["id"])],
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
+                    target = ensure_device_certificate_target(
+                        config,
+                        registry,
+                        str(device["id"]),
                     )
-                except subprocess.TimeoutExpired:
+                except Exception as exc:
                     failures += 1
-                    print(f"{device['id']}\t{host}\tFAIL timeout")
+                    print(f"{device['id']}\t{host}\tFAIL {exc}")
                     continue
-                if completed.returncode != 0:
+                if not target:
                     failures += 1
-                    detail = (
-                        completed.stderr.strip().splitlines()[-1:]
-                        or ["helper failed"]
-                    )
-                    print(f"{device['id']}\t{host}\tFAIL {detail[0]}")
-                    continue
-                try:
-                    payload = parse_helper_json(completed.stdout)
-                except ValueError:
-                    failures += 1
-                    print(f"{device['id']}\t{host}\tFAIL invalid-json")
+                    print(f"{device['id']}\t{host}\tFAIL disabled")
                     continue
                 print(
                     f"{device['id']}\t{host}\tPASS "
-                    f"{str(payload.get('thumbprint') or '')[:12]}"
+                    f"{str(target.get('thumbprint') or '')[:12]}"
                 )
             if failures:
                 raise SystemExit(1)

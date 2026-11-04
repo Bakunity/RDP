@@ -188,6 +188,24 @@ function Grant-NetworkServiceRead {
     }
 }
 
+$SyncMutex = New-Object System.Threading.Mutex(
+    $false,
+    'Global\HermesRdpCertificateSync'
+)
+$SyncMutexHeld = $false
+try {
+    try {
+        $SyncMutexHeld = $SyncMutex.WaitOne(
+            [TimeSpan]::FromSeconds(45)
+        )
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $SyncMutexHeld = $true
+    }
+    if (-not $SyncMutexHeld) {
+        throw 'Certificate sync is already running.'
+    }
+
 if ($Rollback) {
     $Backup = Read-JsonFile -Path $BackupPath
     if (-not $Backup) {
@@ -469,4 +487,15 @@ finally {
     if ($Http) {
         $Http.Dispose()
     }
+}
+}
+finally {
+    if ($SyncMutexHeld) {
+        try {
+            $SyncMutex.ReleaseMutex()
+        }
+        catch {
+        }
+    }
+    $SyncMutex.Dispose()
 }

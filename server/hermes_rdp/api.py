@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .config import Config
 from .db import Registry
+from .device_certificates import get_device_certificate_target
 from .tunnel import close_tunnel, endpoint_listener_state
 
 
@@ -346,19 +347,24 @@ class ApiHandler(BaseHTTPRequestHandler):
             and self.server.registry.get_setting("selected_device", "") == device_id
         )
 
-        self._json(
-            HTTPStatus.OK,
-            {
-                "ok": True,
-                "command": command,
-                "desired_enabled": bool(current["enabled"]),
-                "desired_client_ref": desired_client_ref,
-                "trusted_rdp_certificate_enabled": (
-                    self.server.config.trusted_rdp_certificate_enabled
-                ),
-                "telemetry_live": telemetry_live,
-            },
+        certificate_target = get_device_certificate_target(
+            self.server.registry,
+            device_id,
         )
+        response = {
+            "ok": True,
+            "command": command,
+            "desired_enabled": bool(current["enabled"]),
+            "desired_client_ref": desired_client_ref,
+            "trusted_rdp_certificate_enabled": (
+                self.server.config.trusted_rdp_certificate_enabled
+            ),
+            "telemetry_live": telemetry_live,
+        }
+        if certificate_target:
+            response["desired_rdp_certificate_name"] = certificate_target["cert_name"]
+            response["desired_rdp_certificate_thumbprint"] = certificate_target["thumbprint"]
+        self._json(HTTPStatus.OK, response)
 
     def _command_result(self, device_id: str) -> None:
         if not self._device_auth(device_id):
