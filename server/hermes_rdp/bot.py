@@ -19,6 +19,7 @@ from .telegram_icons import TelegramEmojiTheme
 
 LOG = logging.getLogger("hermes_rdp.bot")
 LIVE_SECONDS = 60
+PRODUCT_ONLINE_GRACE_SECONDS = 45
 
 
 def escape(value: Any) -> str:
@@ -381,7 +382,11 @@ class TelegramBot:
 
     def _online(self, device: dict[str, Any]) -> bool:
         last_seen = int(device.get("last_seen") or 0)
-        return last_seen > 0 and int(time.time()) - last_seen <= self.config.online_after_seconds
+        threshold = max(
+            int(self.config.online_after_seconds),
+            PRODUCT_ONLINE_GRACE_SECONDS,
+        )
+        return last_seen > 0 and int(time.time()) - last_seen <= threshold
 
     def _device_domain(self) -> str:
         getter = getattr(self.registry, "get_device_domain", None)
