@@ -100,8 +100,9 @@ class TelegramRepairUxTests(unittest.TestCase):
             tls_fingerprint_file=fingerprint,
             ssh_host_key_file=host_key,
             client_installer_url="https://example.test/install-client.ps1",
-            repository_ref="0123456789abcdef0123456789abcdef01234567",
+            repository_ref="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             close_tunnel_helper=root / "close-tunnel",
+            client_repository_ref="0123456789abcdef0123456789abcdef01234567",
         )
         self.bot = TelegramUxBot(self.config, self.registry)
         self.bot.render = lambda *args, **kwargs: None

@@ -11,10 +11,24 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
     def test_server_publishes_pinned_client_maintenance_target(self) -> None:
         api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
         config = (ROOT / "server/hermes_rdp/config.py").read_text(encoding="utf-8")
-        self.assertIn('"desired_client_ref": self.server.config.repository_ref', api)
+        self.assertIn('"desired_client_ref": self.server.config.client_ref', api)
         self.assertIn('"trusted_rdp_certificate_enabled"', api)
-        self.assertIn('command["repository_ref"] = self.server.config.repository_ref', api)
+        self.assertIn('command["repository_ref"] = self.server.config.client_ref', api)
         self.assertIn("trusted_rdp_certificate_enabled: bool = False", config)
+        self.assertIn("client_repository_ref: str = \"\"", config)
+        self.assertIn("def client_ref(self) -> str:", config)
+
+    def test_telegram_status_is_russian_and_distinguishes_update_failure(self) -> None:
+        bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
+        self.assertIn("ОЖИДАЕТ ОБНОВЛЕНИЯ", bot)
+        self.assertIn("ОБНОВЛЯЕТСЯ", bot)
+        self.assertIn("ОШИБКА ОБНОВЛЕНИЯ", bot)
+        self.assertIn("Обслуживание:", bot)
+        self.assertIn("УПРАВЛЯЕТСЯ", bot)
+        self.assertIn("НУЖНО ВОССТАНОВЛЕНИЕ", bot)
+        self.assertNotIn('f"Maintenance: {maintenance_line}', bot)
+        self.assertNotIn(" MANAGED", bot)
+        self.assertNotIn(" SELF-HEAL ", bot)
 
     def test_registry_maintenance_commands_do_not_redefine_access(self) -> None:
         db = (ROOT / "server/hermes_rdp/db.py").read_text(encoding="utf-8")

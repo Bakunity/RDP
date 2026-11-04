@@ -73,6 +73,39 @@ PY
   return 1
 }
 
+client_bundle_hash() {
+  local root="$1"
+  python3 - "$root" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+paths = [
+    "client/HermesRdpAgent.ps1",
+    "client/HermesRdpMaintenance.ps1",
+    "client/HermesRdpCertRotation.ps1",
+    "scripts/install-client.ps1",
+    "scripts/install-client-core.ps1",
+    "scripts/install-client-replace.ps1",
+    "scripts/repair-client.ps1",
+    "scripts/repair-client-core.ps1",
+    "scripts/update-client.ps1",
+    "scripts/setup-client-cert-rotation.ps1",
+    "scripts/sync-rdp-certificate.ps1",
+    "scripts/uninstall-client.ps1",
+    "scripts/uninstall-client-core.ps1",
+]
+digest = hashlib.sha256()
+for relative in paths:
+    path = root / relative
+    if not path.is_file():
+        raise SystemExit(f"missing client bundle file: {relative}")
+    digest.update(relative.encode("utf-8") + b"\0")
+    digest.update(path.read_bytes())
+print(digest.hexdigest())
+PY
+}
 restore_optional_file() {
   local path="$1"
   rm -f "$path"
@@ -180,12 +213,82 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
 fi
 PYTHONPATH="$ROOT/server" python3 -m compileall -q "$ROOT/server/hermes_rdp"
 
-PREVIOUS_REF="$(python3 - <<'PY'
+read -r PREVIOUS_REF CONFIG_CLIENT_REF < <(python3 - <<'PY'
 import json
 with open("/etc/hermes-rdp/config.json", encoding="utf-8") as handle:
-    print(str(json.load(handle).get("repository_ref", "")))
+    data = json.load(handle)
+print(
+    str(data.get("repository_ref", "")),
+    str(data.get("client_repository_ref", "")),
+)
+PY
+)
+
+TELEMETRY_CLIENT_REF="$(python3 - "$DB" <<'PY'
+import collections
+import json
+import re
+import sqlite3
+import sys
+
+connection = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+counter = collections.Counter()
+try:
+    rows = connection.execute(
+        "SELECT telemetry_json FROM devices "
+        "WHERE revoked=0 AND telemetry_json IS NOT NULL"
+    ).fetchall()
+finally:
+    connection.close()
+
+for (raw,) in rows:
+    try:
+        telemetry = json.loads(raw or "{}")
+    except Exception:
+        continue
+    ref = str(telemetry.get("client_repository_ref") or "").lower()
+    if re.fullmatch(r"[0-9a-f]{40}", ref):
+        counter[ref] += 1
+
+print(counter.most_common(1)[0][0] if counter else "")
 PY
 )"
+
+PREVIOUS_CLIENT_REF="$CONFIG_CLIENT_REF"
+if ! [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+  PREVIOUS_CLIENT_REF="$TELEMETRY_CLIENT_REF"
+fi
+if ! [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+  PREVIOUS_CLIENT_REF="$PREVIOUS_REF"
+fi
+
+TARGET_CLIENT_HASH="$(client_bundle_hash "$ROOT")"
+NEW_CLIENT_REF="$RESOLVED_SHA"
+
+if [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+  if [[ "$PREVIOUS_CLIENT_REF" == "$RESOLVED_SHA" ]]; then
+    NEW_CLIENT_REF="$PREVIOUS_CLIENT_REF"
+  else
+    PREVIOUS_CLIENT_ARCHIVE="$WORK/client-previous.tar.gz"
+    PREVIOUS_CLIENT_DIR="$WORK/client-previous"
+    mkdir -p "$PREVIOUS_CLIENT_DIR"
+    if curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$PREVIOUS_CLIENT_REF" -o "$PREVIOUS_CLIENT_ARCHIVE" \
+      && tar -xzf "$PREVIOUS_CLIENT_ARCHIVE" -C "$PREVIOUS_CLIENT_DIR"; then
+      PREVIOUS_CLIENT_ROOT="$(find "$PREVIOUS_CLIENT_DIR" -maxdepth 1 -mindepth 1 -type d -name 'RDP-*' | head -n1)"
+      if [[ -n "$PREVIOUS_CLIENT_ROOT" ]]; then
+        PREVIOUS_CLIENT_HASH="$(client_bundle_hash "$PREVIOUS_CLIENT_ROOT")"
+        if [[ "$PREVIOUS_CLIENT_HASH" == "$TARGET_CLIENT_HASH" ]]; then
+          NEW_CLIENT_REF="$PREVIOUS_CLIENT_REF"
+        fi
+      fi
+    else
+      echo "WARNING: unable to inspect previous client bundle; client ref will advance." >&2
+    fi
+  fi
+fi
+
+echo "SERVER_REF=$RESOLVED_SHA"
+echo "CLIENT_REF=$NEW_CLIENT_REF"
 
 install -d -m 0700 "$BACKUP"
 for path in \
@@ -231,6 +334,8 @@ python3 - \
   "$REF" \
   "$RESOLVED_SHA" \
   "$PREVIOUS_REF" \
+  "$PREVIOUS_CLIENT_REF" \
+  "$NEW_CLIENT_REF" \
   "$DB_UID" \
   "$DB_GID" \
   "$DB_MODE" <<'PY'
@@ -243,6 +348,8 @@ from pathlib import Path
     requested_ref,
     resolved_sha,
     previous_ref,
+    previous_client_ref,
+    new_client_ref,
     db_uid,
     db_gid,
     db_mode,
@@ -253,6 +360,8 @@ Path(path).write_text(
             "requested_ref": requested_ref,
             "resolved_sha": resolved_sha,
             "previous_repository_ref": previous_ref,
+            "previous_client_repository_ref": previous_client_ref,
+            "client_repository_ref": new_client_ref,
             "database_uid": int(db_uid),
             "database_gid": int(db_gid),
             "database_mode": db_mode,
@@ -316,20 +425,21 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
   test -s /etc/hermes-rdp/trusted-rdp-cert-state.json
 fi
 
-python3 - "$REF" "$RESOLVED_SHA" <<'PY'
+python3 - "$REF" "$RESOLVED_SHA" "$NEW_CLIENT_REF" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-requested_ref, resolved_sha = sys.argv[1:]
+requested_ref, resolved_sha, client_ref = sys.argv[1:]
 path = Path("/etc/hermes-rdp/config.json")
 data = json.loads(path.read_text(encoding="utf-8"))
 data["client_installer_url"] = (
     "https://raw.githubusercontent.com/bakunity/RDP/"
-    f"{resolved_sha}/scripts/install-client.ps1"
+    f"{client_ref}/scripts/install-client.ps1"
 )
 data["repository_ref"] = resolved_sha
 data["repository_requested_ref"] = requested_ref
+data["client_repository_ref"] = client_ref
 path.write_text(
     json.dumps(data, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",

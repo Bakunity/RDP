@@ -50,8 +50,9 @@ class TelegramPairCommandTests(unittest.TestCase):
             tls_fingerprint_file=fingerprint,
             ssh_host_key_file=host_key,
             client_installer_url="https://example.test/install-client.ps1?a=1&b=2",
-            repository_ref="v1.1.0",
+            repository_ref="server-ref",
             close_tunnel_helper=root / "close-tunnel",
+            client_repository_ref="client-ref",
         )
         self.bot = TelegramBot(self.config, self.registry)
 
@@ -67,7 +68,8 @@ class TelegramPairCommandTests(unittest.TestCase):
         self.assertIn("Server=&#x27;server.example&#x27;", text)
         self.assertIn("PairCode=&#x27;ABCD1234&#x27;", text)
         self.assertIn("Fingerprint=&#x27;AA11BB22&#x27;", text)
-        self.assertIn("RepositoryRef=&#x27;v1.1.0&#x27;", text)
+        self.assertIn("RepositoryRef=&#x27;client-ref&#x27;", text)
+        self.assertNotIn("RepositoryRef=&#x27;server-ref&#x27;", text)
         self.assertIn("a=1&amp;b=2", text)
         self.assertIn("&amp; ([scriptblock]::Create($s)) @p</code></pre>", text)
         self.assertNotIn("Create((irm $u))", text)
