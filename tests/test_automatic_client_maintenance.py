@@ -46,10 +46,13 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
 
     def test_live_telemetry_supports_layered_device_screens(self) -> None:
         api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
-        self.assertIn(
-            'in {"device", "device_details", "device_technical"}',
-            api,
-        )
+        for screen in (
+            '"device"',
+            '"device_details"',
+            '"device_technical"',
+            '"device_address_progress"',
+        ):
+            self.assertIn(screen, api)
 
     def test_registry_maintenance_commands_do_not_redefine_access(self) -> None:
         db = (ROOT / "server/hermes_rdp/db.py").read_text(encoding="utf-8")

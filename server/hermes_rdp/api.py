@@ -343,7 +343,12 @@ class ApiHandler(BaseHTTPRequestHandler):
         telemetry_live = (
             live_until > int(time.time())
             and self.server.registry.get_setting("screen", "home")
-            in {"device", "device_details", "device_technical"}
+            in {
+                "device",
+                "device_details",
+                "device_technical",
+                "device_address_progress",
+            }
             and self.server.registry.get_setting("selected_device", "") == device_id
         )
 

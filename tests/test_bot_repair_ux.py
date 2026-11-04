@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from hermes_rdp.bot_ux import TelegramUxBot
 from hermes_rdp.config import Config
@@ -406,24 +408,131 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertEqual(self.registry.get_setting("screen"), "device")
         self.assertEqual(self.registry.get_setting("input_mode"), "")
 
-    def test_edit_slug_flow_updates_named_endpoint(self) -> None:
+    def test_edit_slug_flow_stays_on_progress_until_client_confirms(self) -> None:
         self.registry.set_setting("device_domain", "tima.biz")
         self.bot._handle_callback({"id": "cb-slug", "data": "edit_slug:dev123"})
         self.assertEqual(self.registry.get_setting("input_mode"), "device_slug")
 
-        self.bot._handle_update(
-            {
-                "message": {
-                    "text": "tima",
-                    "chat": {"id": 123},
-                    "from": {"id": 123},
+        renders = []
+        self.bot.render = lambda *args, **kwargs: renders.append(
+            (
+                self.registry.get_setting("screen"),
+                self.registry.get_setting("address_change_stage"),
+            )
+        )
+        target = {
+            "cert_name": "tima.tima.biz",
+            "thumbprint": "A" * 40,
+            "not_after": "2030-01-01",
+        }
+        with patch(
+            "hermes_rdp.bot_ux.set_device_slug_with_certificate",
+            return_value=("tima", target),
+        ):
+            self.bot._handle_update(
+                {
+                    "message": {
+                        "message_id": 501,
+                        "text": "tima",
+                        "chat": {"id": 123},
+                        "from": {"id": 123},
+                    }
                 }
-            }
+            )
+
+        self.assertEqual(
+            renders[0],
+            ("device_address_progress", "issuing"),
+        )
+        self.assertEqual(
+            renders[-1],
+            ("device_address_progress", "applying"),
+        )
+        self.assertEqual(
+            self.registry.get_setting("screen"),
+            "device_address_progress",
+        )
+        self.assertEqual(
+            self.registry.get_setting("input_mode"),
+            "",
+        )
+        self.assertEqual(
+            self.registry.get_setting("address_change_requested_host"),
+            "tima.tima.biz",
+        )
+
+    def test_address_progress_only_finishes_after_windows_thumbprint_matches(self) -> None:
+        self.registry.set_setting("device_domain", "tima.biz")
+        self.registry.set_setting(
+            "address_change_requested_host",
+            "tima.tima.biz",
+        )
+        self.registry.set_setting(
+            "address_change_stage",
+            "applying",
+        )
+        self.registry.set_setting(
+            "device_certificate_target:dev123",
+            json.dumps(
+                {
+                    "cert_name": "tima.tima.biz",
+                    "thumbprint": "A" * 40,
+                    "not_after": "2030-01-01",
+                }
+            ),
         )
         device = self.registry.get_device("dev123")
-        self.assertEqual(device["slug"], "tima")
-        text, _ = self.bot._device(device)
-        self.assertIn("RDP: tima.tima.biz:53391", text)
+        device["last_seen"] = int(time.time())
+        device["telemetry"] = {
+            "rdp_certificate_thumbprint": "B" * 40,
+            "rdp_certificate_hash_type": 3,
+            "certificate_lifecycle_ok": True,
+            "rdp_connections": 0,
+        }
+
+        text, _ = self.bot._device_address_progress(device)
+        self.assertIn("3/3 Применяю сертификат", text)
+        self.assertIn("Готовность будет показана только после проверки Windows.", text)
+        self.assertEqual(
+            self.registry.get_setting("address_change_stage"),
+            "applying",
+        )
+
+        device["telemetry"]["rdp_certificate_thumbprint"] = "A" * 40
+        text, keyboard = self.bot._device_address_progress(device)
+        self.assertIn("RDP-АДРЕС ГОТОВ", text)
+        self.assertIn("3/3 Сертификат подтверждён компьютером", text)
+        self.assertEqual(
+            self.registry.get_setting("address_change_stage"),
+            "done",
+        )
+        callbacks = {
+            button["callback_data"]
+            for row in keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertIn("device:dev123", callbacks)
+
+    def test_address_progress_explains_active_rdp_wait(self) -> None:
+        self.registry.set_setting(
+            "address_change_requested_host",
+            "tima.tima.biz",
+        )
+        self.registry.set_setting(
+            "address_change_stage",
+            "applying",
+        )
+        device = self.registry.get_device("dev123")
+        device["last_seen"] = int(time.time())
+        device["telemetry"] = {
+            "rdp_certificate_thumbprint": "B" * 40,
+            "rdp_certificate_hash_type": 3,
+            "certificate_lifecycle_ok": True,
+            "rdp_connections": 1,
+        }
+        text, _ = self.bot._device_address_progress(device)
+        self.assertIn("Есть активная RDP-сессия", text)
+        self.assertIn("Жду её завершения", text)
 
     def test_address_edit_explains_that_digits_are_allowed(self) -> None:
         self.registry.set_setting("device_domain", "tima.biz")

@@ -321,7 +321,12 @@ class TelegramBot:
         self._answer(callback_id)
 
     def _device_signature(self) -> tuple[Any, ...] | None:
-        if self.registry.get_setting("screen", "home") not in {"device", "device_details", "device_technical"}:
+        if self.registry.get_setting("screen", "home") not in {
+            "device",
+            "device_details",
+            "device_technical",
+            "device_address_progress",
+        }:
             return None
         device_id = self.registry.get_setting("selected_device", "") or ""
         if not device_id:
@@ -350,6 +355,8 @@ class TelegramBot:
             telemetry.get("client_repository_ref"),
             telemetry.get("maintenance_capable"),
             telemetry.get("certificate_lifecycle_ok"),
+            telemetry.get("rdp_certificate_thumbprint"),
+            telemetry.get("rdp_certificate_hash_type"),
             str((telemetry.get("maintenance_status") or {}).get("state") or ""),
             str((telemetry.get("maintenance_status") or {}).get("action") or ""),
             bool((telemetry.get("maintenance_status") or {}).get("ok")),
@@ -360,7 +367,12 @@ class TelegramBot:
         while not self.stop_event.wait(3):
             try:
                 screen = self.registry.get_setting("screen", "home")
-                if screen not in {"device", "device_details", "device_technical"}:
+                if screen not in {
+                    "device",
+                    "device_details",
+                    "device_technical",
+                    "device_address_progress",
+                }:
                     self.last_device_signature = None
                     was_active = False
                     continue

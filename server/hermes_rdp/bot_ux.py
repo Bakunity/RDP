@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import html
+import time
 from typing import Any
 
 from .bot import TelegramBot, bar, escape, format_bytes, format_duration
-from .device_certificates import set_device_slug_with_certificate
+from .db import normalize_device_slug
+from .device_certificates import (
+    get_device_certificate_target,
+    set_device_slug_with_certificate,
+)
 
 
 class TelegramUxBot(TelegramBot):
@@ -47,20 +52,78 @@ class TelegramUxBot(TelegramBot):
 
             if input_mode in {"device_name", "device_slug"} and not raw_text.startswith("/"):
                 try:
-                    device = self.registry.get_device(device_id)
+                    self.registry.get_device(device_id)
                     if input_mode == "device_name":
                         self.registry.rename_device(device_id, raw_text)
-                    else:
-                        set_device_slug_with_certificate(
+                        self.registry.set_setting("input_mode", "")
+                        self.registry.set_setting("input_error", "")
+                        self.registry.set_setting("screen", "device")
+                        # Accepted edit input is transient UI, not chat history.
+                        self._delete_input_message(message)
+                        self.render()
+                        return
+
+                    requested_slug = normalize_device_slug(raw_text)
+                    if not requested_slug:
+                        raise ValueError("Некорректный RDP-адрес")
+                    domain = self._device_domain()
+                    requested_host = (
+                        f"{requested_slug}.{domain}"
+                        if domain
+                        else requested_slug
+                    )
+                    self.registry.set_setting(
+                        "address_change_requested_host",
+                        requested_host,
+                    )
+                    self.registry.set_setting(
+                        "address_change_stage",
+                        "issuing",
+                    )
+                    self.registry.set_setting("input_error", "")
+                    self.registry.set_setting(
+                        "screen",
+                        "device_address_progress",
+                    )
+                    # Keep fast certificate telemetry flowing throughout the
+                    # whole convergence window, not only the first 60 seconds.
+                    self.registry.set_setting(
+                        "live_until",
+                        str(int(time.time()) + 180),
+                    )
+                    self.render()
+
+                    try:
+                        _, target = set_device_slug_with_certificate(
                             self.config,
                             self.registry,
                             device_id,
                             raw_text,
                         )
+                    except Exception:
+                        self.registry.set_setting(
+                            "input_mode",
+                            "device_slug",
+                        )
+                        self.registry.set_setting(
+                            "screen",
+                            "device_edit",
+                        )
+                        raise
+
                     self.registry.set_setting("input_mode", "")
                     self.registry.set_setting("input_error", "")
-                    self.registry.set_setting("screen", "device")
-                    # Accepted edit input is transient UI, not chat history.
+                    self.registry.set_setting(
+                        "address_change_stage",
+                        "applying",
+                    )
+                    if target:
+                        self.registry.set_setting(
+                            "address_change_target_thumbprint",
+                            str(target.get("thumbprint") or ""),
+                        )
+                    # The user's input is accepted only after the server has a
+                    # valid certificate for the new hostname.
                     self._delete_input_message(message)
                     self.render()
                 except Exception as exc:
@@ -428,6 +491,169 @@ class TelegramUxBot(TelegramBot):
         }
         return text, keyboard
 
+    @staticmethod
+    def _clean_thumbprint(value: Any) -> str:
+        return "".join(
+            character
+            for character in str(value or "").upper()
+            if character in "0123456789ABCDEF"
+        )
+
+    def _device_address_progress(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        stage = str(
+            self.registry.get_setting(
+                "address_change_stage",
+                "issuing",
+            )
+            or "issuing"
+        )
+        requested_host = str(
+            self.registry.get_setting(
+                "address_change_requested_host",
+                "",
+            )
+            or self._device_host(device)
+        )
+        telemetry = device.get("telemetry") or {}
+        target = get_device_certificate_target(
+            self.registry,
+            str(device["id"]),
+        )
+
+        expected = self._clean_thumbprint(
+            (target or {}).get("thumbprint")
+            or self.registry.get_setting(
+                "address_change_target_thumbprint",
+                "",
+            )
+        )
+        actual = self._clean_thumbprint(
+            telemetry.get("rdp_certificate_thumbprint")
+        )
+        try:
+            hash_type = int(
+                telemetry.get("rdp_certificate_hash_type") or 0
+            )
+        except (TypeError, ValueError):
+            hash_type = 0
+        lifecycle_ok = bool(
+            telemetry.get("certificate_lifecycle_ok")
+        )
+        applied = bool(
+            stage != "issuing"
+            and expected
+            and actual == expected
+            and hash_type == 3
+            and lifecycle_ok
+        )
+
+        if applied:
+            stage = "done"
+            self.registry.set_setting(
+                "address_change_stage",
+                "done",
+            )
+            self._set_live(False)
+
+        if stage == "issuing":
+            lines = [
+                f"{self.icon('globe')} ИЗМЕНЕНИЕ RDP-АДРЕСА",
+                "",
+                f"Новый адрес: {escape(requested_host)}",
+                "",
+                f"{self.icon('success')} 1/3 Запрос принят",
+                f"{self.icon('timer')} 2/3 Выпускаю сертификат",
+                "○ 3/3 Применение на компьютере",
+                "",
+                "Адрес ещё не считается готовым.",
+            ]
+            buttons = [
+                [
+                    self.button(
+                        "refresh",
+                        "ОБНОВИТЬ",
+                        "refresh",
+                    )
+                ]
+            ]
+        elif stage == "done":
+            lines = [
+                f"{self.icon('success')} RDP-АДРЕС ГОТОВ",
+                "",
+                f"Адрес: {escape(requested_host)}",
+                "",
+                f"{self.icon('success')} 1/3 Адрес сохранён",
+                f"{self.icon('success')} 2/3 Сертификат выпущен",
+                f"{self.icon('success')} 3/3 Сертификат подтверждён компьютером",
+                "",
+                "Можно подключаться.",
+            ]
+            buttons = [
+                [
+                    self.button(
+                        "back",
+                        "К КОМПЬЮТЕРУ",
+                        f"device:{device['id']}",
+                        style="primary",
+                    )
+                ]
+            ]
+        else:
+            try:
+                rdp_connections = int(
+                    telemetry.get("rdp_connections") or 0
+                )
+            except (TypeError, ValueError):
+                rdp_connections = 0
+
+            if not self._online(device):
+                wait_text = (
+                    "Компьютер сейчас не в сети. Применение продолжится "
+                    "автоматически после подключения."
+                )
+            elif rdp_connections > 0:
+                wait_text = (
+                    "Есть активная RDP-сессия. Жду её завершения, "
+                    "чтобы безопасно применить сертификат."
+                )
+            elif not actual:
+                wait_text = (
+                    "Жду подтверждение текущего сертификата от Windows."
+                )
+            else:
+                wait_text = (
+                    "Windows применяет новый сертификат. "
+                    "Жду контрольное подтверждение."
+                )
+
+            lines = [
+                f"{self.icon('globe')} ИЗМЕНЕНИЕ RDP-АДРЕСА",
+                "",
+                f"Новый адрес: {escape(requested_host)}",
+                "",
+                f"{self.icon('success')} 1/3 Адрес сохранён",
+                f"{self.icon('success')} 2/3 Сертификат выпущен",
+                f"{self.icon('timer')} 3/3 Применяю сертификат на компьютере",
+                "",
+                wait_text,
+                "",
+                "Готовность будет показана только после проверки Windows.",
+            ]
+            buttons = [
+                [
+                    self.button(
+                        "refresh",
+                        "ОБНОВИТЬ",
+                        "refresh",
+                    )
+                ]
+            ]
+
+        return "\n".join(lines), {"inline_keyboard": buttons}
+
     def _device_details(
         self,
         device: dict[str, Any],
@@ -587,7 +813,13 @@ class TelegramUxBot(TelegramBot):
 
     def _render_content(self) -> tuple[str, dict[str, Any]]:
         screen = self.registry.get_setting("screen", "home") or "home"
-        if screen in {"repair", "device_details", "device_technical", "device_edit"}:
+        if screen in {
+            "repair",
+            "device_details",
+            "device_technical",
+            "device_edit",
+            "device_address_progress",
+        }:
             device_id = self.registry.get_setting("selected_device", "") or ""
             try:
                 device = self.registry.get_device(device_id)
@@ -601,5 +833,7 @@ class TelegramUxBot(TelegramBot):
                 return self._device_edit(device)
             if screen == "device_technical":
                 return self._device_technical(device)
+            if screen == "device_address_progress":
+                return self._device_address_progress(device)
             return self._device_details(device)
         return super()._render_content()
