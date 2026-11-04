@@ -289,17 +289,11 @@ class SoakStabilizationTests(unittest.TestCase):
 
         self.assertEqual(len(rows[0]), 1)
         self.assertEqual(rows[0][0]["text"], "🔒 ВЫКЛЮЧИТЬ ДОСТУП")
-        self.assertEqual(
-            rows[0][0].get("icon_custom_emoji_id"),
-            "6037249452824072506",
-        )
+        self.assertNotIn("icon_custom_emoji_id", rows[0][0])
         self.assertEqual(rows[0][0].get("style"), "danger")
         self.assertEqual(len(rows[1]), 1)
         self.assertEqual(rows[1][0]["text"], "🔁 ПЕРЕЗАПУСК")
-        self.assertEqual(
-            rows[1][0].get("icon_custom_emoji_id"),
-            "6030657343744644592",
-        )
+        self.assertNotIn("icon_custom_emoji_id", rows[1][0])
 
     def test_dashboard_signature_tracks_control_state_changes(self) -> None:
         timestamp = int(time.time())

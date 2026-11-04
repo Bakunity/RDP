@@ -14,7 +14,7 @@ from typing import Any
 from .config import Config
 from .db import Registry
 from .tunnel import close_tunnel
-from .telegram_icons import APPROVED_PACKS, TelegramEmojiTheme
+from .telegram_icons import TelegramEmojiTheme
 
 
 LOG = logging.getLogger("hermes_rdp.bot")
@@ -68,7 +68,6 @@ class TelegramBot:
         self.last_render = 0.0
         self.last_device_signature: tuple[Any, ...] | None = None
         self.emoji = TelegramEmojiTheme()
-        self._emoji_packs_loaded = False
 
     def api_call(self, method: str, payload: dict[str, Any] | None = None, timeout: int = 40):
         request = urllib.request.Request(
@@ -86,93 +85,6 @@ class TelegramBot:
         if not result.get("ok"):
             raise RuntimeError(result.get("description", "Telegram API error"))
         return result.get("result")
-
-    def _load_emoji_packs(self) -> None:
-        if getattr(self, "_emoji_packs_loaded", False):
-            return
-        self._emoji_packs_loaded = True
-        theme = self._emoji_theme()
-
-        loaded_sets: dict[str, dict[str, Any]] = {}
-        loaded_pack_names: dict[str, str] = {}
-        membership: dict[str, str] = {}
-
-        for pack_name in APPROVED_PACKS:
-            try:
-                sticker_set = self.api_call(
-                    "getStickerSet",
-                    {"name": pack_name},
-                    timeout=15,
-                )
-            except Exception as exc:
-                LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
-                continue
-
-            if not isinstance(sticker_set, dict):
-                continue
-            actual_name = str(sticker_set.get("name") or pack_name)
-            loaded_sets[pack_name] = sticker_set
-            loaded_pack_names[pack_name] = actual_name
-            for sticker in sticker_set.get("stickers") or []:
-                if not isinstance(sticker, dict):
-                    continue
-                custom_id = str(sticker.get("custom_emoji_id") or "")
-                if custom_id:
-                    membership[custom_id] = actual_name
-
-        # Verify that the curated IDs exist. set_name on Sticker is optional in
-        # Bot API, so existence is checked separately from set membership.
-        curated_ids = [
-            custom_id
-            for custom_id, _ in theme.pinned_ids().values()
-        ]
-        existing_ids: set[str] = set()
-        if curated_ids:
-            try:
-                stickers = self.api_call(
-                    "getCustomEmojiStickers",
-                    {"custom_emoji_ids": curated_ids[:200]},
-                    timeout=15,
-                ) or []
-                for sticker in stickers:
-                    if isinstance(sticker, dict):
-                        custom_id = str(sticker.get("custom_emoji_id") or "")
-                        if custom_id:
-                            existing_ids.add(custom_id)
-            except Exception as exc:
-                LOG.debug("custom emoji existence validation failed: %s", exc)
-
-        invalidated = theme.reconcile_pack_membership(
-            membership,
-            loaded_pack_names,
-        )
-        if invalidated:
-            LOG.info(
-                "Discarded %s custom emoji IDs that do not belong to the selected packs",
-                invalidated,
-            )
-
-        # Re-discover any invalidated icons from the exact selected sets.
-        for pack_name, sticker_set in loaded_sets.items():
-            theme.learn_pack(pack_name, sticker_set)
-
-        missing_existing = [
-            custom_id
-            for custom_id, _ in theme.pinned_ids().values()
-            if existing_ids and custom_id not in existing_ids
-        ]
-        if missing_existing:
-            LOG.info(
-                "Telegram did not confirm %s resolved custom emoji IDs",
-                len(missing_existing),
-            )
-
-        LOG.info(
-            "Telegram emoji theme resolved %s/%s icons from packs: %s",
-            theme.resolved_count(),
-            len(theme.icons),
-            ", ".join(theme.resolved_packs()) or "none",
-        )
 
     def _emoji_theme(self) -> TelegramEmojiTheme:
         theme = getattr(self, "emoji", None)
@@ -199,91 +111,15 @@ class TelegramBot:
             style=style,
         )
 
-    @staticmethod
-    def _is_custom_emoji_error(exc: Exception) -> bool:
-        value = str(exc).lower()
-        return any(
-            marker in value
-            for marker in (
-                "custom emoji",
-                "custom_emoji",
-                "icon_custom",
-                "premium",
-            )
-        )
-
     def _render_api_call(
         self,
         method: str,
         payload: dict[str, Any],
     ) -> Any:
-        try:
-            return self.api_call(method, payload)
-        except Exception as exc:
-            theme = self._emoji_theme()
-            if not (
-                theme.enabled
-                and theme.payload_has_custom_emoji(payload)
-                and self._is_custom_emoji_error(exc)
-            ):
-                raise
-
-            # A button icon failure must not wipe custom emoji from the whole
-            # dashboard. First retry with only button custom icons disabled.
-            if (
-                theme.buttons_enabled
-                and theme.payload_has_button_custom_emoji(payload)
-            ):
-                LOG.info(
-                    "Telegram rejected button custom emoji; retrying with text custom emoji intact: %s",
-                    exc,
-                )
-                theme.buttons_enabled = False
-                text, keyboard = self._render_content()
-                retry_payload = dict(payload)
-                retry_payload["text"] = text
-                retry_payload["reply_markup"] = keyboard
-                try:
-                    return self.api_call(method, retry_payload)
-                except Exception as retry_exc:
-                    if not (
-                        theme.text_enabled
-                        and theme.payload_has_text_custom_emoji(retry_payload)
-                        and self._is_custom_emoji_error(retry_exc)
-                    ):
-                        raise
-
-                    LOG.info(
-                        "Telegram also rejected text custom emoji; falling back to Unicode: %s",
-                        retry_exc,
-                    )
-                    theme.text_enabled = False
-                    text, keyboard = self._render_content()
-                    unicode_payload = dict(payload)
-                    unicode_payload["text"] = text
-                    unicode_payload["reply_markup"] = keyboard
-                    return self.api_call(method, unicode_payload)
-
-            if (
-                theme.text_enabled
-                and theme.payload_has_text_custom_emoji(payload)
-            ):
-                LOG.info(
-                    "Telegram rejected text custom emoji; falling back to Unicode text only: %s",
-                    exc,
-                )
-                theme.text_enabled = False
-                text, keyboard = self._render_content()
-                retry_payload = dict(payload)
-                retry_payload["text"] = text
-                retry_payload["reply_markup"] = keyboard
-                return self.api_call(method, retry_payload)
-
-            raise
+        return self.api_call(method, payload)
 
     def run(self) -> None:
         self.api_call("deleteWebhook", {"drop_pending_updates": False})
-        self._load_emoji_packs()
         updater = threading.Thread(target=self._live_loop, daemon=True)
         updater.start()
         failures = 0
@@ -339,75 +175,6 @@ class TelegramBot:
         else:
             self.registry.set_setting("live_until", "0")
 
-    def _send_emoji_probe(self) -> None:
-        theme = self._emoji_theme()
-        spec = theme.icons["computer"]
-        custom_id = str(spec.custom_emoji_id or "")
-        custom_text = (
-            f'<tg-emoji emoji-id="{custom_id}">{spec.fallback}</tg-emoji>'
-            if custom_id
-            else spec.fallback
-        )
-        text = (
-            "EMOJI TEST\n\n"
-            f"Custom в тексте: {custom_text}\n"
-            f"Обычный Unicode: {spec.fallback}\n\n"
-            f"Пак: {escape(spec.pack or 'не разрешён')}\n"
-            f"Custom ID: {escape(custom_id or 'нет')}\n"
-            f"Text custom: {'ON' if theme.text_enabled else 'OFF'}\n"
-            f"Button custom: {'ON' if theme.buttons_enabled else 'OFF'}"
-        )
-        custom_button: dict[str, Any] = {
-            "text": "CUSTOM ICON",
-            "callback_data": "home",
-        }
-        if custom_id and theme.buttons_enabled:
-            custom_button["icon_custom_emoji_id"] = custom_id
-        keyboard = {
-            "inline_keyboard": [
-                [custom_button],
-                [
-                    {
-                        "text": f"{spec.fallback} UNICODE",
-                        "callback_data": "home",
-                    }
-                ],
-            ]
-        }
-        try:
-            self.api_call(
-                "sendMessage",
-                {
-                    "chat_id": self.config.telegram_chat_id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "reply_markup": keyboard,
-                },
-            )
-        except Exception as exc:
-            LOG.warning("emoji probe with custom emoji failed: %s", exc)
-            self.api_call(
-                "sendMessage",
-                {
-                    "chat_id": self.config.telegram_chat_id,
-                    "text": (
-                        "EMOJI TEST\n\n"
-                        f"Custom test rejected by Telegram: {escape(exc)}\n"
-                        f"Unicode fallback: {spec.fallback}"
-                    ),
-                    "reply_markup": {
-                        "inline_keyboard": [
-                            [
-                                {
-                                    "text": f"{spec.fallback} UNICODE",
-                                    "callback_data": "home",
-                                }
-                            ]
-                        ]
-                    },
-                },
-            )
-
     def _handle_update(self, update: dict[str, Any]) -> None:
         if not self._authorized(update):
             callback = update.get("callback_query")
@@ -421,8 +188,6 @@ class TelegramBot:
                 self.registry.set_setting("screen", "home")
                 self.registry.set_setting("selected_device", "")
                 self.render(force_new=True)
-            elif text == "/emoji":
-                self._send_emoji_probe()
             return
         callback = update.get("callback_query")
         if callback:
@@ -607,7 +372,7 @@ class TelegramBot:
             rows.append(
                 [
                     self.button(
-                        "success" if self._online(device) else "cancel",
+                        "online" if self._online(device) else "offline",
                         f"{device['display_name']} · :{device['rdp_port']}",
                         f"device:{device['id']}",
                         style="success" if self._online(device) else "danger",
