@@ -478,7 +478,7 @@ class TelegramBot:
                 process_age = None
             if processes:
                 process_status = (
-                    f"Наблюдение: 🟢 ещё {live_remaining} сек."
+                    f"Наблюдение: {self.icon('success')} ещё {live_remaining} сек."
                     + (f" · снимок {process_age} сек. назад" if process_age is not None else "")
                 )
                 for index, process in enumerate(processes[:5], 1):
@@ -489,7 +489,7 @@ class TelegramBot:
                         f"PID {process.get('pid', '?')}"
                     )
             else:
-                process_status = f"Наблюдение: 🟢 ещё {live_remaining} сек. · ждём первый снимок"
+                process_status = f"Наблюдение: {self.icon('success')} ещё {live_remaining} сек. · ждём первый снимок"
 
         desired_access = bool(device.get("enabled", True))
         if online and "access_enabled" in telemetry:
