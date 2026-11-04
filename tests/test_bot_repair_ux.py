@@ -138,14 +138,17 @@ class TelegramRepairUxTests(unittest.TestCase):
             for row in keyboard["inline_keyboard"]
             for button in row
         ]
-        self.assertIn("ВОССТАНОВИТЬ АВТО", labels)
+        self.assertTrue(
+            any("ВОССТАНОВИТЬ АВТО" in label for label in labels)
+        )
         repair = next(
             button
             for row in keyboard["inline_keyboard"]
             for button in row
             if button["callback_data"] == "repair:dev123"
         )
-        self.assertTrue(repair.get("icon_custom_emoji_id"))
+        self.assertTrue(repair["text"].startswith("🛠"))
+        self.assertNotIn("icon_custom_emoji_id", repair)
         self.assertEqual(repair.get("style"), "primary")
 
     def test_pair_screen_can_rotate_code_without_reusing_old_one(self) -> None:
