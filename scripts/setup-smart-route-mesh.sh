@@ -101,6 +101,12 @@ PY
 )
 MESH_HOST="mesh.$DEVICE_DOMAIN"
 CONTROL_URL="https://$MESH_HOST"
+CGNAT_PREFIX="$(
+  python3 - <<'PY'
+import ipaddress
+print(ipaddress.IPv4Network((0x64400000, 10)))
+PY
+)"
 
 PUBLIC_IPV4="$(
   python3 - "$PUBLIC_HOST" <<'PY'
@@ -222,7 +228,7 @@ trusted_proxies:
 noise:
   private_key_path: /var/lib/headscale/noise_private.key
 prefixes:
-  v4: 100.64.0.0/10
+  v4: $CGNAT_PREFIX
   v6: fd7a:115c:a1e0::/48
   allocation: sequential
 derp:
