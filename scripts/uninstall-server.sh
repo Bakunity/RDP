@@ -25,7 +25,9 @@ for path in \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/sbin/hermes-rdp-cert-package \
   /etc/sudoers.d/hermes-rdp \
-  /etc/sudoers.d/hermes-rdp-cert-package; do
+  /etc/sudoers.d/hermes-rdp-cert-package \
+  /etc/nginx/conf.d/hermes-rdp-acme.conf \
+  /etc/nginx/sites-enabled/hermes-rdp-acme.conf; do
   [[ -e "$path" ]] && cp -a --parents "$path" "$BACKUP/"
 done
 
@@ -48,6 +50,23 @@ rm -f \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/sbin/hermes-rdp-cert-package
+
+NGINX_CHANGED=0
+for nginx_conf in \
+  /etc/nginx/conf.d/hermes-rdp-acme.conf \
+  /etc/nginx/sites-enabled/hermes-rdp-acme.conf; do
+  if [[ -f "$nginx_conf" ]] && grep -q '^# Managed by Hermes RDP$' "$nginx_conf"; then
+    rm -f "$nginx_conf"
+    NGINX_CHANGED=1
+  fi
+done
+if ((NGINX_CHANGED == 1)) && command -v nginx >/dev/null 2>&1; then
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx >/dev/null 2>&1 || true
+  else
+    echo "Warning: nginx configuration is invalid after Hermes ACME route removal; nginx was not reloaded." >&2
+  fi
+fi
 
 systemctl daemon-reload
 
