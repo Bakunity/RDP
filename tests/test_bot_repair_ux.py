@@ -119,7 +119,7 @@ class TelegramRepairUxTests(unittest.TestCase):
             for row in product_keyboard["inline_keyboard"]
             for button in row
         }
-        self.assertNotIn("repair:dev123", product_callbacks)
+        self.assertIn("repair:dev123", product_callbacks)
 
         _, technical_keyboard = self.bot._device_technical(
             self.registry.get_device("dev123")
@@ -224,7 +224,7 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertIsNone(by_callback["home"].get("style"))
         self.assertNotIn("live", by_callback)
         self.assertNotIn("delete:dev123", by_callback)
-        self.assertNotIn("repair:dev123", by_callback)
+        self.assertEqual(by_callback["repair:dev123"].get("style"), "primary")
 
         _, details_keyboard = self.bot._device_details(
             self.registry.get_device("dev123")
@@ -303,7 +303,7 @@ class TelegramRepairUxTests(unittest.TestCase):
             for button in row
         }
         self.assertIn("details:dev123", summary_callbacks)
-        self.assertNotIn("repair:dev123", summary_callbacks)
+        self.assertIn("repair:dev123", summary_callbacks)
         self.assertNotIn("delete:dev123", summary_callbacks)
         self.assertNotIn("live", summary_callbacks)
 
