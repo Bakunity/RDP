@@ -11,6 +11,7 @@ $BaseDir = 'C:\ProgramData\BakunityRDP\SmartRoute'
 $ConfigPath = Join-Path $BaseDir 'config.json'
 $StatePath = Join-Path $BaseDir 'state.json'
 $MeshLibPath = Join-Path $BaseDir 'BakunityMesh.ps1'
+$NativeTransportLibPath = Join-Path $BaseDir 'BakunityNativeTransport.ps1'
 $LogPath = Join-Path $BaseDir 'smart-route.log'
 $HostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
 $HostsBegin = '# BEGIN BAKUNITY RDP SMART ROUTE'
@@ -18,6 +19,7 @@ $HostsEnd = '# END BAKUNITY RDP SMART ROUTE'
 $SyncIntervalSeconds = 15
 $TransparentPort = 3389
 $LauncherPortStart = 43000
+$NativeForwardPortStart = 45000
 
 function Write-Log {
     param([string]$Message)
@@ -236,7 +238,11 @@ function Get-RoutingMode {
 }
 
 function Select-DeviceRoute {
-    param([object]$Device, [string]$Policy)
+    param(
+        [object]$Device,
+        [string]$Policy,
+        [int]$NativePort
+    )
 
     if ($Policy -in @('auto','lan')) {
         foreach ($Lan in @($Device.routes.lan)) {
@@ -257,6 +263,44 @@ function Select-DeviceRoute {
             return [pscustomobject]@{
                 type='unavailable'; host=''; target_ipv4=''; target_port=0
                 latency_ms=0; reason='no reachable LAN route'
+            }
+        }
+    }
+
+    if ($Policy -in @('auto','p2p')) {
+        $Native = $Device.routes.native
+        if (
+            $Native -and
+            [bool]$Native.available -and
+            $Native.peer_id -and
+            $Native.shared_secret
+        ) {
+            $NativeMode = if ($Policy -eq 'p2p') { 'direct' } else { 'auto' }
+            try {
+                $Forward = Set-BakunityNativeForward -Key ([string]$Device.id) -PeerId ([string]$Native.peer_id) -SharedSecret ([string]$Native.shared_secret) -Listen "127.0.0.1:$NativePort" -Mode $NativeMode
+                if ($Forward -and [bool]$Forward.ok) {
+                    return [pscustomobject]@{
+                        type = if ($Policy -eq 'p2p') { 'native_p2p' } else { 'native_auto' }
+                        host = '127.0.0.1'
+                        target_ipv4 = '127.0.0.1'
+                        target_port = [int]$NativePort
+                        latency_ms = 0
+                        reason = if ($Policy -eq 'p2p') {
+                            'bakunity_direct_required'
+                        } else {
+                            'bakunity_native_auto'
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Log "NATIVE_FORWARD=ERROR device=$($Device.id) $($_.Exception.Message)"
+                if ($Policy -eq 'p2p') {
+                    return [pscustomobject]@{
+                        type='unavailable'; host=''; target_ipv4=''; target_port=0
+                        latency_ms=0; reason='Bakunity direct path unavailable'
+                    }
+                }
             }
         }
     }
@@ -368,7 +412,8 @@ function Build-Mappings {
         if (-not $Loopback) { $Loopback = Get-FreeLoopbackAddress -Used $Used }
         $Policy = ([string]$Device.route_policy).Trim().ToLowerInvariant()
         if ($Policy -notin @('auto','p2p','relay','lan')) { $Policy = $DefaultPolicy }
-        $Route = Select-DeviceRoute -Device $Device -Policy $Policy
+        $NativePort = $NativeForwardPortStart + $Index
+        $Route = Select-DeviceRoute -Device $Device -Policy $Policy -NativePort $NativePort
         $LocalPort = if ($Mode -eq 'transparent') { $TransparentPort } else { $LauncherPortStart + $Index }
         $Mappings += [pscustomobject]@{
             device_id=$Id
@@ -386,6 +431,207 @@ function Build-Mappings {
         $Index++
     }
     return [pscustomobject]@{ policy=$DefaultPolicy; mode=$Mode; mappings=@($Mappings) }
+}
+
+function Sync-ConnectorNativeTransport {
+    param([object]$Config, [object]$Manifest)
+
+    $NativeServer = $Manifest.server.native_transport
+    if (-not $NativeServer -or -not [bool]$NativeServer.enabled) {
+        return Get-BakunityNativeTransportStatus
+    }
+
+    $Status = Get-BakunityNativeTransportStatus
+    if (-not $Status -or -not [bool]$Status.ok) {
+        $Bootstrap = Invoke-ControlPost -Config $Config -Path '/v1/named-access/native-transport-bootstrap' -Body @{}
+        if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+            $RepositoryRef = [string]$Config.repository_ref
+            if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}    param([object]$Mesh)
+    return [bool](@($Mesh.roles) -contains 'connector')
+}
+
+function Sync-ConnectorMesh {
+    param([object]$Config, [object]$Manifest)
+
+    $Enabled = [bool]$Manifest.server.smart_route.enabled
+    if (-not $Enabled) {
+        return Get-BakunityTailscaleStatus
+    }
+
+    $Mesh = Get-BakunityTailscaleStatus
+    if ($Mesh.conflict) {
+        Write-Log 'MESH=CONFLICT foreign Tailscale detected; Relay remains available'
+        return $Mesh
+    }
+
+    $NeedsEnrollment = [bool](
+        -not $Mesh.online -or
+        -not (Test-ConnectorMeshRole -Mesh $Mesh) -or
+        [string]$Mesh.control_url -ne [string]$Manifest.server.smart_route.control_url
+    )
+    if ($NeedsEnrollment) {
+        $Bootstrap = Invoke-ControlPost -Config $Config -Path '/v1/named-access/mesh-bootstrap' -Body @{}
+        if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+            $Result = Ensure-BakunityMeshRole -Role connector -Bootstrap $Bootstrap
+            if ($Result.conflict) {
+                Write-Log 'MESH=CONFLICT foreign Tailscale detected'
+            }
+            else {
+                Write-Log 'MESH=ONLINE role=connector'
+            }
+        }
+    }
+    return Get-BakunityTailscaleStatus
+}
+
+function Sync-SmartRoute {
+    $Config = Read-JsonFile -Path $ConfigPath
+    if (-not $Config) { throw "Missing Smart Route config: $ConfigPath" }
+    $Manifest = Invoke-ControlGet -Config $Config -Path '/v1/named-access/manifest'
+    if (-not $Manifest.ok -or [int]$Manifest.manifest_version -ne 2) { throw 'Smart Route manifest v2 is required.' }
+    $NativeStatus = Sync-ConnectorNativeTransport -Config $Config -Manifest $Manifest
+    $Mesh = Sync-ConnectorMesh -Config $Config -Manifest $Manifest
+    $State = Read-JsonFile -Path $StatePath
+    $Built = Build-Mappings -Manifest $Manifest -State $State
+    $Mappings = @($Built.mappings)
+
+    $IpHelper = Get-Service -Name iphlpsvc -ErrorAction Stop
+    if ($IpHelper.Status -ne 'Running') { Start-Service -Name iphlpsvc -ErrorAction Stop }
+
+    $Old = Get-ExistingMap -State $State
+    foreach ($Entry in $Old.Values) {
+        $Address = [string]$Entry.loopback
+        $Port = if ($Entry.PSObject.Properties['local_port']) { [int]$Entry.local_port } else { 3389 }
+        if (Test-LoopbackAddress -Address $Address) { Remove-PortProxy -ListenAddress $Address -ListenPort $Port }
+    }
+    foreach ($Mapping in $Mappings) {
+        Set-PortProxy -ListenAddress ([string]$Mapping.loopback) -ListenPort ([int]$Mapping.local_port) -TargetIPv4 ([string]$Mapping.target_ipv4) -TargetPort ([int]$Mapping.target_port)
+    }
+    Write-ManagedHosts -Mappings $Mappings
+
+    $MapState = [ordered]@{}
+    $RouteTelemetry = [ordered]@{}
+    foreach ($Mapping in $Mappings) {
+        $MapState[[string]$Mapping.device_id] = [ordered]@{
+            hostname=[string]$Mapping.hostname
+            loopback=[string]$Mapping.loopback
+            local_port=[int]$Mapping.local_port
+            enabled=[bool]$Mapping.enabled
+            route_policy=[string]$Mapping.route_policy
+            route_type=[string]$Mapping.route_type
+            target_ipv4=[string]$Mapping.target_ipv4
+            target_port=[int]$Mapping.target_port
+            latency_ms=[int]$Mapping.latency_ms
+            reason=[string]$Mapping.reason
+        }
+        $RouteTelemetry[[string]$Mapping.device_id] = [ordered]@{
+            hostname=[string]$Mapping.hostname
+            policy=[string]$Mapping.route_policy
+            route=[string]$Mapping.route_type
+            latency_ms=[int]$Mapping.latency_ms
+            reason=[string]$Mapping.reason
+        }
+    }
+
+    $Tail = Get-BakunityTailscaleStatus
+    if ($NativeStatus -and $NativeStatus.forwards) {
+        foreach ($Forward in @($NativeStatus.forwards)) {
+            $Key = [string]$Forward.key
+            if (-not $RouteTelemetry.Contains($Key)) { continue }
+            $Path = [string]$Forward.path
+            if ($Path -eq 'direct') {
+                $RouteTelemetry[$Key].route = 'native_p2p'
+                $RouteTelemetry[$Key].reason = 'bakunity_p2p_direct'
+            }
+            elseif ($Path -eq 'relay') {
+                $RouteTelemetry[$Key].route = 'native_relay'
+                $RouteTelemetry[$Key].reason = 'bakunity_relay'
+            }
+        }
+    }
+
+    Write-JsonFile -Path $StatePath -Value ([ordered]@{
+        version=4
+        connector_id=[string]$Manifest.connector.id
+        connector_name=[string]$Manifest.connector.name
+        route_policy=[string]$Built.policy
+        routing_mode=[string]$Built.mode
+        device_domain=[string]$Manifest.server.device_domain
+        updated_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        mappings=$MapState
+    })
+
+    [void](Invoke-ControlPost -Config $Config -Path '/v1/named-access/telemetry' -Body @{
+        machine_name=$env:COMPUTERNAME
+        telemetry=[ordered]@{
+            captured_at=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            routing_mode=[string]$Built.mode
+            route_policy=[string]$Built.policy
+            native_transport=[ordered]@{
+                installed=[bool](Test-Path -LiteralPath $script:BakunityNativeTransportExe)
+                online=[bool]($NativeStatus -and $NativeStatus.ok)
+                peer_id=if ($NativeStatus) { [string]$NativeStatus.peer_id } else { '' }
+                relay_connected=[bool]($NativeStatus -and $NativeStatus.relay_connected)
+                version=if ($NativeStatus) { [string]$NativeStatus.version } else { '' }
+            }
+            mesh=$Tail
+            routes=$RouteTelemetry
+        }
+    })
+
+    $Summary = @($Mappings | Group-Object route_type | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ' '
+    Write-Log "SYNC=PASS policy=$($Built.policy) mode=$($Built.mode) $Summary"
+}
+
+New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $MeshLibPath)) {
+    throw "Missing mesh library: $MeshLibPath"
+}
+if (-not (Test-Path -LiteralPath $NativeTransportLibPath)) {
+    throw "Missing native transport library: $NativeTransportLibPath"
+}
+. $MeshLibPath
+. $NativeTransportLibPath
+$Mutex = New-Object Threading.Mutex($false, 'Global\BakunityRdpSmartRoute')
+$HasMutex = $false
+try {
+    $HasMutex = $Mutex.WaitOne(0)
+    if (-not $HasMutex) {
+        if ($Once) { Write-Host 'SMART_ROUTE=ALREADY_RUNNING' }
+        exit 0
+    }
+    do {
+        try {
+            Sync-SmartRoute
+            if ($Once) { Write-Host 'SMART_ROUTE=PASS' }
+        }
+        catch {
+            Write-Log "SYNC=ERROR $($_.Exception.Message)"
+            if ($Once) {
+                Write-Host "SMART_ROUTE=ERROR:$($_.Exception.Message)"
+                exit 1
+            }
+        }
+        if ($Once) { break }
+        Start-Sleep -Seconds $SyncIntervalSeconds
+    } while ($true)
+}
+finally {
+    if ($HasMutex) {
+        try { $Mutex.ReleaseMutex() } catch {}
+    }
+    $Mutex.Dispose()
+}
+) {
+                throw 'Connector repository ref is unavailable for native transport.'
+            }
+            Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
+            Set-BakunityNativeTransportConfig -Role connector -RelayAddr ([string]$Bootstrap.relay_addr)
+            $Status = Start-BakunityNativeTransport
+            Write-Log "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
+        }
+    }
+    return Get-BakunityNativeTransportStatus
 }
 
 function Test-ConnectorMeshRole {
