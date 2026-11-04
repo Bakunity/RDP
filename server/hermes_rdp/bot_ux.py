@@ -231,6 +231,14 @@ class TelegramUxBot(TelegramBot):
             return f"{self.icon('upload')} Доступно обновление Bakunity RDP"
         return ""
 
+    def _product_rdp_endpoint(self, device: dict[str, Any]) -> str:
+        default_device_id = str(
+            self.registry.get_setting("default_rdp_device_id", "") or ""
+        ).strip()
+        if default_device_id == str(device.get("id") or ""):
+            return self._device_host(device)
+        return self._rdp_endpoint(device)
+
     def _pair(self) -> tuple[str, dict[str, Any]]:
         text, _ = super()._pair()
         guidance = (
@@ -261,7 +269,7 @@ class TelegramUxBot(TelegramBot):
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
             f"{escape(device['machine_name'])} · "
             f"{escape(telemetry.get('os', '—'))}\n"
-            f"RDP: {self._rdp_endpoint(device)}"
+            f"RDP: {self._product_rdp_endpoint(device)}"
             f"{notice_text}"
         )
 
