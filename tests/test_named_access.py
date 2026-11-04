@@ -92,7 +92,7 @@ class NamedAccessTests(unittest.TestCase):
                 "mesh": {
                     "installed": True,
                     "online": True,
-                    "ipv4": "100.64.0.10",
+                    "ipv4": "192.0.2.10",
                 },
                 "routes": {
                     "dev123": {
