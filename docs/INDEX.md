@@ -34,3 +34,5 @@
 Начинать новую установку лучше с [QUICKSTART.md](QUICKSTART.md), а перед постоянной эксплуатацией пройти [TESTING_A_TO_Z.md](TESTING_A_TO_Z.md).
 
 - [Домены устройств и wildcard DNS](DEVICE_DOMAIN.md)
+
+- [Named Access без видимого RDP-порта](NAMED_ACCESS.md)
