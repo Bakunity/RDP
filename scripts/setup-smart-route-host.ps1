@@ -1,4 +1,4 @@
-param([string]$RepositoryRef = 'main')
+﻿param([string]$RepositoryRef = 'main')
 
 #Requires -RunAsAdministrator
 $ErrorActionPreference = 'Stop'
