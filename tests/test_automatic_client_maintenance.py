@@ -43,6 +43,13 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertIn("do not", bot)
         self.assertIn("suppress repair failures", bot)
 
+    def test_live_telemetry_supports_layered_device_screens(self) -> None:
+        api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'in {"device", "device_details", "device_technical"}',
+            api,
+        )
+
     def test_registry_maintenance_commands_do_not_redefine_access(self) -> None:
         db = (ROOT / "server/hermes_rdp/db.py").read_text(encoding="utf-8")
         self.assertIn('{"on", "off", "restart", "repair", "update"}', db)
