@@ -56,7 +56,8 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
             callback_data="cmd:on:dev",
             style="success",
         )
-        self.assertEqual(button["text"], "ВКЛЮЧИТЬ ДОСТУП")
+        self.assertTrue(button["text"].startswith(ICONS["access_on"].fallback))
+        self.assertIn("ВКЛЮЧИТЬ ДОСТУП", button["text"])
         self.assertEqual(
             button["icon_custom_emoji_id"],
             ICONS["access_on"].custom_emoji_id,
