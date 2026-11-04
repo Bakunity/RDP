@@ -69,8 +69,8 @@ class TelegramUxBot(TelegramBot):
         text = text.replace("<pre><code>", guidance + "<pre><code>", 1)
         keyboard = {
             "inline_keyboard": [
-                [{"text": "🔁 НОВЫЙ КОД", "callback_data": "pair_new"}],
-                [{"text": "⬅️ К СПИСКУ", "callback_data": "home"}],
+                [self.button("refresh", "НОВЫЙ КОД", "pair_new")],
+                [self.button("back", "К СПИСКУ", "home")],
             ]
         }
         return text, keyboard
@@ -83,14 +83,16 @@ class TelegramUxBot(TelegramBot):
         rows.insert(
             max(0, len(rows) - 1),
             [
-                {
-                    "text": (
-                        "🛠 ВОССТАНОВИТЬ АВТО"
+                self.button(
+                    "repair",
+                    (
+                        "ВОССТАНОВИТЬ АВТО"
                         if automatic
-                        else "🛠 ВОССТАНОВИТЬ КЛИЕНТ"
+                        else "ВОССТАНОВИТЬ КЛИЕНТ"
                     ),
-                    "callback_data": f"repair:{device['id']}",
-                }
+                    f"repair:{device['id']}",
+                    style="primary",
+                )
             ],
         )
         return text, {"inline_keyboard": rows}
@@ -111,7 +113,7 @@ class TelegramUxBot(TelegramBot):
             "& ([scriptblock]::Create($s)) @p"
         )
         text = (
-            "🛠 ВОССТАНОВЛЕНИЕ BAKUNITY RDP\n\n"
+            f"{self.icon('repair')} ВОССТАНОВЛЕНИЕ BAKUNITY RDP\n\n"
             f"Компьютер: {escape(device['display_name'])}\n"
             f"RDP: {self.config.public_host}:{device['rdp_port']}\n\n"
             "Этот fallback восстанавливает локальный Bakunity RDP Agent, Scheduled Task "
@@ -129,12 +131,13 @@ class TelegramUxBot(TelegramBot):
         keyboard = {
             "inline_keyboard": [
                 [
-                    {
-                        "text": "⬅️ К КОМПЬЮТЕРУ",
-                        "callback_data": f"device:{device['id']}",
-                    }
+                    self.button(
+                        "back",
+                        "К КОМПЬЮТЕРУ",
+                        f"device:{device['id']}",
+                    )
                 ],
-                [{"text": "🏠 К СПИСКУ", "callback_data": "home"}],
+                [self.button("home", "К СПИСКУ", "home")],
             ]
         }
         return text, keyboard
