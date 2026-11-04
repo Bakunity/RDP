@@ -11,6 +11,7 @@ Add-Type -AssemblyName System.Net.Http
 $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $ConfigPath = Join-Path $BaseDir 'device.json'
+$MaintenanceTaskName = 'Hermes RDP Maintenance'
 $CoreCandidate = Join-Path ([IO.Path]::GetTempPath()) (
     "HermesRdpUninstallCore-$([Guid]::NewGuid().ToString('N')).ps1"
 )
@@ -22,6 +23,22 @@ if (-not $Force) {
     if ($Answer -ne 'REMOVE') {
         throw 'Удаление отменено. Hermes RDP не изменён.'
     }
+}
+
+function Remove-MaintenanceTask {
+    $Task = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+    if (-not $Task) {
+        return
+    }
+    Stop-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+    for ($Attempt = 0; $Attempt -lt 40; $Attempt++) {
+        $Current = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+        if (-not $Current -or [string]$Current.State -ne 'Running') {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Unregister-ScheduledTask -TaskName $MaintenanceTaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
 function Resolve-RepositorySha {
@@ -225,6 +242,7 @@ try {
         -Uri $CoreUrl `
         -OutFile $CoreCandidate
     Assert-PowerShellFile -Path $CoreCandidate
+    Remove-MaintenanceTask
 
     $CoreOutput = @()
     $CoreFailure = $null
