@@ -254,7 +254,8 @@ cat > /etc/hermes-rdp/config.json <<EOF
   "close_tunnel_helper": "/usr/local/sbin/hermes-rdp-close-tunnel",
   "client_installer_url": "https://raw.githubusercontent.com/$REPO/$REF/scripts/install-client.ps1",
   "repository_ref": "$REF",
-  "client_repository_ref": "$REF"
+  "client_repository_ref": "$REF",
+  "client_compatible_refs": ["$REF"]
 }
 EOF
 chmod 0640 /etc/hermes-rdp/config.json
