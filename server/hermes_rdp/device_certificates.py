@@ -62,10 +62,13 @@ def ensure_device_certificate_target(
     registry: Registry,
     device_id: str,
 ) -> dict[str, str] | None:
+    if not config.trusted_rdp_certificate_enabled:
+        return None
+
     domain = str(registry.get_device_domain() or "").strip().lower().rstrip(".")
     device = registry.get_device(device_id)
     slug = str(device.get("slug") or "").strip().lower()
-    if not config.trusted_rdp_certificate_enabled or not domain or not slug:
+    if not domain or not slug:
         return None
 
     expected_name = f"{slug}.{domain}"
