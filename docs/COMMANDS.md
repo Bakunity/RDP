@@ -13,6 +13,8 @@ sudo bakunity-rdpctl domain set tima.biz
 sudo bakunity-rdpctl domain status
 sudo bakunity-rdpctl domain show
 sudo bakunity-rdpctl domain clear
+sudo bakunity-rdpctl certificates sync
+sudo bakunity-rdpctl certificates status
 sudo hermes-rdpctl dashboard reset
 ```
 
