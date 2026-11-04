@@ -176,6 +176,7 @@ function Get-HostNativeTransportTelemetry {
         relay_connected = [bool]($Status -and $Status.relay_connected)
         path = 'idle'
         version = $Version
+        last_error = ''
     }
 }
 
@@ -199,21 +200,34 @@ function Sync-HostNativeTransport {
         $NativeRole -notin @('host','both')
     )
     if ($NeedsNativeHost) {
-        $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-bootstrap" -Body @{}
-        if ($Bootstrap -and [bool]$Bootstrap.enabled) {
-            $RepositoryRef = ''
-            if (Test-Path -LiteralPath $ClientRefPath) {
-                $RepositoryRef = (
-                    Get-Content -LiteralPath $ClientRefPath -Raw
-                ).Trim()
+        try {
+            $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-bootstrap" -Body @{}
+            if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+                $RepositoryRef = ''
+                if (Test-Path -LiteralPath $ClientRefPath) {
+                    $RepositoryRef = (
+                        Get-Content -LiteralPath $ClientRefPath -Raw
+                    ).Trim()
+                }
+                if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
+                    throw 'Host Smart Route client ref is unavailable for native transport.'
+                }
+                Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
+                Set-BakunityNativeTransportConfig -Role both -RelayAddr ([string]$Bootstrap.relay_addr) -SharedSecret ([string]$Bootstrap.shared_secret)
+                $Status = Start-BakunityNativeTransport
+                Write-HostRouteLog "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
             }
-            if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
-                throw 'Host Smart Route client ref is unavailable for native transport.'
+        }
+        catch {
+            $Telemetry = Get-HostNativeTransportTelemetry
+            $ErrorText = [string]$_.Exception.Message
+            if ($ErrorText.Length -gt 500) {
+                $ErrorText = $ErrorText.Substring(0, 500)
             }
-            Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
-            Set-BakunityNativeTransportConfig -Role both -RelayAddr ([string]$Bootstrap.relay_addr) -SharedSecret ([string]$Bootstrap.shared_secret)
-            $Status = Start-BakunityNativeTransport
-            Write-HostRouteLog "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
+            $Telemetry.last_error = $ErrorText
+            [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+            Write-HostRouteLog "NATIVE_TRANSPORT=ERROR $ErrorText"
+            return $Telemetry
         }
     }
 
