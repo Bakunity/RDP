@@ -27,15 +27,33 @@ class TelegramUxBot(TelegramBot):
         if data.startswith("repair:"):
             device_id = data.split(":", 1)[1]
             try:
-                self.registry.get_device(device_id)
+                device = self.registry.get_device(device_id)
             except KeyError:
                 self._answer(callback_id, "Устройство не найдено")
                 self.render()
                 return
+
+            telemetry = device.get("telemetry") or {}
+            maintenance_capable = bool(telemetry.get("maintenance_capable"))
+            if self._online(device) and maintenance_capable:
+                self._set_live(False)
+                self.registry.set_setting("selected_device", device_id)
+                self.registry.set_setting("screen", "device")
+                try:
+                    self.registry.queue_command(device_id, "repair")
+                    self._answer(
+                        callback_id,
+                        "Восстановление поставлено в очередь; выполнится, когда RDP будет свободен",
+                    )
+                except Exception as exc:
+                    self._answer(callback_id, str(exc))
+                self.render()
+                return
+
             self._set_live(False)
             self.registry.set_setting("selected_device", device_id)
             self.registry.set_setting("screen", "repair")
-            self._answer(callback_id)
+            self._answer(callback_id, "Для этого клиента нужен один ручной Repair")
             self.render()
             return
 
@@ -60,11 +78,17 @@ class TelegramUxBot(TelegramBot):
     def _device(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         text, keyboard = super()._device(device)
         rows = list(keyboard.get("inline_keyboard", []))
+        telemetry = device.get("telemetry") or {}
+        automatic = self._online(device) and bool(telemetry.get("maintenance_capable"))
         rows.insert(
             max(0, len(rows) - 1),
             [
                 {
-                    "text": "🛠 ВОССТАНОВИТЬ КЛИЕНТ",
+                    "text": (
+                        "🛠 ВОССТАНОВИТЬ АВТО"
+                        if automatic
+                        else "🛠 ВОССТАНОВИТЬ КЛИЕНТ"
+                    ),
                     "callback_data": f"repair:{device['id']}",
                 }
             ],
@@ -87,17 +111,17 @@ class TelegramUxBot(TelegramBot):
             "& ([scriptblock]::Create($s)) @p"
         )
         text = (
-            "🛠 ВОССТАНОВЛЕНИЕ HERMES RDP\n\n"
+            "🛠 ВОССТАНОВЛЕНИЕ BAKUNITY RDP\n\n"
             f"Компьютер: {escape(device['display_name'])}\n"
             f"RDP: {self.config.public_host}:{device['rdp_port']}\n\n"
-            "Этот режим восстанавливает локальный Hermes Agent, Scheduled Task "
+            "Этот fallback восстанавливает локальный Bakunity RDP Agent, Scheduled Task "
             "и необходимые RDP/OpenSSH-компоненты существующего подключения.\n\n"
             "Не создаёт новый компьютер и не меняет Device ID, API-token, "
             "Ed25519-ключи или назначенный RDP-порт.\n\n"
             "Для безопасного repair на ПК должны сохраниться device.json, "
             "существующая SSH-identity и known_hosts. Если они потеряны, repair "
             "остановится без автоматической перерегистрации.\n\n"
-            "1. Открой PowerShell от имени администратора на этом ПК.\n"
+            "Этот экран нужен только для старого/offline клиента, который ещё не умеет self-heal.\n\n1. Открой PowerShell от имени администратора на этом ПК.\n"
             "2. Вставь команду ниже целиком.\n"
             "3. Дождись строки REPAIR=PASS.\n\n"
             f"<pre><code>{html.escape(command)}</code></pre>"

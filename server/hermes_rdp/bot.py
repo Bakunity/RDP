@@ -284,6 +284,12 @@ class TelegramBot:
             telemetry.get("ssh_tunnel_running"),
             telemetry.get("ssh_process_count"),
             telemetry.get("endpoint_available"),
+            telemetry.get("client_repository_ref"),
+            telemetry.get("maintenance_capable"),
+            telemetry.get("certificate_lifecycle_ok"),
+            str((telemetry.get("maintenance_status") or {}).get("state") or ""),
+            str((telemetry.get("maintenance_status") or {}).get("action") or ""),
+            bool((telemetry.get("maintenance_status") or {}).get("ok")),
         )
 
     def _live_loop(self) -> None:
@@ -321,7 +327,7 @@ class TelegramBot:
         devices = self.registry.list_devices()
         online = sum(1 for device in devices if self._online(device))
         text = (
-            "🖥 HERMES RDP · КОМПЬЮТЕРЫ\n\n"
+            "🖥 BAKUNITY RDP · КОМПЬЮТЕРЫ\n\n"
             f"Онлайн: {online} из {len(devices)}\n"
             f"OpenSSH-туннели: порт {self.config.ssh_bind_port}\n"
             f"Диапазон RDP: {self.config.port_start}–{self.config.port_end}\n"
@@ -468,6 +474,8 @@ class TelegramBot:
             "on": "включение доступа",
             "off": "выключение доступа",
             "restart": "перезапуск туннеля",
+            "repair": "восстановление клиента",
+            "update": "обновление клиента",
         }
         if pending_action:
             command_line = "⏳ Команда: " + action_names.get(pending_action, pending_action) + "…"
@@ -482,6 +490,44 @@ class TelegramBot:
                 command_line += f" · {escape(last_result['message'])}"
         else:
             command_line = "Последняя команда: —"
+
+        maintenance_capable = bool(telemetry.get("maintenance_capable"))
+        client_ref = str(telemetry.get("client_repository_ref") or "").lower()
+        desired_ref = str(getattr(self.config, "repository_ref", "") or "").lower()
+        if maintenance_capable:
+            if client_ref and client_ref == desired_ref:
+                client_status = f"✅ АКТУАЛЕН · {client_ref[:7]}"
+            elif client_ref and desired_ref:
+                client_status = f"⬆️ ОБНОВЛЕНИЕ · {client_ref[:7]} → {desired_ref[:7]}"
+            else:
+                client_status = "🟠 REF НЕИЗВЕСТЕН"
+        else:
+            client_status = "⚪ LEGACY · нужен один ручной Repair"
+
+        if (
+            bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
+            and online
+            and "certificate_lifecycle_ok" in telemetry
+        ):
+            certificate_status = (
+                "✅ MANAGED"
+                if bool(telemetry.get("certificate_lifecycle_ok"))
+                else "🟠 SELF-HEAL НУЖЕН"
+            )
+        else:
+            certificate_status = "⚪ НЕИЗВЕСТНО"
+
+        maintenance = telemetry.get("maintenance_status") or {}
+        maintenance_state = str(maintenance.get("state") or "")
+        maintenance_action = str(maintenance.get("action") or "")
+        if maintenance_state == "running":
+            maintenance_line = f"⏳ {maintenance_action.upper()}"
+        elif maintenance_state == "failed":
+            maintenance_line = f"❌ {maintenance_action.upper()}"
+        elif maintenance_state == "completed" and maintenance.get("ok"):
+            maintenance_line = f"✅ {maintenance_action.upper()}"
+        else:
+            maintenance_line = "—"
 
         resource_line = (
             f"Ресурсы: {resource_age} сек. назад\n"
@@ -510,11 +556,14 @@ class TelegramBot:
             f"Маршрут: {escape(telemetry.get('route', '—'))}\n\n"
             "СОСТОЯНИЕ\n"
             f"Агент: {'🟢 В СЕТИ' if online else '🔴 НЕ В СЕТИ'}\n"
+            f"Клиент: {client_status}\n"
+            f"Сертификат: {certificate_status}\n"
+            f"Maintenance: {maintenance_line}\n"
             f"RDP-доступ (цель): {'🟢 ВКЛЮЧЕН' if desired_access else '⚪ ВЫКЛЮЧЕН'}\n"
             f"Агент применил: {applied_access}\n"
             f"SSH-туннель: {ssh_status}\n"
             f"Публичный RDP: {endpoint_status}\n"
-            f"🌐 RDP через Hermes: {rdp_hermes_connections}\n"
+            f"🌐 RDP через Bakunity: {rdp_hermes_connections}\n"
             f"🏠 RDP напрямую (LAN/VPN): {rdp_direct_connections}\n"
             f"{rdp_other_line}"
             f"{command_line}\n"

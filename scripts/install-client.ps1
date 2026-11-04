@@ -21,6 +21,7 @@ $ProgressPreference = 'SilentlyContinue'
 $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $ConfigPath = Join-Path $BaseDir 'device.json'
+$ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $PrivateKeyPath = Join-Path $BaseDir 'id_ed25519'
 $PublicKeyPath = "$PrivateKeyPath.pub"
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
@@ -34,6 +35,16 @@ $ReplaceCandidate = Join-Path ([IO.Path]::GetTempPath()) (
 $RepairCandidate = Join-Path ([IO.Path]::GetTempPath()) (
     "HermesRdpInstallSelfHeal-$([Guid]::NewGuid().ToString('N')).ps1"
 )
+
+function Write-ClientRef {
+    param([string]$ResolvedSha)
+    $Temp = "$ClientRefPath.tmp"
+    Set-Content -LiteralPath $Temp -Value $ResolvedSha -Encoding ASCII
+    $Acl = Get-Acl -LiteralPath $Temp
+    $Acl.SetSecurityDescriptorSddlForm('O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+    Set-Acl -LiteralPath $Temp -AclObject $Acl
+    Move-Item -LiteralPath $Temp -Destination $ClientRefPath -Force
+}
 
 function Resolve-RepositorySha {
     param([string]$Ref)
@@ -240,6 +251,7 @@ try {
             Invoke-SameServerSelfHeal `
                 -Config $ExistingConfig `
                 -ResolvedSha $ResolvedSha
+            Write-ClientRef -ResolvedSha $ResolvedSha
             return
         }
     }
@@ -273,6 +285,8 @@ try {
     if (-not (Test-HermesInstallComplete)) {
         throw 'Fresh/REPLACE завершился, но финальные Hermes invariants не подтверждены.'
     }
+    Write-ClientRef -ResolvedSha $ResolvedSha
+    Write-Host "ClientRef: $ResolvedSha"
     Write-Host 'INSTALL_INVARIANTS=PASS' -ForegroundColor Green
 }
 finally {

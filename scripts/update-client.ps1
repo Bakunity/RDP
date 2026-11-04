@@ -8,6 +8,7 @@ $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
 $ConfigPath = Join-Path $BaseDir 'device.json'
+$ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $StartupTimeoutSeconds = 75
 $StartupStableSeconds = 20
 $CandidatePath = Join-Path (
@@ -40,6 +41,16 @@ function Assert-PowerShellFile {
     if ($Errors.Count -gt 0) {
         throw "PowerShell parse error: $($Errors[0].Message)"
     }
+}
+
+function Write-ClientRef {
+    param([string]$ResolvedSha)
+    $Temp = "$ClientRefPath.tmp"
+    Set-Content -LiteralPath $Temp -Value $ResolvedSha -Encoding ASCII
+    $Acl = Get-Acl -LiteralPath $Temp
+    $Acl.SetSecurityDescriptorSddlForm('O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+    Set-Acl -LiteralPath $Temp -AclObject $Acl
+    Move-Item -LiteralPath $Temp -Destination $ClientRefPath -Force
 }
 
 function Get-NativePowerShellPath {
@@ -373,9 +384,12 @@ try {
             -SetupPath $CertSetupCandidate `
             -ResolvedSha $ResolvedSha
 
+        Write-ClientRef -ResolvedSha $ResolvedSha
+
         Write-Host
         Write-Host 'UPDATE=PASS' -ForegroundColor Green
         Write-Host "ResolvedRef: $ResolvedSha"
+        Write-Host "ClientRef: $ResolvedSha"
         Write-Host "Backup: $BackupDir"
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"

@@ -41,6 +41,17 @@ Status: rolling engineering release ledger. Update continuously; do not wait unt
 - Existing Vercel security headers and redirects remain intact.
 - A regression assertion in `tests/test_site_openssh_content.py` guards the branch and path filters.
 
+### Automatic Windows client maintenance
+
+- Added one-click Telegram Repair for maintenance-capable clients; legacy/offline clients keep the manual PowerShell fallback.
+- The Windows Agent now receives the server's immutable `desired_client_ref` and automatically converges to that exact SHA instead of following mutable `main`.
+- Automatic update/repair is deferred while any RDP session is active, so maintenance does not intentionally disconnect an in-use desktop.
+- Added a separate `Hermes RDP Maintenance` SYSTEM task so Repair/Update survives stopping/restarting the main Agent task.
+- Added bounded one-hour retry cooldown and an active-maintenance lock to prevent repair loops after failures.
+- Trusted RDP certificate drift is checked on a cached 60-second path, outside the normal 3-second Agent control loop; unhealthy managed certificate state queues self-heal automatically.
+- Fresh install, Repair and Update persist the current immutable client ref; uninstall removes the maintenance task and runtime state.
+- Telegram device cards now expose client ref state, certificate lifecycle health and maintenance status, and refresh when those values change.
+
 ## Deferred observation / not a blocker
 
 ### Natural certificate renewal rotation

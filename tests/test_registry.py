@@ -180,6 +180,23 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(after_on["pending_command"], "on")
         self.assertEqual(after_on["command_seq"], on_seq)
 
+    def test_maintenance_commands_preserve_desired_access(self):
+        device, _ = self.pair()
+        device_id = device["id"]
+        self.registry.set_enabled(device_id, False)
+
+        repair_seq = self.registry.queue_command(device_id, "repair")
+        after_repair = self.registry.get_device(device_id)
+        self.assertFalse(after_repair["enabled"])
+        self.assertEqual(after_repair["pending_command"], "repair")
+        self.registry.complete_command(device_id, repair_seq, True, "queued")
+
+        update_seq = self.registry.queue_command(device_id, "update")
+        after_update = self.registry.get_device(device_id)
+        self.assertFalse(after_update["enabled"])
+        self.assertEqual(after_update["pending_command"], "update")
+        self.assertEqual(after_update["command_seq"], update_seq)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,6 +32,7 @@ class FakeRegistry:
             }
         }
         self.pair_codes: list[str] = []
+        self.queued_commands: list[tuple[str, str]] = []
 
     def get_setting(self, key: str, default: str = "") -> str:
         return self.settings.get(key, default)
@@ -51,6 +52,10 @@ class FakeRegistry:
 
     def list_devices(self):
         return list(self.devices.values())
+
+    def queue_command(self, device_id: str, action: str):
+        self.queued_commands.append((device_id, action))
+        return len(self.queued_commands)
 
 
 class TelegramRepairUxTests(unittest.TestCase):
@@ -103,7 +108,7 @@ class TelegramRepairUxTests(unittest.TestCase):
 
     def test_repair_screen_targets_existing_device(self) -> None:
         text, keyboard = self.bot._repair(self.registry.get_device("dev123"))
-        self.assertIn("ВОССТАНОВЛЕНИЕ HERMES RDP", text)
+        self.assertIn("ВОССТАНОВЛЕНИЕ BAKUNITY RDP", text)
         self.assertIn("ExpectedDeviceId=&#x27;dev123&#x27;", text)
         self.assertIn("RepositoryRef=&#x27;0123456789abcdef0123456789abcdef01234567&#x27;", text)
         self.assertNotIn("PairCode", text)
@@ -116,6 +121,24 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.bot._handle_callback({"id": "cb1", "data": "repair:dev123"})
         self.assertEqual(self.registry.get_setting("selected_device"), "dev123")
         self.assertEqual(self.registry.get_setting("screen"), "repair")
+
+    def test_repair_callback_queues_one_click_maintenance_for_new_agent(self) -> None:
+        self.registry.devices["dev123"]["telemetry"] = {"maintenance_capable": True}
+        self.bot._online = lambda device: True
+        self.bot._handle_callback({"id": "cb2", "data": "repair:dev123"})
+        self.assertEqual(self.registry.queued_commands, [("dev123", "repair")])
+        self.assertEqual(self.registry.get_setting("screen"), "device")
+
+    def test_device_card_marks_automatic_repair_for_new_agent(self) -> None:
+        self.registry.devices["dev123"]["telemetry"] = {"maintenance_capable": True}
+        self.bot._online = lambda device: True
+        _, keyboard = self.bot._device(self.registry.get_device("dev123"))
+        labels = [
+            button["text"]
+            for row in keyboard["inline_keyboard"]
+            for button in row
+        ]
+        self.assertIn("🛠 ВОССТАНОВИТЬ АВТО", labels)
 
     def test_pair_screen_can_rotate_code_without_reusing_old_one(self) -> None:
         self.bot._handle_callback({"id": "cb1", "data": "add"})

@@ -85,7 +85,7 @@ class ControlStateDashboardTests(unittest.TestCase):
             "Агент применил:",
             "SSH-туннель:",
             "Публичный RDP:",
-            "RDP через Hermes:",
+            "RDP через Bakunity:",
             "RDP напрямую (LAN/VPN):",
             "В СЕТИ",
             "НЕ В СЕТИ",

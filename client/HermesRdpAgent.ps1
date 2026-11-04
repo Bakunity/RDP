@@ -6,10 +6,17 @@ $ConfigPath = Join-Path $BaseDir 'device.json'
 $StatePath = Join-Path $BaseDir 'agent-state.json'
 $LogPath = Join-Path $BaseDir 'agent.log'
 $SshErrorLog = Join-Path $BaseDir 'ssh-error.log'
+$ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
+$MaintenanceRunnerPath = Join-Path $BaseDir 'HermesRdpMaintenance.ps1'
+$MaintenanceStatusPath = Join-Path $BaseDir 'maintenance-status.json'
+$MaintenanceActivePath = Join-Path $BaseDir 'maintenance-active.json'
+$MaintenanceTaskName = 'Hermes RDP Maintenance'
+$AutoMaintenanceRetrySeconds = 3600
 $PollSeconds = 3
 $SlowTelemetrySeconds = 15
 $TopProcessesSeconds = 6
 $SshDiscoverySeconds = 15
+$CertificateHealthSeconds = 60
 $script:Http = $null
 $script:LiveTelemetry = $false
 $script:SlowTelemetry = $null
@@ -18,6 +25,8 @@ $script:TopProcesses = @()
 $script:TopProcessesCapturedAt = 0
 $script:HermesSshPids = @()
 $script:SshDiscoveryCapturedAt = 0
+$script:CertificateHealth = $null
+$script:CertificateHealthCapturedAt = 0
 
 $PinnedHttpClientSource = @'
 using System;
@@ -115,14 +124,192 @@ function Write-JsonFile {
 
 function Get-AgentState {
     $State = Read-JsonFile -Path $StatePath
+    $Changed = $false
     if (-not $State) {
         $State = [pscustomobject]@{
             enabled = $true
             last_command_seq = 0
+            pending_maintenance_action = ''
+            pending_maintenance_ref = ''
+            pending_maintenance_requested_at = 0
         }
+        $Changed = $true
+    }
+    if (-not $State.PSObject.Properties['pending_maintenance_action']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_action -NotePropertyValue ''
+        $Changed = $true
+    }
+    if (-not $State.PSObject.Properties['pending_maintenance_ref']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_ref -NotePropertyValue ''
+        $Changed = $true
+    }
+    if (-not $State.PSObject.Properties['pending_maintenance_requested_at']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_requested_at -NotePropertyValue 0
+        $Changed = $true
+    }
+    if ($Changed) {
         Write-JsonFile -Path $StatePath -Value $State
     }
     return $State
+}
+
+function Get-ClientRepositoryRef {
+    if (-not (Test-Path -LiteralPath $ClientRefPath)) {
+        return ''
+    }
+    try {
+        $Value = (Get-Content -LiteralPath $ClientRefPath -Raw).Trim().ToLowerInvariant()
+        if ($Value -match '^[0-9a-f]{40}$') {
+            return $Value
+        }
+    }
+    catch {
+    }
+    return ''
+}
+
+function Get-MaintenanceStatus {
+    if (-not (Test-Path -LiteralPath $MaintenanceStatusPath)) {
+        return $null
+    }
+    try {
+        return Read-JsonFile -Path $MaintenanceStatusPath
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-MaintenanceActive {
+    if (-not (Test-Path -LiteralPath $MaintenanceActivePath)) {
+        return $false
+    }
+    try {
+        $Active = Read-JsonFile -Path $MaintenanceActivePath
+        $StartedAt = [int64]$Active.started_at
+        $Age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $StartedAt
+        if ($StartedAt -gt 0 -and $Age -lt 3600) {
+            return $true
+        }
+    }
+    catch {
+    }
+    Remove-Item -LiteralPath $MaintenanceActivePath -Force -ErrorAction SilentlyContinue
+    return $false
+}
+
+function Set-SystemScriptAcl {
+    param([string]$Path)
+    $Acl = Get-Acl -LiteralPath $Path
+    $Acl.SetSecurityDescriptorSddlForm('O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+    Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+function Assert-PowerShellFile {
+    param([string]$Path)
+    $Tokens = $null
+    $Errors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($Path, [ref]$Tokens, [ref]$Errors)
+    if ($Errors.Count -gt 0) {
+        throw "PowerShell parse error: $($Errors[0].Message)"
+    }
+}
+
+function Set-PendingMaintenance {
+    param([object]$State, [string]$Action, [string]$RepositoryRef)
+    if ($Action -notin @('repair', 'update')) {
+        throw "Unsupported maintenance action: $Action"
+    }
+    if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Maintenance target must be an immutable commit SHA.'
+    }
+    $State.pending_maintenance_action = $Action
+    $State.pending_maintenance_ref = $RepositoryRef.ToLowerInvariant()
+    $State.pending_maintenance_requested_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    Write-JsonFile -Path $StatePath -Value $State
+}
+
+function Clear-PendingMaintenance {
+    param([object]$State)
+    $State.pending_maintenance_action = ''
+    $State.pending_maintenance_ref = ''
+    $State.pending_maintenance_requested_at = 0
+    Write-JsonFile -Path $StatePath -Value $State
+}
+
+function Test-MaintenanceRetryAllowed {
+    param([string]$Action, [string]$RepositoryRef)
+    $Status = Get-MaintenanceStatus
+    if (-not $Status) {
+        return $true
+    }
+    if ([string]$Status.action -ne $Action -or [string]$Status.repository_ref -ne $RepositoryRef) {
+        return $true
+    }
+    $UpdatedAt = 0
+    try {
+        $UpdatedAt = [int64]$Status.updated_at
+    }
+    catch {
+    }
+    if ($UpdatedAt -le 0) {
+        return $true
+    }
+    $Age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $UpdatedAt
+    if ($Age -ge $AutoMaintenanceRetrySeconds) {
+        return $true
+    }
+    return $false
+}
+
+function Start-MaintenanceTask {
+    param([string]$Action, [string]$RepositoryRef)
+    if ($Action -notin @('repair', 'update')) {
+        throw "Unsupported maintenance action: $Action"
+    }
+    if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Maintenance target must be an immutable commit SHA.'
+    }
+    $RepositoryRef = $RepositoryRef.ToLowerInvariant()
+
+    if (Test-MaintenanceActive) {
+        return 'maintenance already active'
+    }
+
+    $ExistingTask = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+    if ($ExistingTask -and [string]$ExistingTask.State -eq 'Running') {
+        return 'maintenance task already running'
+    }
+
+    $Candidate = Join-Path ([IO.Path]::GetTempPath()) ("HermesRdpMaintenance-$([Guid]::NewGuid().ToString('N')).ps1")
+    try {
+        $Url = "https://raw.githubusercontent.com/bakunity/RDP/$RepositoryRef/client/HermesRdpMaintenance.ps1"
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Candidate
+        Assert-PowerShellFile -Path $Candidate
+        Copy-Item -LiteralPath $Candidate -Destination $MaintenanceRunnerPath -Force
+        Set-SystemScriptAcl -Path $MaintenanceRunnerPath
+    }
+    finally {
+        Remove-Item -LiteralPath $Candidate -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($ExistingTask) {
+        Unregister-ScheduledTask -TaskName $MaintenanceTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    $Argument = (
+        '-NoProfile -ExecutionPolicy Bypass -File "' +
+        $MaintenanceRunnerPath +
+        '" -Action ' + $Action +
+        ' -RepositoryRef ' + $RepositoryRef +
+        ' -ExpectedDeviceId ' + [string]$Config.device_id
+    )
+    $TaskAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $Argument
+    $Principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName $MaintenanceTaskName -Action $TaskAction -Principal $Principal -Settings $Settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $MaintenanceTaskName
+    return "$Action maintenance started for $RepositoryRef"
 }
 
 function Invoke-ApiPost {
@@ -554,6 +741,54 @@ function Get-TopProcesses {
     )
 }
 
+
+function Read-CertificateLifecycleHealth {
+    $Result = [ordered]@{ ok = $false; task_state = 'ABSENT'; hash_type = 0 }
+    try {
+        $Task = Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
+        if ($Task) {
+            $Result.task_state = [string]$Task.State
+        }
+        $Rdp = Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'"
+        $HashType = [int]$Rdp.SSLCertificateSHA1HashType
+        $Result.hash_type = $HashType
+        $Thumbprint = (([string]$Rdp.SSLCertificateSHA1Hash) -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+        $Certificate = $null
+        if ($Thumbprint.Length -eq 40) {
+            $Certificate = Get-ChildItem -LiteralPath 'Cert:\LocalMachine\My' -ErrorAction SilentlyContinue |
+                Where-Object {
+                    (([string]$_.Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()) -eq $Thumbprint
+                } |
+                Select-Object -First 1
+        }
+        $Result.ok = [bool](
+            $Task -and
+            [string]$Task.State -ne 'Disabled' -and
+            $HashType -eq 3 -and
+            $Certificate -and
+            $Certificate.HasPrivateKey -and
+            $Certificate.NotAfter -gt (Get-Date)
+        )
+    }
+    catch {
+        $Result.task_state = 'ERROR'
+        $Result.ok = $false
+    }
+    return [pscustomobject]$Result
+}
+
+function Get-CertificateLifecycleHealth {
+    $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if (
+        -not $script:CertificateHealth -or
+        ($Now - [int64]$script:CertificateHealthCapturedAt) -ge $CertificateHealthSeconds
+    ) {
+        $script:CertificateHealth = Read-CertificateLifecycleHealth
+        $script:CertificateHealthCapturedAt = $Now
+    }
+    return $script:CertificateHealth
+}
+
 function Get-SlowTelemetry {
     $Os = Get-CimInstance Win32_OperatingSystem
     $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
@@ -574,6 +809,9 @@ function Get-SlowTelemetry {
         )
     }
     $Uptime = [int]((Get-Date) - $Boot).TotalSeconds
+    $CertificateHealth = Get-CertificateLifecycleHealth
+    $MaintenanceStatus = Get-MaintenanceStatus
+    $ClientRepositoryRef = Get-ClientRepositoryRef
 
     return [ordered]@{
         resource_captured_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -598,6 +836,12 @@ function Get-SlowTelemetry {
         network_sent_bytes = [int64]$Network[1]
         route = Get-RouteName
         uptime_seconds = $Uptime
+        client_repository_ref = $ClientRepositoryRef
+        maintenance_capable = $true
+        maintenance_status = $MaintenanceStatus
+        certificate_lifecycle_ok = [bool]$CertificateHealth.ok
+        certificate_rotation_task_state = [string]$CertificateHealth.task_state
+        rdp_certificate_hash_type = [int]$CertificateHealth.hash_type
     }
 }
 
@@ -661,11 +905,84 @@ function Get-Telemetry {
         rdp_remote_addresses = @($Rdp.remote_addresses)
         rdp_direct_remote_addresses = @($Rdp.direct_remote_addresses)
         uptime_seconds = [int]$Slow.uptime_seconds
+        client_repository_ref = [string]$Slow.client_repository_ref
+        maintenance_capable = [bool]$Slow.maintenance_capable
+        maintenance_status = $Slow.maintenance_status
+        certificate_lifecycle_ok = [bool]$Slow.certificate_lifecycle_ok
+        certificate_rotation_task_state = [string]$Slow.certificate_rotation_task_state
+        rdp_certificate_hash_type = [int]$Slow.rdp_certificate_hash_type
         top_processes = if ($LiveTelemetry) { @($script:TopProcesses) } else { @() }
         top_processes_captured_at = if ($LiveTelemetry) {
             [int64]$script:TopProcessesCapturedAt
         }
         else { 0 }
+    }
+}
+
+
+function Invoke-MaintenanceReconcile {
+    param([object]$State, [object]$Telemetry, [object]$Response)
+
+    if (-not $Response -or (Test-MaintenanceActive)) {
+        return
+    }
+
+    $DesiredRef = ''
+    if ($Response.PSObject.Properties['desired_client_ref']) {
+        $CandidateRef = ([string]$Response.desired_client_ref).ToLowerInvariant()
+        if ($CandidateRef -match '^[0-9a-f]{40}$') {
+            $DesiredRef = $CandidateRef
+        }
+    }
+
+    $CurrentRef = Get-ClientRepositoryRef
+    $PendingAction = [string]$State.pending_maintenance_action
+    $PendingRef = [string]$State.pending_maintenance_ref
+
+    if (-not $PendingAction -and $CurrentRef -match '^[0-9a-f]{40}$' -and $DesiredRef) {
+        if ($CurrentRef -ne $DesiredRef) {
+            Set-PendingMaintenance -State $State -Action 'update' -RepositoryRef $DesiredRef
+            $PendingAction = 'update'
+            $PendingRef = $DesiredRef
+            Write-AgentLog "Automatic update queued: $CurrentRef -> $DesiredRef"
+        }
+        elseif (
+            $Response.PSObject.Properties['trusted_rdp_certificate_enabled'] -and
+            [bool]$Response.trusted_rdp_certificate_enabled -and
+            $Telemetry.PSObject.Properties['certificate_lifecycle_ok'] -and
+            -not [bool]$Telemetry.certificate_lifecycle_ok
+        ) {
+            Set-PendingMaintenance -State $State -Action 'repair' -RepositoryRef $DesiredRef
+            $PendingAction = 'repair'
+            $PendingRef = $DesiredRef
+            Write-AgentLog 'Automatic certificate self-heal queued'
+        }
+    }
+
+    if (-not $PendingAction -or $PendingRef -notmatch '^[0-9a-f]{40}$') {
+        return
+    }
+
+    try {
+        if ([int]$Telemetry.rdp_connections -gt 0) {
+            return
+        }
+    }
+    catch {
+        return
+    }
+
+    if (-not (Test-MaintenanceRetryAllowed -Action $PendingAction -RepositoryRef $PendingRef)) {
+        return
+    }
+
+    try {
+        $Message = Start-MaintenanceTask -Action $PendingAction -RepositoryRef $PendingRef
+        Write-AgentLog $Message
+        Clear-PendingMaintenance -State $State
+    }
+    catch {
+        Write-AgentLog "Maintenance start failed: $($_.Exception.Message)"
     }
 }
 
@@ -689,6 +1006,14 @@ function Invoke-CommandAction {
                 'restart' {
                     $State.enabled = $true
                 }
+                'repair' {
+                    Remove-Item -LiteralPath $MaintenanceStatusPath -Force -ErrorAction SilentlyContinue
+                    Set-PendingMaintenance -State $State -Action 'repair' -RepositoryRef ([string]$Command.repository_ref)
+                }
+                'update' {
+                    Remove-Item -LiteralPath $MaintenanceStatusPath -Force -ErrorAction SilentlyContinue
+                    Set-PendingMaintenance -State $State -Action 'update' -RepositoryRef ([string]$Command.repository_ref)
+                }
                 default {
                     throw "Неизвестная команда: $($Command.action)"
                 }
@@ -709,6 +1034,12 @@ function Invoke-CommandAction {
                 }
                 'restart' {
                     $Message = Restart-SshTunnel
+                }
+                'repair' {
+                    $Message = 'Repair queued; it will run when RDP is idle'
+                }
+                'update' {
+                    $Message = 'Update queued; it will run when RDP is idle'
                 }
             }
         }
@@ -790,6 +1121,9 @@ while ($true) {
         if ($Response -and $Response.command) {
             Invoke-CommandAction -Command $Response.command
         }
+
+        $State = Get-AgentState
+        Invoke-MaintenanceReconcile -State $State -Telemetry $Telemetry -Response $Response
     }
     catch {
         Write-AgentLog "Control poll error: $($_.Exception.Message)"

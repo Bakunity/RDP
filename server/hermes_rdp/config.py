@@ -30,6 +30,7 @@ class Config:
     online_after_seconds: int = 15
     pair_ttl_seconds: int = 900
     command_timeout_seconds: int = 60
+    trusted_rdp_certificate_enabled: bool = False
 
     @property
     def api_base_url(self) -> str:
@@ -95,4 +96,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
         online_after_seconds=int(data.get("online_after_seconds", 15)),
         pair_ttl_seconds=int(data.get("pair_ttl_seconds", 900)),
         command_timeout_seconds=max(5, int(data.get("command_timeout_seconds", 60))),
+        trusted_rdp_certificate_enabled=bool(
+            (data.get("trusted_rdp_certificate") or {}).get("enabled", False)
+        ),
     )
