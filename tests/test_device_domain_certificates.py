@@ -12,6 +12,7 @@ from hermes_rdp.device_certificates import (
     get_device_certificate_target,
     set_device_slug_with_certificate,
 )
+from hermes_rdp.db import normalize_device_slug
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +130,25 @@ class DeviceDomainCertificateTests(unittest.TestCase):
         self.assertIn("Global\\HermesRdpCertificateSync", sync)
         self.assertIn("$SyncMutex.WaitOne", sync)
         self.assertIn("$SyncMutex.ReleaseMutex()", sync)
+
+    def test_numeric_device_slugs_are_valid(self) -> None:
+        self.assertEqual(normalize_device_slug("2"), "2")
+        self.assertEqual(normalize_device_slug("PC-2026"), "pc-2026")
+
+    def test_controller_sandbox_allows_only_certificate_write_roots(self) -> None:
+        service = (
+            ROOT / "server/systemd/hermes-rdp.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ProtectSystem=strict", service)
+        for path in (
+            "/etc/letsencrypt",
+            "/var/lib/letsencrypt",
+            "/var/log/letsencrypt",
+            "/var/www/hermes-rdp-acme",
+            "/etc/nginx/conf.d",
+            "/etc/nginx/sites-enabled",
+        ):
+            self.assertIn(f"ReadWritePaths=-{path}", service)
 
     def test_device_helper_derives_hostname_from_authenticated_device_state(self) -> None:
         helper = (
