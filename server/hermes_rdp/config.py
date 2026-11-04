@@ -28,6 +28,7 @@ class Config:
     repository_ref: str
     close_tunnel_helper: Path
     client_repository_ref: str = ""
+    client_compatible_refs: tuple[str, ...] = ()
     online_after_seconds: int = 15
     pair_ttl_seconds: int = 900
     command_timeout_seconds: int = 60
@@ -36,6 +37,19 @@ class Config:
     @property
     def client_ref(self) -> str:
         return self.client_repository_ref or self.repository_ref
+
+    @property
+    def compatible_client_refs(self) -> tuple[str, ...]:
+        refs: list[str] = []
+        for value in (self.client_ref, *self.client_compatible_refs):
+            ref = str(value or "").strip().lower()
+            if ref and ref not in refs:
+                refs.append(ref)
+        return tuple(refs)
+
+    def is_client_ref_compatible(self, value: str) -> bool:
+        ref = str(value or "").strip().lower()
+        return bool(ref and ref in self.compatible_client_refs)
 
     @property
     def api_base_url(self) -> str:
@@ -103,6 +117,11 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
                 "client_repository_ref",
                 data.get("repository_ref", "main"),
             )
+        ),
+        client_compatible_refs=tuple(
+            str(item).strip().lower()
+            for item in (data.get("client_compatible_refs") or [])
+            if str(item).strip()
         ),
         online_after_seconds=int(data.get("online_after_seconds", 15)),
         pair_ttl_seconds=int(data.get("pair_ttl_seconds", 900)),

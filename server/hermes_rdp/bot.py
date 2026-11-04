@@ -80,6 +80,21 @@ class TelegramBot:
             return effective
         return str(getattr(self.config, "repository_ref", "") or "").strip()
 
+    def _client_ref_is_compatible(self, value: str) -> bool:
+        ref = str(value or "").strip().lower()
+        if not ref:
+            return False
+        checker = getattr(self.config, "is_client_ref_compatible", None)
+        if callable(checker):
+            return bool(checker(ref))
+        compatible = {
+            str(item or "").strip().lower()
+            for item in getattr(self.config, "client_compatible_refs", ()) or ()
+            if str(item or "").strip()
+        }
+        compatible.add(self._client_ref().lower())
+        return ref in compatible
+
     def api_call(self, method: str, payload: dict[str, Any] | None = None, timeout: int = 40):
         request = urllib.request.Request(
             f"{self.api}/{method}",
@@ -604,7 +619,7 @@ class TelegramBot:
         )
 
         if maintenance_capable:
-            if client_ref and desired_ref and client_ref == desired_ref:
+            if client_ref and self._client_ref_is_compatible(client_ref):
                 client_status = (
                     f"{self.icon('success')} АКТУАЛЕН · {client_ref[:7]}"
                 )

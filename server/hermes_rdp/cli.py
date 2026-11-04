@@ -380,6 +380,10 @@ def main() -> None:
         print(f"config: OK ({config.public_host})")
         print(f"server-ref: {config.repository_ref}")
         print(f"client-ref: {config.client_ref}")
+        print(
+            "client-compatible-refs: "
+            + ",".join(config.compatible_client_refs)
+        )
         print(f"database: OK ({config.db_path})")
         device_domain = registry.get_device_domain()
         print(f"device-domain: {device_domain or 'disabled'}")

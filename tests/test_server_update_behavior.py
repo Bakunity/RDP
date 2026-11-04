@@ -29,16 +29,23 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
         self.assertIn('data["repository_requested_ref"] = requested_ref', text)
         self.assertIn("f\"{client_ref}/scripts/install-client.ps1\"", text)
 
-    def test_server_update_preserves_client_ref_when_bundle_is_unchanged(self) -> None:
+    def test_server_update_preserves_equivalent_client_refs(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("client_bundle_hash()", text)
-        self.assertIn("TELEMETRY_CLIENT_REF", text)
+        self.assertIn("TELEMETRY_CLIENT_REFS", text)
         self.assertIn('telemetry.get("client_repository_ref")', text)
-        self.assertIn("PREVIOUS_CLIENT_HASH", text)
+        self.assertIn("CANDIDATE_CLIENT_REFS", text)
+        self.assertIn("COMPATIBLE_CLIENT_REFS", text)
         self.assertIn("TARGET_CLIENT_HASH", text)
-        self.assertIn('NEW_CLIENT_REF="$PREVIOUS_CLIENT_REF"', text)
+        self.assertIn("client_bundle_hash_for_ref", text)
+        self.assertIn('NEW_CLIENT_REF="$compatible"', text)
         self.assertIn('data["client_repository_ref"] = client_ref', text)
+        self.assertIn('data["client_compatible_refs"] = [', text)
         self.assertIn('echo "CLIENT_REF=$NEW_CLIENT_REF"', text)
+        self.assertIn(
+            'echo "CLIENT_COMPATIBLE_REFS=$COMPATIBLE_CLIENT_CSV"',
+            text,
+        )
 
     def test_update_server_creates_consistent_database_backup(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
