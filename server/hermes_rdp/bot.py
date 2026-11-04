@@ -357,12 +357,35 @@ class TelegramBot:
         last_seen = int(device.get("last_seen") or 0)
         return last_seen > 0 and int(time.time()) - last_seen <= self.config.online_after_seconds
 
+    def _device_domain(self) -> str:
+        getter = getattr(self.registry, "get_device_domain", None)
+        if callable(getter):
+            return str(getter() or "").strip()
+        return str(self.registry.get_setting("device_domain", "") or "").strip()
+
+    def _device_host(self, device: dict[str, Any]) -> str:
+        domain = self._device_domain()
+        slug = str(device.get("slug") or "").strip()
+        if domain and slug:
+            return f"{slug}.{domain}"
+        return self.config.public_host
+
+    def _rdp_endpoint(self, device: dict[str, Any]) -> str:
+        return f"{self._device_host(device)}:{int(device['rdp_port'])}"
+
     def _home(self) -> tuple[str, dict[str, Any]]:
         devices = self.registry.list_devices()
         online = sum(1 for device in devices if self._online(device))
+        device_domain = self._device_domain()
+        domain_line = (
+            f"Домен устройств: *.{device_domain}\n"
+            if device_domain
+            else ""
+        )
         text = (
             f"{self.icon('computer')} BAKUNITY RDP · КОМПЬЮТЕРЫ\n\n"
             f"Онлайн: {online} из {len(devices)}\n"
+            f"{domain_line}"
             f"OpenSSH-туннели: порт {self.config.ssh_bind_port}\n"
             f"Диапазон RDP: {self.config.port_start}–{self.config.port_end}\n"
             f"Обновлено: {datetime.now().strftime('%H:%M:%S')}"
@@ -373,7 +396,11 @@ class TelegramBot:
                 [
                     self.button(
                         "online" if self._online(device) else "offline",
-                        f"{device['display_name']} · :{device['rdp_port']}",
+                        (
+                            f"{device['display_name']} · {device.get('slug')}"
+                            if device_domain and device.get("slug")
+                            else f"{device['display_name']} · :{device['rdp_port']}"
+                        ),
                         f"device:{device['id']}",
                         style="success" if self._online(device) else "danger",
                     )
@@ -457,9 +484,9 @@ class TelegramBot:
         desired_access = bool(device.get("enabled", True))
         if online and "access_enabled" in telemetry:
             applied_access = (
-                f"{self.icon('success')} ВКЛЮЧЕН"
+                f"{self.icon('online')} ВКЛЮЧЕН"
                 if bool(telemetry["access_enabled"])
-                else f"{self.icon('access_off')} ВЫКЛЮЧЕН"
+                else f"{self.icon('offline')} ВЫКЛЮЧЕН"
             )
         else:
             applied_access = f"{self.icon('info')} НЕИЗВЕСТНО"
@@ -474,17 +501,17 @@ class TelegramBot:
             if ssh_process_count > 1:
                 ssh_status = f"{self.icon('warning')} ДУБЛИ ({ssh_process_count})"
             elif ssh_running and ssh_process_count == 1:
-                ssh_status = f"{self.icon('success')} ПОДКЛЮЧЕН"
+                ssh_status = f"{self.icon('online')} ПОДКЛЮЧЕН"
             elif not ssh_running and ssh_process_count == 0:
-                ssh_status = f"{self.icon('access_off')} ОТКЛЮЧЕН"
+                ssh_status = f"{self.icon('offline')} ОТКЛЮЧЕН"
             else:
                 ssh_status = f"{self.icon('warning')} НЕСООТВЕТСТВИЕ"
 
         if online and "endpoint_available" in telemetry:
             endpoint_status = (
-                f"{self.icon('success')} ОТКРЫТ"
+                f"{self.icon('online')} ОТКРЫТ"
                 if bool(telemetry["endpoint_available"])
-                else f"{self.icon('access_off')} ЗАКРЫТ"
+                else f"{self.icon('offline')} ЗАКРЫТ"
             )
         else:
             endpoint_status = f"{self.icon('info')} НЕИЗВЕСТНО"
@@ -580,14 +607,14 @@ class TelegramBot:
         process_body = "\n".join(process_lines) if process_lines else "—"
 
         text = (
-            f"{self.icon('success' if online else 'cancel')} {escape(device['display_name']).upper()} · "
+            f"{self.icon('online' if online else 'offline')} {escape(device['display_name']).upper()} · "
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
             f"Компьютер: {escape(device['machine_name'])}\n"
             f"Система: {escape(telemetry.get('os', '—'))}\n"
             f"Пользователь: {escape(user)}\n"
             f"Данные: {str(age) + ' сек. назад' if age is not None else 'ещё не поступили'}\n"
             f"{resource_line}"
-            f"RDP: {self.config.public_host}:{device['rdp_port']}\n\n"
+            f"RDP: {self._rdp_endpoint(device)}\n\n"
             f"CPU: {cpu:.1f}%\n{bar(cpu)}\n\n"
             f"RAM: {ram:.1f}%\n{bar(ram)}\n"
             f"{format_bytes(telemetry.get('ram_used_bytes'))} / {format_bytes(telemetry.get('ram_total_bytes'))}\n\n"
@@ -598,7 +625,7 @@ class TelegramBot:
             f"{self.icon('upload')} Отправлено: {format_bytes(telemetry.get('network_sent_bytes'))}\n"
             f"Маршрут: {escape(telemetry.get('route', '—'))}\n\n"
             "СОСТОЯНИЕ\n"
-            f"Агент: {self.icon('success' if online else 'cancel')} {'В СЕТИ' if online else 'НЕ В СЕТИ'}\n"
+            f"Агент: {self.icon('online' if online else 'offline')} {'В СЕТИ' if online else 'НЕ В СЕТИ'}\n"
             f"Клиент: {client_status}\n"
             f"Сертификат: {certificate_status}\n"
             f"Maintenance: {maintenance_line}\n"

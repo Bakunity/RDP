@@ -107,28 +107,28 @@ class TelegramUxBot(TelegramBot):
 
         if online and "access_enabled" in telemetry:
             access_text = (
-                f"{self.icon('success')} ВКЛЮЧЕН"
+                f"{self.icon('online')} ВКЛЮЧЕН"
                 if bool(telemetry.get("access_enabled"))
-                else f"{self.icon('access_off')} ВЫКЛЮЧЕН"
+                else f"{self.icon('offline')} ВЫКЛЮЧЕН"
             )
         else:
             access_text = f"{self.icon('info')} НЕИЗВЕСТНО"
 
         if online and bool(telemetry.get("ssh_tunnel_running")):
-            tunnel_text = f"{self.icon('success')} ПОДКЛЮЧЕН"
+            tunnel_text = f"{self.icon('online')} ПОДКЛЮЧЕН"
         elif online and telemetry.get("ssh_tunnel_running") is False:
-            tunnel_text = f"{self.icon('access_off')} ОТКЛЮЧЕН"
+            tunnel_text = f"{self.icon('offline')} ОТКЛЮЧЕН"
         else:
             tunnel_text = f"{self.icon('info')} НЕИЗВЕСТНО"
 
         text = (
-            f"{self.icon('success' if online else 'cancel')} "
+            f"{self.icon('online' if online else 'offline')} "
             f"{escape(device['display_name']).upper()} · "
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
             f"Компьютер: {escape(device['machine_name'])}\n"
             f"Система: {escape(telemetry.get('os', '—'))}\n"
             f"Пользователь: {escape(user)}\n"
-            f"RDP: {self.config.public_host}:{device['rdp_port']}\n"
+            f"RDP: {self._rdp_endpoint(device)}\n"
             f"Данные: {data_age}\n\n"
             "СОСТОЯНИЕ\n"
             f"Доступ: {access_text}\n"
@@ -250,7 +250,7 @@ class TelegramUxBot(TelegramBot):
         text = (
             f"{self.icon('repair')} ВОССТАНОВЛЕНИЕ BAKUNITY RDP\n\n"
             f"Компьютер: {escape(device['display_name'])}\n"
-            f"RDP: {self.config.public_host}:{device['rdp_port']}\n\n"
+            f"RDP: {self._rdp_endpoint(device)}\n\n"
             "Этот fallback восстанавливает локальный Bakunity RDP Agent, Scheduled Task "
             "и необходимые RDP/OpenSSH-компоненты существующего подключения.\n\n"
             "Не создаёт новый компьютер и не меняет Device ID, API-token, "
