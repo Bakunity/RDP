@@ -91,6 +91,38 @@ class TelegramBot:
         if getattr(self, "_emoji_packs_loaded", False):
             return
         self._emoji_packs_loaded = True
+        theme = self._emoji_theme()
+
+        verified: dict[str, str] = {}
+        for _, (custom_id, expected_pack) in theme.pinned_ids().items():
+            try:
+                stickers = self.api_call(
+                    "getCustomEmojiStickers",
+                    {"custom_emoji_ids": [custom_id]},
+                    timeout=15,
+                ) or []
+            except Exception as exc:
+                LOG.debug(
+                    "custom emoji %s validation failed: %s",
+                    custom_id,
+                    exc,
+                )
+                continue
+            for sticker in stickers:
+                if not isinstance(sticker, dict):
+                    continue
+                actual_id = str(sticker.get("custom_emoji_id") or "")
+                set_name = str(sticker.get("set_name") or "")
+                if actual_id == custom_id and set_name:
+                    verified[custom_id] = set_name
+
+        invalidated = theme.invalidate_unverified(verified)
+        if invalidated:
+            LOG.info(
+                "Discarded %s unverified pinned Telegram emoji IDs",
+                invalidated,
+            )
+
         for pack_name in APPROVED_PACKS:
             try:
                 sticker_set = self.api_call(
@@ -98,10 +130,10 @@ class TelegramBot:
                     {"name": pack_name},
                     timeout=15,
                 )
-                self._emoji_theme().learn_pack(pack_name, sticker_set)
+                theme.learn_pack(pack_name, sticker_set)
             except Exception as exc:
                 LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
-        theme = self._emoji_theme()
+
         LOG.info(
             "Telegram emoji theme resolved %s/%s icons from packs: %s",
             theme.resolved_count(),
