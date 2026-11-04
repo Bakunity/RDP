@@ -454,7 +454,13 @@ function Sync-ConnectorNativeTransport {
     }
 
     $Status = Get-BakunityNativeTransportStatus
-    if (-not $Status -or -not [bool]$Status.ok) {
+    $NativeRole = if ($Status) { [string]$Status.role } else { '' }
+    $NeedsNativeConnector = [bool](
+        -not $Status -or
+        -not [bool]$Status.ok -or
+        $NativeRole -notin @('connector','both')
+    )
+    if ($NeedsNativeConnector) {
         $Bootstrap = Invoke-ControlPost -Config $Config -Path '/v1/named-access/native-transport-bootstrap' -Body @{}
         if ($Bootstrap -and [bool]$Bootstrap.enabled) {
             $RepositoryRef = [string]$Config.repository_ref
