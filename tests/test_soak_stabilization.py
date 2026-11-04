@@ -288,12 +288,14 @@ class SoakStabilizationTests(unittest.TestCase):
         rows = keyboard["inline_keyboard"]
 
         self.assertEqual(len(rows[0]), 1)
-        self.assertEqual(rows[0][0]["text"], "ВЫКЛЮЧИТЬ ДОСТУП")
-        self.assertTrue(rows[0][0].get("icon_custom_emoji_id"))
+        self.assertIn("ВЫКЛЮЧИТЬ ДОСТУП", rows[0][0]["text"])
+        self.assertTrue(rows[0][0]["text"].startswith("🔒"))
+        self.assertNotIn("icon_custom_emoji_id", rows[0][0])
         self.assertEqual(rows[0][0].get("style"), "danger")
         self.assertEqual(len(rows[1]), 1)
-        self.assertEqual(rows[1][0]["text"], "ПЕРЕЗАПУСК")
-        self.assertTrue(rows[1][0].get("icon_custom_emoji_id"))
+        self.assertIn("ПЕРЕЗАПУСК", rows[1][0]["text"])
+        self.assertTrue(rows[1][0]["text"].startswith("🔁"))
+        self.assertNotIn("icon_custom_emoji_id", rows[1][0])
 
     def test_dashboard_signature_tracks_control_state_changes(self) -> None:
         timestamp = int(time.time())

@@ -138,15 +138,74 @@ class TelegramRepairUxTests(unittest.TestCase):
             for row in keyboard["inline_keyboard"]
             for button in row
         ]
-        self.assertIn("ВОССТАНОВИТЬ АВТО", labels)
+        self.assertTrue(
+            any("ВОССТАНОВИТЬ АВТО" in label for label in labels)
+        )
         repair = next(
             button
             for row in keyboard["inline_keyboard"]
             for button in row
             if button["callback_data"] == "repair:dev123"
         )
-        self.assertTrue(repair.get("icon_custom_emoji_id"))
+        self.assertTrue(repair["text"].startswith("🛠"))
+        self.assertNotIn("icon_custom_emoji_id", repair)
         self.assertEqual(repair.get("style"), "primary")
+
+
+    def test_semantic_button_colors_are_consistent(self) -> None:
+        home_text, home_keyboard = self.bot._home()
+        self.assertIn("BAKUNITY RDP", home_text)
+        home_buttons = [
+            button
+            for row in home_keyboard["inline_keyboard"]
+            for button in row
+        ]
+        add = next(button for button in home_buttons if button["callback_data"] == "add")
+        refresh = next(
+            button for button in home_buttons if button["callback_data"] == "refresh"
+        )
+        device = next(
+            button
+            for button in home_buttons
+            if button["callback_data"] == "device:dev123"
+        )
+        self.assertEqual(add.get("style"), "success")
+        self.assertEqual(refresh.get("style"), "primary")
+        self.assertEqual(device.get("style"), "danger")
+
+        self.bot._online = lambda device: True
+        _, online_home = self.bot._home()
+        online_device = next(
+            button
+            for row in online_home["inline_keyboard"]
+            for button in row
+            if button["callback_data"] == "device:dev123"
+        )
+        self.assertEqual(online_device.get("style"), "success")
+
+        _, device_keyboard = self.bot._device(self.registry.get_device("dev123"))
+        device_buttons = [
+            button
+            for row in device_keyboard["inline_keyboard"]
+            for button in row
+        ]
+        by_callback = {button["callback_data"]: button for button in device_buttons}
+        self.assertEqual(by_callback["cmd:off:dev123"].get("style"), "danger")
+        self.assertEqual(by_callback["cmd:restart:dev123"].get("style"), "primary")
+        self.assertEqual(by_callback["refresh"].get("style"), "primary")
+        self.assertEqual(by_callback["live"].get("style"), "primary")
+        self.assertEqual(by_callback["delete:dev123"].get("style"), "danger")
+        self.assertIsNone(by_callback["home"].get("style"))
+
+    def test_pairing_colors_keep_navigation_neutral(self) -> None:
+        _, keyboard = self.bot._pair()
+        buttons = {
+            button["callback_data"]: button
+            for row in keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertEqual(buttons["pair_new"].get("style"), "primary")
+        self.assertIsNone(buttons["home"].get("style"))
 
     def test_pair_screen_can_rotate_code_without_reusing_old_one(self) -> None:
         self.bot._handle_callback({"id": "cb1", "data": "add"})
