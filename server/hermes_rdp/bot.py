@@ -88,7 +88,7 @@ class TelegramBot:
         return result.get("result")
 
     def _load_emoji_packs(self) -> None:
-        if self._emoji_packs_loaded:
+        if getattr(self, "_emoji_packs_loaded", False):
             return
         self._emoji_packs_loaded = True
         for pack_name in APPROVED_PACKS:
@@ -98,12 +98,19 @@ class TelegramBot:
                     {"name": pack_name},
                     timeout=15,
                 )
-                self.emoji.learn_pack(pack_name, sticker_set)
+                self._emoji_theme().learn_pack(pack_name, sticker_set)
             except Exception as exc:
                 LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
 
+    def _emoji_theme(self) -> TelegramEmojiTheme:
+        theme = getattr(self, "emoji", None)
+        if theme is None:
+            theme = TelegramEmojiTheme()
+            self.emoji = theme
+        return theme
+
     def icon(self, name: str) -> str:
-        return self.emoji.html(name)
+        return self._emoji_theme().html(name)
 
     def button(
         self,
@@ -113,7 +120,7 @@ class TelegramBot:
         *,
         style: str | None = None,
     ) -> dict[str, Any]:
-        return self.emoji.button(
+        return self._emoji_theme().button(
             icon,
             text,
             callback_data=callback_data,
@@ -142,12 +149,12 @@ class TelegramBot:
             return self.api_call(method, payload)
         except Exception as exc:
             if (
-                self.emoji.enabled
-                and self.emoji.payload_has_custom_emoji(payload)
+                self._emoji_theme().enabled
+                and self._emoji_theme().payload_has_custom_emoji(payload)
                 and self._is_custom_emoji_error(exc)
             ):
                 LOG.info("custom emoji unavailable; falling back to unicode: %s", exc)
-                self.emoji.enabled = False
+                self._emoji_theme().enabled = False
                 text, keyboard = self._render_content()
                 fallback_payload = dict(payload)
                 fallback_payload["text"] = text
