@@ -20,7 +20,7 @@ def git_blob_sha(path: Path) -> str:
 
 class CertificateRotationLifecycleTests(unittest.TestCase):
     def test_fresh_install_stages_same_immutable_cert_lifecycle_before_pairing(self) -> None:
-        script = read_ps("scripts/install-client.ps1")
+        script = read_ps("scripts/install-client-core.ps1")
         for marker in (
             "Resolve-RepositorySha",
             "$ResolvedSha/client/HermesRdpAgent.ps1",
@@ -118,7 +118,7 @@ class CertificateRotationLifecycleTests(unittest.TestCase):
         )
 
     def test_uninstall_stops_rotation_task_and_worker(self) -> None:
-        script = read_ps("scripts/uninstall-client.ps1")
+        script = read_ps("scripts/uninstall-client-core.ps1")
         for marker in (
             "$RotationTaskName = 'Hermes RDP Certificate Rotation'",
             "$RotationPath = Join-Path $BaseDir 'HermesRdpCertRotation.ps1'",
