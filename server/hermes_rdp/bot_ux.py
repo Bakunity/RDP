@@ -44,6 +44,13 @@ class TelegramUxBot(TelegramBot):
         data = str(callback.get("data", "home"))
         callback_id = str(callback.get("id", ""))
 
+        if not (
+            data.startswith("edit_name:")
+            or data.startswith("edit_slug:")
+        ):
+            self.registry.set_setting("input_mode", "")
+            self.registry.set_setting("input_error", "")
+
         if data.startswith("edit_name:") or data.startswith("edit_slug:"):
             action, device_id = data.split(":", 1)
             try:
