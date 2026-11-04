@@ -207,13 +207,13 @@ class SmartRouteMeshTests(unittest.TestCase):
 
     def test_host_lifecycle_installs_smart_route_companion(self) -> None:
         install = (
-            ROOT / "scripts/install-client-core.ps1"
+            ROOT / "scripts/install-client.ps1"
         ).read_text(encoding="utf-8-sig")
         update = (
             ROOT / "scripts/update-client.ps1"
         ).read_text(encoding="utf-8-sig")
         repair = (
-            ROOT / "scripts/repair-client-core.ps1"
+            ROOT / "scripts/repair-client.ps1"
         ).read_text(encoding="utf-8-sig")
         setup = (
             ROOT / "scripts/setup-smart-route-host.ps1"
@@ -222,6 +222,9 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("setup-smart-route-host.ps1", install)
         self.assertIn("setup-smart-route-host.ps1", update)
         self.assertIn("setup-smart-route-host.ps1", repair)
+        self.assertIn("Smart Route Host deferred", install)
+        self.assertIn("Smart Route Host deferred", update)
+        self.assertIn("Smart Route Host deferred", repair)
         self.assertIn("Bakunity RDP Host Smart Route", setup)
         self.assertIn("BakunityMesh.ps1", setup)
         self.assertIn("HOST_SMART_ROUTE_SETUP=PASS", setup)
