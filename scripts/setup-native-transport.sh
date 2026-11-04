@@ -10,8 +10,13 @@ DB=/var/lib/hermes-rdp/state.sqlite3
 BIN=/usr/local/bin/bakunity-transport
 UNIT=/etc/systemd/system/bakunity-transport.service
 STATE=/var/lib/bakunity-transport
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+BUILD_ROOT="${BAKUNITY_TRANSPORT_BUILD_ROOT:-/var/cache/bakunity-transport}"
+MIN_BUILD_KB="${BAKUNITY_TRANSPORT_MIN_BUILD_KB:-2097152}"
+WORK=""
+cleanup() {
+  [[ -n "${WORK:-}" && -d "$WORK" ]] && rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run through sudo." >&2
@@ -28,6 +33,24 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl python3 sqlite3 tar ufw >/dev/null
+
+install -d -m 0700 "$BUILD_ROOT"
+find "$BUILD_ROOT" -mindepth 1 -maxdepth 1 -type d \
+  -name 'build.*' -mtime +1 -exec rm -rf {} + 2>/dev/null || true
+
+AVAILABLE_KB="$(df -Pk "$BUILD_ROOT" | awk 'NR==2 {print $4}')"
+AVAILABLE_INODES="$(df -Pi "$BUILD_ROOT" | awk 'NR==2 {print $4}')"
+if ! [[ "$AVAILABLE_KB" =~ ^[0-9]+$ ]] || ((AVAILABLE_KB < MIN_BUILD_KB)); then
+  echo "BUILD_DISK_NOT_READY: $BUILD_ROOT has ${AVAILABLE_KB:-unknown} KB free; need at least $MIN_BUILD_KB KB" >&2
+  exit 1
+fi
+if ! [[ "$AVAILABLE_INODES" =~ ^[0-9]+$ ]] || ((AVAILABLE_INODES < 100000)); then
+  echo "BUILD_INODES_NOT_READY: $BUILD_ROOT has ${AVAILABLE_INODES:-unknown} free inodes; need at least 100000" >&2
+  exit 1
+fi
+
+WORK="$(mktemp -d -p "$BUILD_ROOT" build.XXXXXXXX)"
+install -d -m 0700 "$WORK/tmp" "$WORK/module"
 
 ARCH="$(dpkg --print-architecture)"
 case "$ARCH" in
@@ -52,10 +75,14 @@ tar -C "$WORK" -xzf "$GO_TAR"
 GO="$WORK/go/bin/go"
 
 BUILD="$WORK/bakunity-transport"
+cp -a "$ROOT/native-transport"/. "$WORK/module/"
 (
-  cd "$ROOT/native-transport"
+  cd "$WORK/module"
+  export TMPDIR="$WORK/tmp"
+  export GOTMPDIR="$WORK/tmp"
   export GOMODCACHE="$WORK/gomod"
   export GOCACHE="$WORK/gocache"
+  export GOFLAGS="-p=1"
   "$GO" mod tidy
   "$GO" build -trimpath -ldflags='-s -w' \
     -o "$BUILD" ./cmd/bakunity-transport
