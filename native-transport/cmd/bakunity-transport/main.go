@@ -66,8 +66,10 @@ type nodeRuntime struct {
     host      host.Host
     relayInfo *peer.AddrInfo
     cfg       nodeConfig
-    mu        sync.RWMutex
-    forwards  map[string]*forwardRuntime
+    mu                 sync.RWMutex
+    forwards           map[string]*forwardRuntime
+    reservationReady   bool
+    reservationUpdated time.Time
 }
 
 type relayACL struct {
@@ -424,22 +426,36 @@ func (n *nodeRuntime) ensureRelay(ctx context.Context, reserve bool) error {
         if _, err := circuitclient.Reserve(connectCtx, n.host, *n.relayInfo); err != nil {
             return fmt.Errorf("reserve relay: %w", err)
         }
+        n.mu.Lock()
+        n.reservationReady = true
+        n.reservationUpdated = time.Now()
+        n.mu.Unlock()
     }
     return nil
+}
+
+func (n *nodeRuntime) reservationNeedsRefresh() bool {
+    if n.cfg.Role != "host" && n.cfg.Role != "both" {
+        return false
+    }
+    n.mu.RLock()
+    ready := n.reservationReady
+    updated := n.reservationUpdated
+    n.mu.RUnlock()
+    return !ready || time.Since(updated) >= 30*time.Minute
 }
 
 func (n *nodeRuntime) maintainRelay(ctx context.Context) {
     ticker := time.NewTicker(5 * time.Second)
     defer ticker.Stop()
-    reservationTick := 0
     for {
         select {
         case <-ctx.Done():
             return
         case <-ticker.C:
-            reservationTick++
-            reserve := reservationTick%240 == 0
-            if n.host.Network().Connectedness(n.relayInfo.ID) != network.Connected || reserve {
+            connected := n.host.Network().Connectedness(n.relayInfo.ID) == network.Connected
+            reserve := n.reservationNeedsRefresh()
+            if !connected || reserve {
                 if err := n.ensureRelay(ctx, reserve); err != nil {
                     log.Printf("relay maintenance: %v", err)
                 }
