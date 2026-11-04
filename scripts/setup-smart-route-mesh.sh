@@ -264,7 +264,7 @@ cat >"$HEADSCALE_POLICY" <<'EOF'
     {
       "src": ["tag:bakunity-connector"],
       "dst": ["tag:bakunity-host"],
-      "ip": ["3389"]
+      "ip": ["tcp:3389"]
     }
   ]
 }
@@ -353,13 +353,45 @@ chmod 0640 "$HEADSCALE_CONFIG"
 chown root:headscale "$HEADSCALE_CONFIG"
 
 headscale configtest >/dev/null
+
+systemctl stop headscale.service >/dev/null 2>&1 || true
+for spec in "tcp:8080" "tcp:9090" "tcp:50443" "udp:3478"; do
+  proto="${spec%%:*}"
+  port="${spec##*:}"
+  if [[ "$proto" == "tcp" ]]; then
+    if ss -H -ltn "( sport = :$port )" 2>/dev/null | grep -q .; then
+      echo "HEADSCALE_PORT_CONFLICT: tcp/$port is already occupied" >&2
+      ss -H -ltnp "( sport = :$port )" >&2 || true
+      exit 1
+    fi
+  else
+    if ss -H -lun "( sport = :$port )" 2>/dev/null | grep -q .; then
+      echo "HEADSCALE_PORT_CONFLICT: udp/$port is already occupied" >&2
+      ss -H -lunp "( sport = :$port )" >&2 || true
+      exit 1
+    fi
+  fi
+done
+
 systemctl enable headscale.service >/dev/null
 systemctl restart headscale.service
+HEADSCALE_READY=0
 for _ in $(seq 1 30); do
-  curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+  if curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+    HEADSCALE_READY=1
+    break
+  fi
+  if systemctl is-failed --quiet headscale.service; then
+    break
+  fi
   sleep 1
 done
-curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null
+if ((HEADSCALE_READY != 1)); then
+  echo "HEADSCALE_STARTUP_FAILED" >&2
+  systemctl status headscale.service --no-pager --full >&2 || true
+  journalctl -u headscale.service -n 80 --no-pager -o cat >&2 || true
+  exit 1
+fi
 
 if ! headscale users list 2>/dev/null | grep -Eq '(^|[[:space:]])bakunity([[:space:]]|$)'; then
   headscale users create bakunity >/dev/null
