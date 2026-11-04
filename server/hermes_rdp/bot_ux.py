@@ -29,6 +29,7 @@ class TelegramUxBot(TelegramBot):
                     self.registry.set_setting("input_error", "")
                     self.registry.set_setting("screen", "device")
                     message_id = message.get("message_id")
+                    # Accepted edit input is transient UI, not chat history.
                     if message_id:
                         try:
                             self.api_call(
