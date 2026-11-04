@@ -53,21 +53,21 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertIn("maintenance-active.json", runner)
 
     def test_client_ref_is_persisted_by_install_repair_and_update(self) -> None:
-        install = (ROOT / "scripts/install-client-core.ps1").read_text(encoding="utf-8")
+        install = (ROOT / "scripts/install-client.ps1").read_text(encoding="utf-8")
         repair = (ROOT / "scripts/repair-client.ps1").read_text(encoding="utf-8")
         update = (ROOT / "scripts/update-client.ps1").read_text(encoding="utf-8")
         for text in (install, repair, update):
             self.assertIn("client-ref.txt", text)
             self.assertIn("$ResolvedSha", text)
-        self.assertIn("Set-SecretAcl -Path $Secret", install)
+        self.assertIn("Write-ClientRef -ResolvedSha $ResolvedSha", install)
         self.assertIn("Write-ClientRef -ResolvedSha $ResolvedSha", repair)
         self.assertIn("Write-ClientRef -ResolvedSha $ResolvedSha", update)
 
     def test_uninstall_cleans_maintenance_task(self) -> None:
-        uninstall = (ROOT / "scripts/uninstall-client-core.ps1").read_text(encoding="utf-8")
+        uninstall = (ROOT / "scripts/uninstall-client.ps1").read_text(encoding="utf-8")
         self.assertIn("$MaintenanceTaskName = 'Hermes RDP Maintenance'", uninstall)
-        self.assertIn("$MaintenanceTaskName))", uninstall)
-        self.assertIn("HermesRdpMaintenance.ps1", uninstall)
+        self.assertIn("function Remove-MaintenanceTask", uninstall)
+        self.assertIn("Unregister-ScheduledTask -TaskName $MaintenanceTaskName", uninstall)
 
     def test_telegram_has_one_click_repair_and_legacy_fallback(self) -> None:
         ux = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
