@@ -192,7 +192,13 @@ function Sync-HostNativeTransport {
     }
 
     $Status = Get-BakunityNativeTransportStatus
-    if (-not $Status -or -not [bool]$Status.ok) {
+    $NativeRole = if ($Status) { [string]$Status.role } else { '' }
+    $NeedsNativeHost = [bool](
+        -not $Status -or
+        -not [bool]$Status.ok -or
+        $NativeRole -notin @('host','both')
+    )
+    if ($NeedsNativeHost) {
         $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-bootstrap" -Body @{}
         if ($Bootstrap -and [bool]$Bootstrap.enabled) {
             $RepositoryRef = ''
