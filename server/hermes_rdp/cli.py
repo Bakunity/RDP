@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import load_config
 from .db import Registry
-from .tunnel import close_tunnel
+from .tunnel import close_tunnel, endpoint_listener_state
 
 
 def parse_helper_json(text: str) -> dict:
@@ -88,6 +88,22 @@ def build_parser() -> argparse.ArgumentParser:
     named_access_revoke = named_access_sub.add_parser("revoke")
     named_access_revoke.add_argument("connector_id")
 
+    default_rdp = sub.add_parser(
+        "default-rdp",
+        help="manage the one device reachable on standard TCP 3389",
+    )
+    default_rdp_sub = default_rdp.add_subparsers(
+        dest="default_rdp_command",
+        required=True,
+    )
+    default_rdp_set = default_rdp_sub.add_parser("set")
+    default_rdp_set.add_argument(
+        "target",
+        help="device id, slug, hostname, or display name",
+    )
+    default_rdp_sub.add_parser("show")
+    default_rdp_sub.add_parser("clear")
+
     dashboard = sub.add_parser("dashboard")
     dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
     dashboard_sub.add_parser("reset")
@@ -99,6 +115,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor")
     return parser
+
+
+def resolve_device_target(registry: Registry, target: str) -> dict:
+    value = str(target or "").strip().lower()
+    if not value:
+        raise SystemExit("device target is required")
+    domain = registry.get_device_domain()
+    matches = []
+    for device in registry.list_devices():
+        slug = str(device.get("slug") or "").strip()
+        hostname = f"{slug}.{domain}" if slug and domain else ""
+        candidates = {
+            str(device.get("id") or "").strip().lower(),
+            str(device.get("display_name") or "").strip().lower(),
+            str(device.get("machine_name") or "").strip().lower(),
+            slug.lower(),
+            hostname.lower(),
+        }
+        if value in candidates:
+            matches.append(device)
+    if not matches:
+        raise SystemExit(f"device not found: {target}")
+    if len(matches) > 1:
+        raise SystemExit(f"device target is ambiguous: {target}")
+    return matches[0]
+
+
+def systemctl(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["/usr/bin/systemctl", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
 
 
 def main() -> None:
@@ -354,6 +405,77 @@ def main() -> None:
             print("REVOKED=PASS")
             return
 
+    if args.command == "default-rdp":
+        service = "bakunity-rdp-default.service"
+        key = "default_rdp_device_id"
+
+        if args.default_rdp_command == "set":
+            if hasattr(args, "target"):
+                device = resolve_device_target(registry, args.target)
+            else:
+                raise SystemExit("device target is required")
+
+            active = systemctl("is-active", "--quiet", service).returncode == 0
+            if endpoint_listener_state(3389) and not active:
+                raise SystemExit(
+                    "TCP 3389 is already used by another listener; "
+                    "default RDP was not changed"
+                )
+
+            previous = str(registry.get_setting(key, "") or "")
+            registry.set_setting(key, str(device["id"]))
+            enabled = systemctl("enable", "--now", service)
+            if enabled.returncode != 0:
+                registry.set_setting(key, previous)
+                detail = (enabled.stderr or enabled.stdout or "").strip()
+                raise SystemExit(
+                    detail or "failed to start default RDP service"
+                )
+
+            domain = registry.get_device_domain()
+            slug = str(device.get("slug") or "").strip()
+            host = f"{slug}.{domain}" if slug and domain else config.public_host
+            print(f"DEFAULT_RDP={host}")
+            print(f"TARGET={device['display_name']}")
+            print(f"TARGET_PORT={device['rdp_port']}")
+            print("LISTEN_PORT=3389")
+            print("OK")
+            return
+
+        if args.default_rdp_command == "show":
+            device_id = str(registry.get_setting(key, "") or "").strip()
+            if not device_id:
+                print("DEFAULT_RDP=disabled")
+                return
+            try:
+                device = registry.get_device(device_id)
+            except KeyError:
+                print("DEFAULT_RDP=broken")
+                print(f"DEVICE_ID={device_id}")
+                raise SystemExit(1)
+            domain = registry.get_device_domain()
+            slug = str(device.get("slug") or "").strip()
+            host = f"{slug}.{domain}" if slug and domain else config.public_host
+            active = systemctl("is-active", "--quiet", service).returncode == 0
+            print(f"DEFAULT_RDP={host}")
+            print(f"TARGET={device['display_name']}")
+            print(f"TARGET_PORT={device['rdp_port']}")
+            print(f"SERVICE={'active' if active else 'inactive'}")
+            print(f"LISTENER={'yes' if endpoint_listener_state(3389) else 'no'}")
+            if not active or not endpoint_listener_state(3389):
+                raise SystemExit(1)
+            return
+
+        if args.default_rdp_command == "clear":
+            registry.set_setting(key, "")
+            stopped = systemctl("disable", "--now", service)
+            if stopped.returncode != 0:
+                detail = (stopped.stderr or stopped.stdout or "").strip()
+                raise SystemExit(detail or "failed to stop default RDP service")
+            print("DEFAULT_RDP=disabled")
+            print("OK")
+            return
+
     if args.command == "dashboard" and args.dashboard_command == "reset":
         registry.set_setting("dashboard_message_id", "")
         registry.set_setting("screen", "home")
@@ -387,6 +509,34 @@ def main() -> None:
         print(f"database: OK ({config.db_path})")
         device_domain = registry.get_device_domain()
         print(f"device-domain: {device_domain or 'disabled'}")
+        default_device_id = str(
+            registry.get_setting("default_rdp_device_id", "") or ""
+        ).strip()
+        if default_device_id:
+            try:
+                default_device = registry.get_device(default_device_id)
+                default_slug = str(default_device.get("slug") or "").strip()
+                default_host = (
+                    f"{default_slug}.{device_domain}"
+                    if default_slug and device_domain
+                    else config.public_host
+                )
+                if endpoint_listener_state(3389):
+                    print(
+                        "default-rdp: LISTEN 3389 -> "
+                        f"{default_host}:{default_device['rdp_port']}"
+                    )
+                else:
+                    errors += 1
+                    print(
+                        "default-rdp: FAIL 3389 -> "
+                        f"{default_host}:{default_device['rdp_port']}"
+                    )
+            except KeyError:
+                errors += 1
+                print(f"default-rdp: FAIL missing-device {default_device_id}")
+        else:
+            print("default-rdp: disabled")
         try:
             context = ssl._create_unverified_context()
             with urllib.request.urlopen(
