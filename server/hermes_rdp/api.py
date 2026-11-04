@@ -181,6 +181,13 @@ class ApiHandler(BaseHTTPRequestHandler):
             fingerprint=str(body.get("fingerprint", "")),
             ssh_public_key=str(body.get("ssh_public_key", "")),
         )
+        device_domain = self.server.registry.get_device_domain()
+        device_slug = str(device.get("slug") or "")
+        rdp_host = (
+            f"{device_slug}.{device_domain}"
+            if device_slug and device_domain
+            else self.server.config.public_host
+        )
         self._json(
             HTTPStatus.CREATED,
             {
@@ -188,7 +195,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "device": {
                     "id": device["id"],
                     "name": device["display_name"],
+                    "slug": device_slug,
+                    "rdp_host": rdp_host,
                     "rdp_port": device["rdp_port"],
+                    "rdp_endpoint": f"{rdp_host}:{device['rdp_port']}",
                     "token": device_token,
                 },
                 "api": {
