@@ -195,10 +195,94 @@ class TelegramRepairUxTests(unittest.TestCase):
         by_callback = {button["callback_data"]: button for button in device_buttons}
         self.assertEqual(by_callback["cmd:off:dev123"].get("style"), "danger")
         self.assertEqual(by_callback["cmd:restart:dev123"].get("style"), "primary")
-        self.assertEqual(by_callback["refresh"].get("style"), "primary")
-        self.assertEqual(by_callback["live"].get("style"), "primary")
-        self.assertEqual(by_callback["delete:dev123"].get("style"), "danger")
+        self.assertIsNone(by_callback["refresh"].get("style"))
+        self.assertIsNone(by_callback["details:dev123"].get("style"))
         self.assertIsNone(by_callback["home"].get("style"))
+        self.assertNotIn("live", by_callback)
+        self.assertNotIn("delete:dev123", by_callback)
+
+        _, details_keyboard = self.bot._device_details(
+            self.registry.get_device("dev123")
+        )
+        detail_buttons = [
+            button
+            for row in details_keyboard["inline_keyboard"]
+            for button in row
+        ]
+        detail_callbacks = {
+            button["callback_data"]: button for button in detail_buttons
+        }
+        self.assertEqual(detail_callbacks["refresh"].get("style"), "primary")
+        self.assertEqual(detail_callbacks["delete:dev123"].get("style"), "danger")
+        self.assertIn("live", detail_callbacks)
+        self.assertIn("device:dev123", detail_callbacks)
+
+    def test_device_summary_is_compact_and_details_keep_telemetry(self) -> None:
+        device = self.registry.get_device("dev123")
+        device["telemetry"] = {
+            "os": "Windows 11 Pro",
+            "interactive_user": "Tima",
+            "cpu_percent": 12.5,
+            "ram_percent": 44.0,
+            "disk_percent": 55.0,
+            "ssh_tunnel_running": True,
+            "access_enabled": True,
+            "sessions": ["Tima"],
+        }
+        self.bot._online = lambda value: True
+
+        summary_text, summary_keyboard = self.bot._device(device)
+        self.assertIn("TEST PC", summary_text)
+        self.assertIn("Windows 11 Pro", summary_text)
+        self.assertIn("RDP: server.example:53391", summary_text)
+        self.assertIn("Доступ:", summary_text)
+        self.assertIn("SSH-туннель:", summary_text)
+        self.assertNotIn("CPU:", summary_text)
+        self.assertNotIn("RAM:", summary_text)
+        self.assertNotIn("Диск C:", summary_text)
+        self.assertNotIn("Процессы", summary_text)
+        summary_callbacks = {
+            button["callback_data"]
+            for row in summary_keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertIn("details:dev123", summary_callbacks)
+        self.assertNotIn("delete:dev123", summary_callbacks)
+        self.assertNotIn("live", summary_callbacks)
+
+        details_text, details_keyboard = self.bot._device_details(device)
+        self.assertIn("CPU:", details_text)
+        self.assertIn("RAM:", details_text)
+        self.assertIn("Диск C:", details_text)
+        self.assertIn("Процессы", details_text)
+        details_callbacks = {
+            button["callback_data"]
+            for row in details_keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertIn("delete:dev123", details_callbacks)
+        self.assertIn("live", details_callbacks)
+        self.assertIn("device:dev123", details_callbacks)
+
+    def test_details_callback_opens_detailed_device_screen(self) -> None:
+        self.bot._handle_callback({"id": "cb-details", "data": "details:dev123"})
+        self.assertEqual(self.registry.get_setting("selected_device"), "dev123")
+        self.assertEqual(self.registry.get_setting("screen"), "device_details")
+
+    def test_start_recreates_dashboard_as_new_bot_message(self) -> None:
+        calls = []
+        self.bot.render = lambda *args, **kwargs: calls.append((args, kwargs))
+        self.bot._handle_update(
+            {
+                "message": {
+                    "text": "/start",
+                    "chat": {"id": 123},
+                    "from": {"id": 123},
+                }
+            }
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1].get("force_new"))
 
     def test_pairing_colors_keep_navigation_neutral(self) -> None:
         _, keyboard = self.bot._pair()
