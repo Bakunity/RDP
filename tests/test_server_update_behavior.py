@@ -29,6 +29,14 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
         self.assertIn('data["repository_requested_ref"] = requested_ref', text)
         self.assertIn("f\"{client_ref}/scripts/install-client.ps1\"", text)
 
+    def test_update_server_defines_previous_client_ref_before_metadata(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        assignment = 'PREVIOUS_CLIENT_REF="$CONFIG_CLIENT_REF"'
+        metadata_use = '"$PREVIOUS_CLIENT_REF"'
+        self.assertIn(assignment, text)
+        self.assertIn(metadata_use, text)
+        self.assertLess(text.index(assignment), text.index(metadata_use))
+
     def test_server_update_preserves_equivalent_client_refs(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("client_bundle_hash()", text)

@@ -229,6 +229,7 @@ print(
 )
 PY
 )
+PREVIOUS_CLIENT_REF="$CONFIG_CLIENT_REF"
 
 TELEMETRY_CLIENT_REFS="$(python3 - "$DB" <<'PY'
 import collections
