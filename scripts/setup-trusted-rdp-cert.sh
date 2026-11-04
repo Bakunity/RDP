@@ -57,6 +57,7 @@ SOURCE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CERT_RENEW_SOURCE="$SOURCE_ROOT/server/bin/hermes-rdp-cert-renew.sh"
 CERT_STATE_SOURCE="$SOURCE_ROOT/server/bin/hermes-rdp-cert-state-refresh.sh"
 CERT_PACKAGE_SOURCE="$SOURCE_ROOT/server/bin/hermes-rdp-cert-package.sh"
+DEVICE_CERT_PACKAGE_SOURCE="$SOURCE_ROOT/server/bin/hermes-rdp-device-cert-package.sh"
 CERT_PACKAGE_SUDOERS_SOURCE="$SOURCE_ROOT/server/sudoers/hermes-rdp-cert-package"
 SERVICE_SOURCE="$SOURCE_ROOT/server/systemd/hermes-rdp-cert-renew.service"
 TIMER_SOURCE="$SOURCE_ROOT/server/systemd/hermes-rdp-cert-renew.timer"
@@ -91,6 +92,7 @@ for required in \
   "$CERT_RENEW_SOURCE" \
   "$CERT_STATE_SOURCE" \
   "$CERT_PACKAGE_SOURCE" \
+  "$DEVICE_CERT_PACKAGE_SOURCE" \
   "$CERT_PACKAGE_SUDOERS_SOURCE" \
   "$SERVICE_SOURCE" \
   "$TIMER_SOURCE"; do
@@ -338,6 +340,7 @@ unset CERT_PUB KEY_PUB
 install -m 0755 "$CERT_RENEW_SOURCE" /usr/local/sbin/hermes-rdp-cert-renew
 install -m 0755 "$CERT_STATE_SOURCE" /usr/local/sbin/hermes-rdp-cert-state-refresh
 install -m 0755 "$CERT_PACKAGE_SOURCE" /usr/local/sbin/hermes-rdp-cert-package
+install -m 0755 "$DEVICE_CERT_PACKAGE_SOURCE" /usr/local/sbin/hermes-rdp-device-cert-package
 install -m 0440 \
   "$CERT_PACKAGE_SUDOERS_SOURCE" \
   /etc/sudoers.d/hermes-rdp-cert-package
