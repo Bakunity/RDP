@@ -187,17 +187,78 @@ function Test-MaintenanceActive {
     if (-not (Test-Path -LiteralPath $MaintenanceActivePath)) {
         return $false
     }
+
+    $Active = $null
     try {
         $Active = Read-JsonFile -Path $MaintenanceActivePath
-        $StartedAt = [int64]$Active.started_at
-        $Age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $StartedAt
-        if ($StartedAt -gt 0 -and $Age -lt 3600) {
+    }
+    catch {
+    }
+
+    try {
+        $Task = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+        if ($Task -and [string]$Task.State -eq 'Running') {
             return $true
         }
     }
     catch {
     }
+
+    $MaintenancePid = 0
+    try {
+        $MaintenancePid = [int]$Active.pid
+    }
+    catch {
+    }
+    if ($MaintenancePid -gt 0) {
+        try {
+            $Process = Get-CimInstance Win32_Process -Filter "ProcessId=$MaintenancePid" -ErrorAction Stop
+            $CommandLine = [string]$Process.CommandLine
+            if (
+                $CommandLine -and (
+                    $CommandLine.Contains($MaintenanceRunnerPath) -or
+                    $CommandLine.Contains('HermesRdpMaintenance')
+                )
+            ) {
+                return $true
+            }
+        }
+        catch {
+        }
+    }
+
+    $StartedAt = 0
+    try {
+        $StartedAt = [int64]$Active.started_at
+    }
+    catch {
+    }
+    $Age = if ($StartedAt -gt 0) {
+        [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $StartedAt
+    }
+    else {
+        -1
+    }
+
     Remove-Item -LiteralPath $MaintenanceActivePath -Force -ErrorAction SilentlyContinue
+
+    $Status = Get-MaintenanceStatus
+    if ($Status -and [string]$Status.state -eq 'running') {
+        try {
+            $Status.state = 'failed'
+            $Status.ok = $false
+            $Status.message = 'Stale maintenance lock recovered automatically'
+            $Status.updated_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            Write-JsonFile -Path $MaintenanceStatusPath -Value $Status
+            Set-SystemScriptAcl -Path $MaintenanceStatusPath
+        }
+        catch {
+        }
+    }
+
+    Write-AgentLog (
+        "Recovered stale maintenance lock: pid=$MaintenancePid age=$Age"
+    )
     return $false
 }
 
