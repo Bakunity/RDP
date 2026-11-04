@@ -19,6 +19,8 @@ from .telegram_icons import TelegramEmojiTheme
 
 LOG = logging.getLogger("hermes_rdp.bot")
 LIVE_SECONDS = 60
+# The agent polls every 3 seconds, but one HTTPS control poll can wait up to
+# 20 seconds. Do not flicker a healthy computer offline on one short stall.
 PRODUCT_ONLINE_GRACE_SECONDS = 45
 
 
