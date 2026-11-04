@@ -48,6 +48,20 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
         self.assertIn("ROLLBACK=PASS", text)
         self.assertIn("ROLLBACK=FAIL", text)
 
+    def test_update_server_installs_cli_aliases_transactionally(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        for wrapper in (
+            "/usr/local/bin/hermes-rdpctl",
+            "/usr/local/bin/bakunity-rdpctl",
+        ):
+            self.assertIn(wrapper, text)
+            self.assertIn(f"restore_optional_file {wrapper}", text)
+            self.assertIn(f"{wrapper} doctor >/dev/null", text)
+        self.assertGreaterEqual(
+            text.count("export PYTHONPATH=/opt/hermes-rdp/app"),
+            2,
+        )
+
     def test_plain_updater_refuses_major_frp_migration(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("This server still uses FRP.", text)
