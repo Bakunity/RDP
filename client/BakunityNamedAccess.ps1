@@ -43,8 +43,10 @@ function Write-SecureJsonFile {
     $Value | ConvertTo-Json -Depth 12 |
         Set-Content -LiteralPath $Temp -Encoding UTF8
     $Acl = Get-Acl -LiteralPath $Temp
+    # The first sync can run under an elevated Administrator before the
+    # LocalSystem task starts. Protect the DACL without forcing SYSTEM owner.
     $Acl.SetSecurityDescriptorSddlForm(
-        'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)'
+        'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
     )
     Set-Acl -LiteralPath $Temp -AclObject $Acl
     Move-Item -LiteralPath $Temp -Destination $Path -Force
