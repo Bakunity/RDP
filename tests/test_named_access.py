@@ -120,7 +120,7 @@ class NamedAccessTests(unittest.TestCase):
         ):
             self.assertIn(marker, installer)
 
-    def test_named_access_acl_protects_dacl_without_forcing_system_owner(self) -> None:
+    def test_named_access_acl_separates_secret_config_from_readable_state(self) -> None:
         installer = (
             ROOT / "scripts/install-named-access.ps1"
         ).read_text(encoding="utf-8-sig")
@@ -128,15 +128,59 @@ class NamedAccessTests(unittest.TestCase):
             ROOT / "client/BakunityNamedAccess.ps1"
         ).read_text(encoding="utf-8-sig")
 
-        for text in (installer, worker):
-            self.assertIn(
-                "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
-                text,
-            )
-            self.assertNotIn(
-                "O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)",
-                text,
-            )
+        self.assertIn(
+            "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+            installer,
+        )
+        self.assertIn(
+            "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GR;;;BU)",
+            worker,
+        )
+        self.assertNotIn("O:SYG:SYD:P", installer)
+        self.assertNotIn("O:SYG:SYD:P", worker)
+
+    def test_installer_auto_falls_back_to_launcher_when_local_3389_is_owned(self) -> None:
+        installer = (
+            ROOT / "scripts/install-named-access.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "Get-NamedAccessRoutingMode",
+            "Get-NetTCPConnection",
+            "return 'launcher'",
+            "return 'portproxy'",
+            "routing_mode = $RoutingMode",
+            "Install-LauncherShortcut",
+            "Bakunity RDP.lnk",
+            "ROUTING_MODE=$RoutingMode",
+        ):
+            self.assertIn(marker, installer)
+
+    def test_launcher_accepts_hostname_without_port_and_invokes_mstsc(self) -> None:
+        launcher = (
+            ROOT / "client/BakunityRdpLaunch.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "[string]$Computer",
+            "Do not include an RDP port",
+            "Bakunity device not found",
+            "CONNECTING=$($Target.hostname)",
+            'Start-Process -FilePath $Mstsc -ArgumentList @("/v:$Endpoint")',
+            "Microsoft.VisualBasic.Interaction",
+        ):
+            self.assertIn(marker, launcher)
+
+    def test_worker_launcher_mode_never_requires_local_3389(self) -> None:
+        worker = (
+            ROOT / "client/BakunityNamedAccess.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn("$RoutingMode -eq 'launcher'", worker)
+        self.assertIn("SYNC=PASS mode=launcher", worker)
+        self.assertIn("Remove-PortProxyRuntime", worker)
+        launcher_branch = worker.split(
+            "if ($RoutingMode -eq 'launcher')",
+            1,
+        )[1].split("Start-IpHelper", 1)[0]
+        self.assertNotIn("Assert-LocalRdpPortAvailable", launcher_branch)
 
     def test_uninstall_removes_only_recorded_named_access_runtime(self) -> None:
         uninstall = (
@@ -146,6 +190,7 @@ class NamedAccessTests(unittest.TestCase):
         self.assertIn("127\\.77", uninstall)
         self.assertIn("portproxy delete v4tov4", uninstall)
         self.assertIn("Remove-ManagedHostsBlock", uninstall)
+        self.assertIn("Bakunity RDP.lnk", uninstall)
         self.assertNotIn("portproxy reset", uninstall)
         self.assertNotIn("Hermes RDP Agent", uninstall)
 
