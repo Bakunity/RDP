@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
+from pathlib import Path
 
 from .config import load_config
 from .db import Registry
