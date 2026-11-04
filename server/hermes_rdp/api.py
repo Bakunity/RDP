@@ -15,6 +15,13 @@ from . import __version__
 from .config import Config
 from .db import Registry
 from .device_certificates import get_device_certificate_target
+from .native_transport import (
+    native_transport_bootstrap,
+    native_transport_enabled,
+    native_transport_host_manifest,
+    native_transport_relay_addr,
+    set_native_transport_host,
+)
 from .smart_route import (
     create_mesh_bootstrap,
     get_host_smart_route,
@@ -173,6 +180,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/v1/named-access/mesh-bootstrap":
                 self._named_access_mesh_bootstrap()
                 return
+            if path == "/v1/named-access/native-transport-bootstrap":
+                self._named_access_native_transport_bootstrap()
+                return
             parts = [part for part in path.split("/") if part]
             if len(parts) == 4 and parts[:2] == ["v1", "devices"]:
                 device_id, action = parts[2], parts[3]
@@ -196,6 +206,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                     return
                 if action == "smart-route-bootstrap":
                     self._smart_route_bootstrap(device_id)
+                    return
+                if action == "native-transport-telemetry":
+                    self._native_transport_telemetry(device_id)
+                    return
+                if action == "native-transport-bootstrap":
+                    self._native_transport_bootstrap(device_id)
                     return
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
         except json.JSONDecodeError:
@@ -235,6 +251,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.server.registry,
                 str(device["id"]),
             )
+            native = native_transport_host_manifest(
+                self.server.registry,
+                str(device["id"]),
+            )
             lan_ipv4 = [
                 str(value)
                 for value in (smart.get("lan_ipv4") or [])
@@ -259,6 +279,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                             {"host": address, "port": 3389}
                             for address in lan_ipv4
                         ],
+                        "native": native,
                         "p2p": {
                             "available": mesh_online,
                             "host": mesh_ipv4,
@@ -297,6 +318,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                         "enabled": smart_route_enabled,
                         "control_url": control_url,
                     },
+                    "native_transport": {
+                        "enabled": native_transport_enabled(
+                            self.server.registry
+                        ),
+                        "relay_addr": native_transport_relay_addr(
+                            self.server.registry
+                        ),
+                    },
                 },
                 "devices": devices,
             },
@@ -332,6 +361,29 @@ class ApiHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _named_access_native_transport_bootstrap(self) -> None:
+        connector = self._named_access_auth()
+        if not connector:
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        enabled = native_transport_enabled(self.server.registry)
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "enabled": enabled,
+                "relay_addr": (
+                    native_transport_relay_addr(self.server.registry)
+                    if enabled
+                    else ""
+                ),
+                "connector_id": str(connector["id"]),
+            },
+        )
+
     def _named_access_mesh_bootstrap(self) -> None:
         connector = self._named_access_auth()
         if not connector:
@@ -361,6 +413,64 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "bakunity-connector-"
                     + str(connector["id"])[:10]
                 ),
+            },
+        )
+
+    def _native_transport_telemetry(self, device_id: str) -> None:
+        if not self._device_auth(device_id):
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        body = self._read_json()
+        telemetry = body.get("native_transport")
+        if not isinstance(telemetry, dict):
+            raise ValueError("native_transport object required")
+        state = set_native_transport_host(
+            self.server.registry,
+            device_id,
+            telemetry,
+        )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "enabled": native_transport_enabled(
+                    self.server.registry
+                ),
+                "relay_addr": native_transport_relay_addr(
+                    self.server.registry
+                ),
+                "native_transport": state,
+            },
+        )
+
+    def _native_transport_bootstrap(self, device_id: str) -> None:
+        if not self._device_auth(device_id):
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        bootstrap = native_transport_bootstrap(
+            self.server.registry,
+            device_id,
+        )
+        if not bootstrap:
+            self._json(
+                HTTPStatus.OK,
+                {"ok": True, "enabled": False},
+            )
+            return
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "enabled": True,
+                "relay_addr": bootstrap["relay_addr"],
+                "shared_secret": bootstrap["shared_secret"],
+                "device_id": device_id,
             },
         )
 
