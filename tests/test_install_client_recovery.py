@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class InstallClientRecoveryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.text = (ROOT / "scripts/install-client.ps1").read_text(
+        cls.text = (ROOT / "scripts/install-client-core.ps1").read_text(
             encoding="utf-8-sig"
         )
 
