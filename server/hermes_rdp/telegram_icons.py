@@ -142,8 +142,12 @@ class TelegramEmojiTheme:
     ) -> dict[str, Any]:
         spec = self.icons[name]
         custom_id = spec.custom_emoji_id if self.enabled else None
+        # Keep a visible Unicode icon in the label even when a native custom
+        # emoji icon is attached. Some Telegram clients render button colors
+        # from Bot API 9.4 but still omit icon_custom_emoji_id. This guarantees
+        # that the action never becomes visually iconless.
         result: dict[str, Any] = {
-            "text": text if custom_id else f"{spec.fallback} {text}",
+            "text": f"{spec.fallback} {text}",
             "callback_data": callback_data,
         }
         if custom_id:
