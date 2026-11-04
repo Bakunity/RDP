@@ -44,7 +44,7 @@ mipc.tima.biz
   -> Windows hosts: 127.77.0.1
   -> local TCP 127.77.0.1:3389
   -> Windows portproxy
-  -> 150.241.94.110:53389
+  -> SERVER_IP_OR_DOMAIN:53389
   -> existing Bakunity reverse SSH tunnel
   -> MIPC:3389
 ```
