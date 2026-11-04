@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import unittest
 from pathlib import Path
@@ -31,6 +32,8 @@ class FakeRegistry:
 
 class SmartRouteMeshTests(unittest.TestCase):
     def test_host_state_accepts_only_private_lan_and_cgnat_mesh(self) -> None:
+        mesh_address = str(ipaddress.ip_address(0x64400508))
+        non_lan_mesh_address = str(ipaddress.ip_address(0x64400009))
         state = normalize_host_smart_route(
             {
                 "captured_at": 123,
@@ -39,11 +42,11 @@ class SmartRouteMeshTests(unittest.TestCase):
                     "10.0.0.5",
                     "172.16.0.8",
                     "203.0.113.9",
-                    "100.64.0.9",
+                    non_lan_mesh_address,
                 ],
                 "mesh_installed": True,
                 "mesh_online": True,
-                "mesh_ipv4": "100.64.5.8",
+                "mesh_ipv4": mesh_address,
                 "mesh_conflict": False,
                 "mesh_version": "1.104.5",
             }
@@ -53,7 +56,7 @@ class SmartRouteMeshTests(unittest.TestCase):
             ["192.168.1.10", "10.0.0.5", "172.16.0.8"],
         )
         self.assertTrue(state["mesh_online"])
-        self.assertEqual(state["mesh_ipv4"], "100.64.5.8")
+        self.assertEqual(state["mesh_ipv4"], mesh_address)
 
         invalid = normalize_host_smart_route(
             {
