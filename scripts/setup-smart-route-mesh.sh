@@ -19,6 +19,15 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP="/var/backups/hermes-rdp/smart-route-mesh-$STAMP"
 NGINX_CONF=""
 ROLLBACK_ARMED=0
+HEADSCALE_SERVICE_EXISTED=0
+HEADSCALE_WAS_ENABLED=0
+HEADSCALE_WAS_ACTIVE=0
+
+if systemctl cat headscale.service >/dev/null 2>&1; then
+  HEADSCALE_SERVICE_EXISTED=1
+  systemctl is-enabled --quiet headscale.service && HEADSCALE_WAS_ENABLED=1 || true
+  systemctl is-active --quiet headscale.service && HEADSCALE_WAS_ACTIVE=1 || true
+fi
 
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
@@ -67,7 +76,20 @@ with sqlite3.connect(db_path) as conn:
 PY
     fi
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl restart headscale.service >/dev/null 2>&1 || true
+    systemctl stop headscale.service >/dev/null 2>&1 || true
+    if ((HEADSCALE_SERVICE_EXISTED == 1)); then
+      if ((HEADSCALE_WAS_ENABLED == 1)); then
+        systemctl enable headscale.service >/dev/null 2>&1 || true
+      else
+        systemctl disable headscale.service >/dev/null 2>&1 || true
+      fi
+      if ((HEADSCALE_WAS_ACTIVE == 1)); then
+        systemctl start headscale.service >/dev/null 2>&1 || true
+      fi
+    else
+      systemctl disable headscale.service >/dev/null 2>&1 || true
+    fi
+    systemctl reset-failed headscale.service >/dev/null 2>&1 || true
     nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
   fi
   exit "$status"
@@ -244,6 +266,8 @@ curl -fsSL \
   "https://github.com/juanfont/headscale/releases/download/v${HEADSCALE_VERSION}/headscale_${HEADSCALE_VERSION}_linux_${ARCH}.deb" \
   -o "$DEB"
 dpkg -i "$DEB" >/dev/null
+systemctl stop headscale.service >/dev/null 2>&1 || true
+systemctl reset-failed headscale.service >/dev/null 2>&1 || true
 INSTALLED_VERSION="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
 [[ "$INSTALLED_VERSION" == "$HEADSCALE_VERSION" ]] || {
   echo "Unexpected Headscale version: $INSTALLED_VERSION" >&2
@@ -253,6 +277,14 @@ INSTALLED_VERSION="$(headscale version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[
 install -d -o headscale -g headscale -m 0750 /var/lib/headscale
 install -d -o headscale -g headscale -m 0755 /var/run/headscale
 install -d -m 0755 /etc/headscale
+
+# Previous failed boots or root-run CLI commands must never leave state unreadable
+# by the packaged headscale service account.
+chown -R headscale:headscale /var/lib/headscale /var/run/headscale
+find /var/lib/headscale -type d -exec chmod 0750 {} +
+find /var/lib/headscale -type f -exec chmod 0600 {} +
+find /var/run/headscale -type d -exec chmod 0755 {} +
+find /var/run/headscale -type f -exec chown headscale:headscale {} +
 
 cat >"$HEADSCALE_POLICY" <<'EOF'
 {
@@ -388,6 +420,11 @@ for _ in $(seq 1 30); do
 done
 if ((HEADSCALE_READY != 1)); then
   echo "HEADSCALE_STARTUP_FAILED" >&2
+  stat -c 'HEADSCALE_STATE %U:%G %a %n' \
+    /var/lib/headscale \
+    /var/lib/headscale/derp_server_private.key \
+    /var/lib/headscale/noise_private.key \
+    /var/lib/headscale/db.sqlite 2>/dev/null >&2 || true
   systemctl status headscale.service --no-pager --full >&2 || true
   journalctl -u headscale.service -n 80 --no-pager -o cat >&2 || true
   exit 1

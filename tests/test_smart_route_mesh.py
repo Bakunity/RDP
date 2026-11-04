@@ -121,6 +121,12 @@ class SmartRouteMeshTests(unittest.TestCase):
             "HEADSCALE_STARTUP_FAILED",
             "HEADSCALE_PORT_CONFLICT:",
             "journalctl -u headscale.service -n 80",
+            "chown -R headscale:headscale /var/lib/headscale /var/run/headscale",
+            "find /var/lib/headscale -type f -exec chmod 0600 {} +",
+            "HEADSCALE_SERVICE_EXISTED=0",
+            "HEADSCALE_WAS_ENABLED=0",
+            "HEADSCALE_WAS_ACTIVE=0",
+            "systemctl reset-failed headscale.service",
             "proxy_set_header Upgrade",
             'proxy_set_header Connection "upgrade";',
             "ufw allow 443/tcp",
@@ -159,6 +165,27 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("ProtectSystem=strict", service)
         self.assertIn("ReadWritePaths=-/var/lib/headscale", service)
         self.assertIn("ReadWritePaths=-/var/run/headscale", service)
+
+    def test_headscale_rollback_restores_prior_service_state(self) -> None:
+        text = (
+            ROOT / "scripts/setup-smart-route-mesh.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "if ((HEADSCALE_SERVICE_EXISTED == 1)); then",
+            text,
+        )
+        self.assertIn(
+            "if ((HEADSCALE_WAS_ACTIVE == 1)); then",
+            text,
+        )
+        self.assertIn(
+            "systemctl disable headscale.service",
+            text,
+        )
+        self.assertNotIn(
+            "systemctl restart headscale.service >/dev/null 2>&1 || true",
+            text,
+        )
 
     def test_bounded_mesh_key_helper_allows_only_host_or_connector(self) -> None:
         helper = (
