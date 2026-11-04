@@ -123,6 +123,14 @@ class SmartRouteMeshTests(unittest.TestCase):
         )
         self.assertGreater(enabled_index, health_index)
 
+    def test_controller_sandbox_allows_only_headscale_runtime_write_roots(self) -> None:
+        service = (
+            ROOT / "server/systemd/hermes-rdp.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("ReadWritePaths=-/var/lib/headscale", service)
+        self.assertIn("ReadWritePaths=-/var/run/headscale", service)
+
     def test_bounded_mesh_key_helper_allows_only_host_or_connector(self) -> None:
         helper = (
             ROOT / "server/bin/bakunity-rdp-mesh-key.sh"
