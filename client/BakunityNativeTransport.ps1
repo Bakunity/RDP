@@ -148,6 +148,10 @@ function Install-BakunityNativeTransportBinary {
         try {
             Push-Location $Module
             try {
+                & $GoExe mod download
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Bakunity Transport dependency download failed: $LASTEXITCODE"
+                }
                 & $GoExe build -trimpath -ldflags '-s -w' -o $Candidate '.\cmd\bakunity-transport'
                 if ($LASTEXITCODE -ne 0) {
                     throw "Bakunity Transport build failed: $LASTEXITCODE"
