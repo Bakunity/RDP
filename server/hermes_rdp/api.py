@@ -324,6 +324,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             command = dict(command)
             command["repository_ref"] = self.server.config.client_ref
         current = self.server.registry.get_device(device_id)
+        reported_client_ref = str(
+            telemetry.get("client_repository_ref") or ""
+        ).strip().lower()
+        desired_client_ref = (
+            reported_client_ref
+            if self.server.config.is_client_ref_compatible(reported_client_ref)
+            else self.server.config.client_ref
+        )
 
         # Heavy telemetry is leased only for the currently opened device view.
         # Agents still poll every 3s for commands/heartbeat in background mode.
@@ -343,7 +351,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "command": command,
                 "desired_enabled": bool(current["enabled"]),
-                "desired_client_ref": self.server.config.client_ref,
+                "desired_client_ref": desired_client_ref,
                 "trusted_rdp_certificate_enabled": (
                     self.server.config.trusted_rdp_certificate_enabled
                 ),
