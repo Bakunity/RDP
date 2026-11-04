@@ -28,6 +28,12 @@ LockPersonality=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ReadWritePaths=/var/lib/hermes-rdp
+ReadWritePaths=-/etc/letsencrypt
+ReadWritePaths=-/var/lib/letsencrypt
+ReadWritePaths=-/var/log/letsencrypt
+ReadWritePaths=-/var/www/hermes-rdp-acme
+ReadWritePaths=-/etc/nginx/conf.d
+ReadWritePaths=-/etc/nginx/sites-enabled
 ReadOnlyPaths=/etc/hermes-rdp
 
 [Install]
