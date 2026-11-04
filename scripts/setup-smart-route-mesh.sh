@@ -374,7 +374,7 @@ if (($# != 1)); then
   exit 2
 fi
 case "$1" in
-  host) TAG="tag:bakunity-host" ;;
+  host) TAG="tag:bakunity-host,tag:bakunity-connector" ;;
   connector) TAG="tag:bakunity-connector" ;;
   *) echo "invalid mesh role" >&2; exit 2 ;;
 esac
