@@ -24,6 +24,21 @@ class TelegramUxBot(TelegramBot):
             self.render()
             return
 
+        if data.startswith("details:"):
+            device_id = data.split(":", 1)[1]
+            try:
+                self.registry.get_device(device_id)
+            except KeyError:
+                self._answer(callback_id, "Устройство не найдено")
+                self.render()
+                return
+            self._set_live(False)
+            self.registry.set_setting("selected_device", device_id)
+            self.registry.set_setting("screen", "device_details")
+            self._answer(callback_id)
+            self.render()
+            return
+
         if data.startswith("repair:"):
             device_id = data.split(":", 1)[1]
             try:
@@ -76,25 +91,145 @@ class TelegramUxBot(TelegramBot):
         return text, keyboard
 
     def _device(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        online = self._online(device)
+        telemetry = device.get("telemetry") or {}
+        sessions = telemetry.get("sessions") or []
+        user = telemetry.get("interactive_user") or (sessions[0] if sessions else "нет")
+        desired_access = bool(device.get("enabled", True))
+        pending_action = str(device.get("pending_command") or "")
+
+        if device.get("last_seen"):
+            import time
+            age = max(0, int(time.time()) - int(device.get("last_seen") or 0))
+            data_age = f"{age} сек. назад"
+        else:
+            data_age = "ещё не поступили"
+
+        if online and "access_enabled" in telemetry:
+            access_text = (
+                f"{self.icon('success')} ВКЛЮЧЕН"
+                if bool(telemetry.get("access_enabled"))
+                else f"{self.icon('access_off')} ВЫКЛЮЧЕН"
+            )
+        else:
+            access_text = f"{self.icon('info')} НЕИЗВЕСТНО"
+
+        if online and bool(telemetry.get("ssh_tunnel_running")):
+            tunnel_text = f"{self.icon('success')} ПОДКЛЮЧЕН"
+        elif online and telemetry.get("ssh_tunnel_running") is False:
+            tunnel_text = f"{self.icon('access_off')} ОТКЛЮЧЕН"
+        else:
+            tunnel_text = f"{self.icon('info')} НЕИЗВЕСТНО"
+
+        text = (
+            f"{self.icon('success' if online else 'cancel')} "
+            f"{escape(device['display_name']).upper()} · "
+            f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
+            f"Компьютер: {escape(device['machine_name'])}\n"
+            f"Система: {escape(telemetry.get('os', '—'))}\n"
+            f"Пользователь: {escape(user)}\n"
+            f"RDP: {self.config.public_host}:{device['rdp_port']}\n"
+            f"Данные: {data_age}\n\n"
+            "СОСТОЯНИЕ\n"
+            f"Доступ: {access_text}\n"
+            f"SSH-туннель: {tunnel_text}\n"
+            f"Сессии Windows: {len(sessions)}"
+        )
+
+        if pending_action:
+            control_rows = [
+                [
+                    self.button(
+                        "timer",
+                        "КОМАНДА ВЫПОЛНЯЕТСЯ",
+                        "refresh",
+                        style="primary",
+                    )
+                ]
+            ]
+        elif desired_access:
+            control_rows = [
+                [
+                    self.button(
+                        "access_off",
+                        "ВЫКЛЮЧИТЬ ДОСТУП",
+                        f"cmd:off:{device['id']}",
+                        style="danger",
+                    )
+                ],
+                [
+                    self.button(
+                        "repeat",
+                        "ПЕРЕЗАПУСК",
+                        f"cmd:restart:{device['id']}",
+                        style="primary",
+                    )
+                ],
+            ]
+        else:
+            control_rows = [
+                [
+                    self.button(
+                        "access_on",
+                        "ВКЛЮЧИТЬ ДОСТУП",
+                        f"cmd:on:{device['id']}",
+                        style="success",
+                    )
+                ]
+            ]
+
+        automatic = online and bool(telemetry.get("maintenance_capable"))
+        keyboard = {
+            "inline_keyboard": control_rows
+            + [
+                [
+                    self.button(
+                        "repair",
+                        (
+                            "ВОССТАНОВИТЬ АВТО"
+                            if automatic
+                            else "ВОССТАНОВИТЬ КЛИЕНТ"
+                        ),
+                        f"repair:{device['id']}",
+                        style="primary",
+                    )
+                ],
+                [
+                    self.button(
+                        "info",
+                        "ПОДРОБНЕЕ",
+                        f"details:{device['id']}",
+                    )
+                ],
+                [
+                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("back", "К СПИСКУ", "home"),
+                ],
+            ]
+        }
+        return text, keyboard
+
+    def _device_details(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
         text, keyboard = super()._device(device)
         rows = list(keyboard.get("inline_keyboard", []))
-        telemetry = device.get("telemetry") or {}
-        automatic = self._online(device) and bool(telemetry.get("maintenance_capable"))
-        rows.insert(
-            max(0, len(rows) - 1),
-            [
-                self.button(
-                    "repair",
-                    (
-                        "ВОССТАНОВИТЬ АВТО"
-                        if automatic
-                        else "ВОССТАНОВИТЬ КЛИЕНТ"
-                    ),
-                    f"repair:{device['id']}",
-                    style="primary",
-                )
-            ],
-        )
+        if rows:
+            last = list(rows[-1])
+            replaced = []
+            for button in last:
+                if button.get("callback_data") == "home":
+                    replaced.append(
+                        self.button(
+                            "back",
+                            "К КОМПЬЮТЕРУ",
+                            f"device:{device['id']}",
+                        )
+                    )
+                else:
+                    replaced.append(button)
+            rows[-1] = replaced
         return text, {"inline_keyboard": rows}
 
     def _repair(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -144,7 +279,7 @@ class TelegramUxBot(TelegramBot):
 
     def _render_content(self) -> tuple[str, dict[str, Any]]:
         screen = self.registry.get_setting("screen", "home") or "home"
-        if screen == "repair":
+        if screen in {"repair", "device_details"}:
             device_id = self.registry.get_setting("selected_device", "") or ""
             try:
                 device = self.registry.get_device(device_id)
@@ -152,5 +287,7 @@ class TelegramUxBot(TelegramBot):
                 self.registry.set_setting("screen", "home")
                 self.registry.set_setting("selected_device", "")
                 return self._home()
-            return self._repair(device)
+            if screen == "repair":
+                return self._repair(device)
+            return self._device_details(device)
         return super()._render_content()
