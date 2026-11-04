@@ -461,6 +461,33 @@ function Build-Mappings {
     return $Mappings
 }
 
+function Test-MappingSetChanged {
+    param(
+        [array]$Mappings,
+        [hashtable]$Existing
+    )
+
+    if ($Mappings.Count -ne $Existing.Count) {
+        return $true
+    }
+    foreach ($Mapping in $Mappings) {
+        $DeviceId = [string]$Mapping.device_id
+        if (-not $Existing.ContainsKey($DeviceId)) {
+            return $true
+        }
+        $Before = $Existing[$DeviceId]
+        if (
+            [string]$Before.hostname -ne [string]$Mapping.hostname -or
+            [string]$Before.loopback -ne [string]$Mapping.loopback -or
+            [string]$Before.server_ipv4 -ne [string]$Mapping.server_ipv4 -or
+            [int]$Before.rdp_port -ne [int]$Mapping.rdp_port
+        ) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Invoke-NamedAccessSync {
     $Config = Read-JsonFile -Path $ConfigPath
     if (-not $Config) {
@@ -470,6 +497,14 @@ function Invoke-NamedAccessSync {
     $State = Read-JsonFile -Path $StatePath
     $Existing = Convert-StateMappings -State $State
     $Mappings = @(Build-Mappings -Manifest $Manifest -Existing $Existing)
+
+    if (-not (Test-MappingSetChanged -Mappings $Mappings -Existing $Existing)) {
+        Write-Log (
+            "SYNC=UNCHANGED connector=$($Manifest.connector.id) " +
+            "devices=$($Mappings.Count)"
+        )
+        return
+    }
 
     Start-IpHelper
 
@@ -490,10 +525,22 @@ function Invoke-NamedAccessSync {
     $OriginalHosts = [IO.File]::ReadAllText($HostsPath)
     try {
         foreach ($Mapping in $Mappings) {
-            Add-PortProxy `
-                -ListenAddress ([string]$Mapping.loopback) `
-                -ServerIPv4 ([string]$Mapping.server_ipv4) `
-                -RemotePort ([int]$Mapping.rdp_port)
+            $DeviceId = [string]$Mapping.device_id
+            $NeedsProxyUpdate = $true
+            if ($Existing.ContainsKey($DeviceId)) {
+                $Before = $Existing[$DeviceId]
+                $NeedsProxyUpdate = (
+                    [string]$Before.loopback -ne [string]$Mapping.loopback -or
+                    [string]$Before.server_ipv4 -ne [string]$Mapping.server_ipv4 -or
+                    [int]$Before.rdp_port -ne [int]$Mapping.rdp_port
+                )
+            }
+            if ($NeedsProxyUpdate) {
+                Add-PortProxy `
+                    -ListenAddress ([string]$Mapping.loopback) `
+                    -ServerIPv4 ([string]$Mapping.server_ipv4) `
+                    -RemotePort ([int]$Mapping.rdp_port)
+            }
         }
 
         Write-ManagedHosts -OriginalText $OriginalHosts -Mappings $Mappings
