@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from hermes_rdp.db import Registry, hash_secret
+from hermes_rdp.native_transport import normalize_native_transport_host
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class NativeTransportTests(unittest.TestCase):
+    def test_native_host_state_requires_valid_peer_for_online(self) -> None:
+        valid_peer = "12D3KooWQp6vU5hBq9kL8mN7rS4tV2xY6zA3cD5eF7gH9jK"
+        state = normalize_native_transport_host(
+            {
+                "captured_at": 123,
+                "installed": True,
+                "online": True,
+                "peer_id": valid_peer,
+                "relay_connected": True,
+                "path": "direct",
+                "version": "0.1.0",
+            }
+        )
+        self.assertTrue(state["online"])
+        self.assertEqual(state["peer_id"], valid_peer)
+        self.assertEqual(state["path"], "direct")
+
+        invalid = normalize_native_transport_host(
+            {
+                "online": True,
+                "peer_id": "not-a-peer-id",
+                "path": "something-else",
+            }
+        )
+        self.assertFalse(invalid["peer_id"])
+        self.assertEqual(invalid["path"], "idle")
+
+    def test_route_policy_is_scoped_to_connector_and_target_pc(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            registry = Registry(Path(temp) / "state.sqlite3", 53389, 53420)
+            connector, _ = registry.create_named_access_token("Laptop")
+            now = 1
+            with sqlite3.connect(registry.db_path) as conn:
+                for index, device_id in enumerate(("dev-a", "dev-b")):
+                    conn.execute(
+                        "INSERT INTO devices("
+                        "id,display_name,machine_name,fingerprint,token_hash,"
+                        "rdp_port,created_at,updated_at,slug"
+                        ") VALUES(?,?,?,?,?,?,?,?,?)",
+                        (
+                            device_id,
+                            device_id,
+                            device_id,
+                            "fp",
+                            hash_secret("token-" + device_id),
+                            53389 + index,
+                            now,
+                            now,
+                            device_id,
+                        ),
+                    )
+
+            self.assertEqual(
+                registry.get_connector_device_route_policy(
+                    connector["id"],
+                    "dev-a",
+                ),
+                "auto",
+            )
+            registry.set_connector_device_route_policy(
+                connector["id"],
+                "dev-a",
+                "p2p",
+            )
+            self.assertEqual(
+                registry.get_connector_device_route_policy(
+                    connector["id"],
+                    "dev-a",
+                ),
+                "p2p",
+            )
+            self.assertEqual(
+                registry.get_connector_device_route_policy(
+                    connector["id"],
+                    "dev-b",
+                ),
+                "auto",
+            )
+
+    def test_go_transport_is_own_rdp_data_plane(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            '"/bakunity/rdp/1.0.0"',
+            "EnableHolePunching",
+            "NATPortMap",
+            "circuitrelay.WithACL",
+            "AllowReserve",
+            "AllowConnect",
+            "shared secret is too short",
+            "invalid transport authorization",
+            "127.0.0.1:3389",
+            "direct Bakunity path unavailable",
+        ):
+            self.assertIn(marker, source)
+        self.assertNotIn("tailscale", source.lower())
+        self.assertNotIn("headscale", source.lower())
+
+    def test_native_relay_setup_is_bounded_and_self_hosted(self) -> None:
+        setup = (
+            ROOT / "scripts/setup-native-transport.sh"
+        ).read_text(encoding="utf-8")
+        service = (
+            ROOT / "server/systemd/bakunity-transport.service"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "BAKUNITY_GO_VERSION",
+            "sha256sum -c",
+            "bakunity-transport.service",
+            "ufw allow 7444/tcp",
+            "ufw allow 7444/udp",
+            '("native_transport_enabled", "1")',
+            "BAKUNITY_TRANSPORT=PASS",
+        ):
+            self.assertIn(marker, setup)
+        for marker in (
+            "NoNewPrivileges=true",
+            "ProtectSystem=strict",
+            "ReadWritePaths=/var/lib/bakunity-transport",
+            "127.0.0.1:7445",
+        ):
+            self.assertIn(marker, service)
+
+    def test_windows_native_transport_uses_immutable_source_and_system_identity(self) -> None:
+        lib = (
+            ROOT / "client/BakunityNativeTransport.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "RepositoryRef must be an immutable 40-character SHA",
+            "Pinned Go toolchain checksum mismatch",
+            "https://codeload.github.com/bakunity/RDP/tar.gz/",
+            "New-ScheduledTaskPrincipal -UserId 'SYSTEM'",
+            "Bakunity Transport TCP",
+            "Bakunity Transport UDP",
+            "Set-BakunityNativeForward",
+        ):
+            self.assertIn(marker, lib)
+
+    def test_host_and_connector_both_receive_native_transport_library(self) -> None:
+        host_setup = (
+            ROOT / "scripts/setup-smart-route-host.ps1"
+        ).read_text(encoding="utf-8-sig")
+        connector_setup = (
+            ROOT / "scripts/install-smart-route-connector.ps1"
+        ).read_text(encoding="utf-8-sig")
+        host_worker = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        connector_worker = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+
+        self.assertIn("BakunityNativeTransport.ps1", host_setup)
+        self.assertIn("BakunityNativeTransport.ps1", connector_setup)
+        self.assertIn("Sync-HostNativeTransport", host_worker)
+        self.assertIn("Sync-ConnectorNativeTransport", connector_worker)
+        self.assertIn("routes.native", connector_worker)
+        self.assertIn("Set-BakunityNativeForward", connector_worker)
+
+    def test_native_route_is_preferred_before_legacy_mesh_and_vps_relay(self) -> None:
+        worker = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        native_index = worker.index("$Native = $Device.routes.native")
+        legacy_index = worker.index("$P2p = $Device.routes.p2p")
+        relay_index = worker.index("$Relay = $Device.routes.relay")
+        self.assertLess(native_index, legacy_index)
+        self.assertLess(legacy_index, relay_index)
+        self.assertIn("'native_p2p'", worker)
+        self.assertIn("'native_relay'", worker)
+
+    def test_api_exposes_native_transport_without_replacing_old_relay(self) -> None:
+        api = (
+            ROOT / "server/hermes_rdp/api.py"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            'path == "/v1/named-access/native-transport-bootstrap"',
+            'action == "native-transport-telemetry"',
+            'action == "native-transport-bootstrap"',
+            '"native_transport": {',
+            '"relay": {',
+        ):
+            self.assertIn(marker, api)
+
+    def test_telegram_ux_is_computer_first_and_pair_specific(self) -> None:
+        bot = (
+            ROOT / "server/hermes_rdp/bot_ux.py"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "ДОБАВИТЬ КОМПЬЮТЕР",
+            "ОТКУДА ПОДКЛЮЧАЮСЬ",
+            '"ПОДКЛЮЧЕНИЕ"',
+            "device_connection_source",
+            "route_pair:",
+            "connection_source:{connector['id']}",
+            "get_connector_device_route_policy",
+            "set_connector_device_route_policy",
+            "BAKUNITY P2P",
+            "BAKUNITY RELAY",
+        ):
+            self.assertIn(marker, bot)
+        self.assertNotIn('"ДОБАВИТЬ HOST"', bot)
+        self.assertNotIn(
+            "connection_source:{device['id']}:{connector['id']}",
+            bot,
+        )
+        self.assertNotIn("route_device:", bot)
+
+    def test_update_server_versions_native_transport_source(self) -> None:
+        update = (
+            ROOT / "scripts/update-server.sh"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            '"client/BakunityNativeTransport.ps1"',
+            '"native-transport/go.mod"',
+            '"native-transport/cmd/bakunity-transport/main.go"',
+            'test -f "$ROOT/scripts/setup-native-transport.sh"',
+        ):
+            self.assertIn(marker, update)
+
+
+if __name__ == "__main__":
+    unittest.main()

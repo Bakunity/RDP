@@ -1,0 +1,23 @@
+[Unit]
+Description=Bakunity native P2P/relay transport
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bakunity-transport
+Group=bakunity-transport
+ExecStart=/usr/local/bin/bakunity-transport relay --identity /var/lib/bakunity-transport/identity.key --port 7444 --control 127.0.0.1:7445
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/bakunity-transport
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

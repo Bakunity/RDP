@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS named_access_tokens (
     telemetry_json TEXT,
     updated_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS connector_device_routes (
+    connector_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    route_policy TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY(connector_id, device_id),
+    FOREIGN KEY(connector_id) REFERENCES named_access_tokens(id) ON DELETE CASCADE,
+    FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
 """
 
 
@@ -403,6 +413,79 @@ class Registry:
         if cursor.rowcount != 1:
             raise KeyError(connector_id)
         return clean
+
+    def get_connector_device_route_policy(
+        self,
+        connector_id: str,
+        device_id: str,
+    ) -> str:
+        with self.connect() as conn:
+            connector = conn.execute(
+                "SELECT route_policy FROM named_access_tokens "
+                "WHERE id=? AND revoked_at IS NULL",
+                (connector_id,),
+            ).fetchone()
+            if not connector:
+                raise KeyError(connector_id)
+            device = conn.execute(
+                "SELECT 1 FROM devices WHERE id=? AND revoked=0",
+                (device_id,),
+            ).fetchone()
+            if not device:
+                raise KeyError(device_id)
+            row = conn.execute(
+                "SELECT route_policy FROM connector_device_routes "
+                "WHERE connector_id=? AND device_id=?",
+                (connector_id, device_id),
+            ).fetchone()
+        return str(
+            (row["route_policy"] if row else connector["route_policy"])
+            or "auto"
+        ).lower()
+
+    def set_connector_device_route_policy(
+        self,
+        connector_id: str,
+        device_id: str,
+        policy: str,
+    ) -> str:
+        clean = self.normalize_route_policy(policy)
+        timestamp = now()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute(
+                "SELECT 1 FROM named_access_tokens "
+                "WHERE id=? AND revoked_at IS NULL",
+                (connector_id,),
+            ).fetchone():
+                raise KeyError(connector_id)
+            if not conn.execute(
+                "SELECT 1 FROM devices WHERE id=? AND revoked=0",
+                (device_id,),
+            ).fetchone():
+                raise KeyError(device_id)
+            conn.execute(
+                "INSERT INTO connector_device_routes("
+                "connector_id,device_id,route_policy,updated_at"
+                ") VALUES(?,?,?,?) "
+                "ON CONFLICT(connector_id,device_id) DO UPDATE SET "
+                "route_policy=excluded.route_policy,"
+                "updated_at=excluded.updated_at",
+                (connector_id, device_id, clean, timestamp),
+            )
+        return clean
+
+    def clear_connector_device_route_policy(
+        self,
+        connector_id: str,
+        device_id: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM connector_device_routes "
+                "WHERE connector_id=? AND device_id=?",
+                (connector_id, device_id),
+            )
 
     def update_named_access_telemetry(
         self,

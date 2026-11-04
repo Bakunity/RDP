@@ -13,6 +13,16 @@ python3 -m compileall -q server/hermes_rdp tests scripts/check-public-examples.p
 echo '== Python tests =='
 PYTHONPATH=server python3 -m unittest discover -s tests -v
 
+echo '== Bakunity native transport =='
+(
+  cd native-transport
+  GOTOOLCHAIN=go1.25.7+auto go mod tidy
+  GOTOOLCHAIN=go1.25.7+auto go test ./...
+  GOTOOLCHAIN=go1.25.7+auto GOOS=windows GOARCH=amd64 \
+    go build -trimpath -o /tmp/BakunityTransport.exe ./cmd/bakunity-transport
+  test -s /tmp/BakunityTransport.exe
+)
+
 echo '== Public example privacy =='
 python3 scripts/check-public-examples.py
 
