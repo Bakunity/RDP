@@ -11,7 +11,9 @@ $MaintenanceRunnerPath = Join-Path $BaseDir 'HermesRdpMaintenance.ps1'
 $MaintenanceStatusPath = Join-Path $BaseDir 'maintenance-status.json'
 $MaintenanceActivePath = Join-Path $BaseDir 'maintenance-active.json'
 $MaintenanceTaskName = 'Hermes RDP Maintenance'
+$CertificateSyncPath = Join-Path $BaseDir 'sync-rdp-certificate.ps1'
 $AutoMaintenanceRetrySeconds = 3600
+$CertificateTargetRetrySeconds = 60
 $PollSeconds = 3
 $SlowTelemetrySeconds = 15
 $TopProcessesSeconds = 6
@@ -27,6 +29,7 @@ $script:HermesSshPids = @()
 $script:SshDiscoveryCapturedAt = 0
 $script:CertificateHealth = $null
 $script:CertificateHealthCapturedAt = 0
+$script:CertificateTargetLastAttempt = 0
 
 $PinnedHttpClientSource = @'
 using System;
@@ -743,7 +746,12 @@ function Get-TopProcesses {
 
 
 function Read-CertificateLifecycleHealth {
-    $Result = [ordered]@{ ok = $false; task_state = 'ABSENT'; hash_type = 0 }
+    $Result = [ordered]@{
+        ok = $false
+        task_state = 'ABSENT'
+        hash_type = 0
+        thumbprint = ''
+    }
     try {
         $Task = Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
         if ($Task) {
@@ -753,6 +761,7 @@ function Read-CertificateLifecycleHealth {
         $HashType = [int]$Rdp.SSLCertificateSHA1HashType
         $Result.hash_type = $HashType
         $Thumbprint = (([string]$Rdp.SSLCertificateSHA1Hash) -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+        $Result.thumbprint = $Thumbprint
         $Certificate = $null
         if ($Thumbprint.Length -eq 40) {
             $Certificate = Get-ChildItem -LiteralPath 'Cert:\LocalMachine\My' -ErrorAction SilentlyContinue |
@@ -842,6 +851,7 @@ function Get-SlowTelemetry {
         certificate_lifecycle_ok = [bool]$CertificateHealth.ok
         certificate_rotation_task_state = [string]$CertificateHealth.task_state
         rdp_certificate_hash_type = [int]$CertificateHealth.hash_type
+        rdp_certificate_thumbprint = [string]$CertificateHealth.thumbprint
     }
 }
 
@@ -911,11 +921,114 @@ function Get-Telemetry {
         certificate_lifecycle_ok = [bool]$Slow.certificate_lifecycle_ok
         certificate_rotation_task_state = [string]$Slow.certificate_rotation_task_state
         rdp_certificate_hash_type = [int]$Slow.rdp_certificate_hash_type
+        rdp_certificate_thumbprint = [string]$Slow.rdp_certificate_thumbprint
         top_processes = if ($LiveTelemetry) { @($script:TopProcesses) } else { @() }
         top_processes_captured_at = if ($LiveTelemetry) {
             [int64]$script:TopProcessesCapturedAt
         }
         else { 0 }
+    }
+}
+
+
+function Get-NativePowerShellPath {
+    $System32 = Join-Path $env:WINDIR 'System32'
+    if (
+        [Environment]::Is64BitOperatingSystem -and
+        -not [Environment]::Is64BitProcess
+    ) {
+        $System32 = Join-Path $env:WINDIR 'Sysnative'
+    }
+    return Join-Path $System32 'WindowsPowerShell\v1.0\powershell.exe'
+}
+
+function Invoke-CertificateTargetReconcile {
+    param([object]$Telemetry, [object]$Response)
+
+    if (
+        -not $Response -or
+        -not $Response.PSObject.Properties['desired_rdp_certificate_thumbprint']
+    ) {
+        return
+    }
+
+    $Expected = (
+        ([string]$Response.desired_rdp_certificate_thumbprint) -replace
+        '[^0-9A-Fa-f]',
+        ''
+    ).ToUpperInvariant()
+    if ($Expected.Length -ne 40) {
+        return
+    }
+
+    $Current = ''
+    if ($Telemetry.PSObject.Properties['rdp_certificate_thumbprint']) {
+        $Current = (
+            ([string]$Telemetry.rdp_certificate_thumbprint) -replace
+            '[^0-9A-Fa-f]',
+            ''
+        ).ToUpperInvariant()
+    }
+    if ($Current -eq $Expected) {
+        return
+    }
+
+    try {
+        if ([int]$Telemetry.rdp_connections -gt 0) {
+            return
+        }
+    }
+    catch {
+        return
+    }
+
+    $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if (
+        $script:CertificateTargetLastAttempt -gt 0 -and
+        ($Now - [int64]$script:CertificateTargetLastAttempt) -lt
+            $CertificateTargetRetrySeconds
+    ) {
+        return
+    }
+    $script:CertificateTargetLastAttempt = $Now
+
+    try {
+        if (-not (Test-Path -LiteralPath $CertificateSyncPath)) {
+            throw "certificate sync script is missing: $CertificateSyncPath"
+        }
+        $PowerShellPath = Get-NativePowerShellPath
+        if (-not (Test-Path -LiteralPath $PowerShellPath)) {
+            throw "native PowerShell is missing: $PowerShellPath"
+        }
+
+        $Output = & $PowerShellPath `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $CertificateSyncPath 2>&1 |
+            Out-String
+        $ExitCode = $LASTEXITCODE
+        if ($Output.Trim()) {
+            foreach ($Line in @($Output.Trim() -split "`r?`n")) {
+                if ($Line) {
+                    Write-AgentLog "certificate-sync: $Line"
+                }
+            }
+        }
+        if ($ExitCode -ne 0) {
+            throw "certificate sync exited with code $ExitCode"
+        }
+
+        $script:CertificateHealth = $null
+        $script:CertificateHealthCapturedAt = 0
+        $script:SlowTelemetry = $null
+        $script:SlowTelemetryCapturedAt = 0
+        Write-AgentLog (
+            "RDP certificate target applied: " +
+            "$Current -> $Expected"
+        )
+    }
+    catch {
+        Write-AgentLog "RDP certificate target sync failed: $($_.Exception.Message)"
     }
 }
 
@@ -1123,6 +1236,7 @@ while ($true) {
         }
 
         $State = Get-AgentState
+        Invoke-CertificateTargetReconcile -Telemetry $Telemetry -Response $Response
         Invoke-MaintenanceReconcile -State $State -Telemetry $Telemetry -Response $Response
     }
     catch {
