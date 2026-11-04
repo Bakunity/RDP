@@ -120,6 +120,24 @@ class NamedAccessTests(unittest.TestCase):
         ):
             self.assertIn(marker, installer)
 
+    def test_named_access_acl_protects_dacl_without_forcing_system_owner(self) -> None:
+        installer = (
+            ROOT / "scripts/install-named-access.ps1"
+        ).read_text(encoding="utf-8-sig")
+        worker = (
+            ROOT / "client/BakunityNamedAccess.ps1"
+        ).read_text(encoding="utf-8-sig")
+
+        for text in (installer, worker):
+            self.assertIn(
+                "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+                text,
+            )
+            self.assertNotIn(
+                "O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)",
+                text,
+            )
+
     def test_uninstall_removes_only_recorded_named_access_runtime(self) -> None:
         uninstall = (
             ROOT / "scripts/uninstall-named-access.ps1"
