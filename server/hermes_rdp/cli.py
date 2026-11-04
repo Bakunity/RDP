@@ -329,8 +329,8 @@ def main() -> None:
             print(f"CONNECTOR_ID={connector['id']}")
             print(f"CONNECTOR_NAME={connector['name']}")
             print(f"DEVICE_DOMAIN={domain}")
+            print("WARNING=The next line contains a read-only secret token. Do not share it.")
             print("POWERSHELL_ADMIN_COMMAND=" + command)
-            print("SECRET=The install command contains a read-only token; do not share it.")
             return
 
         if args.named_access_command == "list":
@@ -347,7 +347,10 @@ def main() -> None:
             return
 
         if args.named_access_command == "revoke":
-            registry.revoke_named_access_token(args.connector_id)
+            try:
+                registry.revoke_named_access_token(args.connector_id)
+            except KeyError:
+                raise SystemExit("Named Access connector not found")
             print("REVOKED=PASS")
             return
 
