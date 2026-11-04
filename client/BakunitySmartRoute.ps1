@@ -279,14 +279,24 @@ function Select-DeviceRoute {
             try {
                 $Forward = Set-BakunityNativeForward -Key ([string]$Device.id) -PeerId ([string]$Native.peer_id) -SharedSecret ([string]$Native.shared_secret) -Listen "127.0.0.1:$NativePort" -Mode $NativeMode
                 if ($Forward -and [bool]$Forward.ok) {
+                    $NativePath = [string]$Forward.path
+                    $NativeType = if ($NativePath -eq 'direct') {
+                        'native_p2p'
+                    } elseif ($NativePath -eq 'relay') {
+                        'native_relay'
+                    } else {
+                        'native_auto'
+                    }
                     return [pscustomobject]@{
-                        type = if ($Policy -eq 'p2p') { 'native_p2p' } else { 'native_auto' }
+                        type = $NativeType
                         host = '127.0.0.1'
                         target_ipv4 = '127.0.0.1'
                         target_port = [int]$NativePort
                         latency_ms = 0
-                        reason = if ($Policy -eq 'p2p') {
-                            'bakunity_direct_required'
+                        reason = if ($NativePath -eq 'direct') {
+                            'bakunity_p2p_direct'
+                        } elseif ($NativePath -eq 'relay') {
+                            'bakunity_relay'
                         } else {
                             'bakunity_native_auto'
                         }
