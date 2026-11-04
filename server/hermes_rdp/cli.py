@@ -216,6 +216,8 @@ def main() -> None:
         errors = 0
         print(f"config: OK ({config.public_host})")
         print(f"database: OK ({config.db_path})")
+        device_domain = registry.get_device_domain()
+        print(f"device-domain: {device_domain or 'disabled'}")
         try:
             context = ssl._create_unverified_context()
             with urllib.request.urlopen(
