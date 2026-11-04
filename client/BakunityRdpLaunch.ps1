@@ -28,18 +28,43 @@ function Get-DeviceRows {
     param([object]$State)
 
     $Rows = @()
-    if (-not $State.mappings) {
-        return $Rows
+
+    if ($State.devices) {
+        foreach ($Entry in @($State.devices)) {
+            $Rows += [pscustomobject]@{
+                device_id = [string]$Entry.device_id
+                slug = ([string]$Entry.slug).Trim().ToLowerInvariant()
+                hostname = ([string]$Entry.hostname).Trim().ToLowerInvariant()
+                rdp_port = [int]$Entry.rdp_port
+                enabled = [bool]$Entry.enabled
+            }
+        }
+        return @($Rows | Sort-Object hostname)
     }
-    foreach ($Property in $State.mappings.PSObject.Properties) {
-        $Entry = $Property.Value
-        $Rows += [pscustomobject]@{
-            device_id = [string]$Property.Name
-            hostname = [string]$Entry.hostname
-            rdp_port = [int]$Entry.rdp_port
-            enabled = [bool]$Entry.enabled
+
+    # Backward compatibility with state v1/v2.
+    if ($State.mappings) {
+        $Domain = ([string]$State.device_domain).Trim().ToLowerInvariant()
+        foreach ($Property in $State.mappings.PSObject.Properties) {
+            $Entry = $Property.Value
+            $HostName = ([string]$Entry.hostname).Trim().ToLowerInvariant()
+            $Slug = ([string]$Entry.slug).Trim().ToLowerInvariant()
+            if (-not $Slug -and $Domain -and $HostName.EndsWith(".$Domain")) {
+                $Slug = $HostName.Substring(
+                    0,
+                    $HostName.Length - $Domain.Length - 1
+                )
+            }
+            $Rows += [pscustomobject]@{
+                device_id = [string]$Property.Name
+                slug = $Slug
+                hostname = $HostName
+                rdp_port = [int]$Entry.rdp_port
+                enabled = [bool]$Entry.enabled
+            }
         }
     }
+
     return @($Rows | Sort-Object hostname)
 }
 
@@ -63,22 +88,34 @@ function Resolve-Target {
 
     $Candidates = @(
         $Rows | Where-Object {
-            $HostName = ([string]$_.hostname).ToLowerInvariant()
-            $Slug = if ($Domain -and $HostName.EndsWith(".$Domain")) {
-                $HostName.Substring(
+            $HostName = ([string]$_.hostname).Trim().ToLowerInvariant()
+            $Slug = ([string]$_.slug).Trim().ToLowerInvariant()
+            if (-not $Slug -and $Domain -and $HostName.EndsWith(".$Domain")) {
+                $Slug = $HostName.Substring(
                     0,
                     $HostName.Length - $Domain.Length - 1
                 )
-            }
-            else {
-                ''
             }
             $HostName -eq $InputValue -or $Slug -eq $InputValue
         }
     )
 
     if ($Candidates.Count -eq 0) {
-        throw "Bakunity device not found: $InputValue"
+        $Available = @(
+            $Rows |
+                Where-Object { $_.hostname } |
+                Select-Object -ExpandProperty hostname
+        ) -join ', '
+        if ($Available) {
+            throw (
+                "Bakunity device not found: $InputValue. " +
+                "Available: $Available"
+            )
+        }
+        throw (
+            "Bakunity device not found: $InputValue. " +
+            "Local Named Access state contains no devices."
+        )
     }
     if ($Candidates.Count -gt 1) {
         throw "Bakunity device name is ambiguous: $InputValue"
@@ -91,7 +128,7 @@ $Rows = @(Get-DeviceRows -State $State)
 
 if ($List) {
     $Rows |
-        Select-Object hostname,enabled |
+        Select-Object slug,hostname,enabled |
         Format-Table -AutoSize
     exit 0
 }
