@@ -6,6 +6,33 @@ Status: rolling engineering release ledger. Update continuously; do not wait unt
 
 ## Merged / current main since v1.3.0
 
+## Integration candidate
+
+### Compatibility-safe Bakunity runtime surface
+
+- Added public `bakunity-rdpctl` / `bakunity-rdp` entry points while retaining legacy `hermes_rdp`, systemd units, Windows Scheduled Tasks, local state paths and API identifiers for installed-agent compatibility.
+- Server update now accepts `BAKUNITY_RDP_REF` with `HERMES_RDP_REF` as a backward-compatible fallback.
+- Public release workflow and landing copy use Bakunity RDP branding; documentation explicitly identifies legacy Windows task names where operators must use the real installed identifiers.
+
+### Zero-config server bootstrap
+
+- Integrated the validated single-command bootstrap from PR #37 as `scripts/install.sh`.
+- Keeps Telegram bot token entry masked, validates the bot and owner claim, resolves source immutably and preserves the existing advanced `install-server.sh` path.
+- Trusted public-IP RDP certificate setup can coexist with nginx on TCP 80 through a managed ACME webroot and bounded rollback.
+
+### Windows client lifecycle
+
+- Integrated the live-validated lifecycle from PR #38 without replacing the accepted installer core.
+- Same-server partial installs self-heal through Repair without new pairing or identity rotation.
+- Different-server installs use transactional REPLACE with old-state rollback.
+- Complete uninstall restores the pre-Bakunity RDP listener certificate binding, revokes server credentials, removes tasks/state and verifies local RDP remains available.
+- Revoke verification normalizes already-revoked responses instead of reporting false failure after the server has already removed the device.
+
+### Website and VPS migration preparation
+
+- Added the Matrix hero animation and dark/green Bakunity presentation from the still-relevant parts of PR #40.
+- Added `deploy/nginx-rdp.bakunity.com.conf` and a non-destructive VPS migration path; Vercel remains the active fallback until DNS/TLS/origin checks are completed.
+
 ### Vercel deployment filtering
 
 - Fixed the public-site Git integration creating Vercel deployments for unrelated product/runtime/context commits.
