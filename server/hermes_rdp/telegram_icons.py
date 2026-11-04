@@ -127,6 +127,33 @@ class TelegramEmojiTheme:
             )
         )
 
+
+    def pinned_ids(self) -> dict[str, tuple[str, str]]:
+        return {
+            name: (str(spec.custom_emoji_id), str(spec.pack))
+            for name, spec in self.icons.items()
+            if spec.custom_emoji_id and spec.pack
+        }
+
+    def invalidate_unverified(
+        self,
+        verified: dict[str, str],
+    ) -> int:
+        invalidated = 0
+        for name, spec in tuple(self.icons.items()):
+            if not spec.custom_emoji_id or not spec.pack:
+                continue
+            actual_pack = verified.get(str(spec.custom_emoji_id), "")
+            if actual_pack.lower() == str(spec.pack).lower():
+                continue
+            self.icons[name] = replace(
+                spec,
+                custom_emoji_id=None,
+                pack=None,
+            )
+            invalidated += 1
+        return invalidated
+
     def html(self, name: str) -> str:
         spec = self.icons[name]
         if not self.enabled or not spec.custom_emoji_id:

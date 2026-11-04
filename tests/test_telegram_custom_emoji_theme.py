@@ -94,6 +94,38 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
         self.assertEqual(resolved, 0)
         self.assertEqual(theme.icons["computer"], before)
 
+    def test_invalid_pinned_id_is_dropped_and_can_be_rediscovered(self) -> None:
+        theme = TelegramEmojiTheme()
+        invalidated = theme.invalidate_unverified(
+            {
+                str(ICONS["computer"].custom_emoji_id): "tgmacicons",
+            }
+        )
+        self.assertGreater(invalidated, 0)
+        self.assertIsNone(theme.icons["repair"].custom_emoji_id)
+        self.assertIsNone(theme.icons["repair"].pack)
+
+        resolved = theme.learn_pack(
+            "vector_icons_by_fStikBot",
+            {
+                "stickers": [
+                    {
+                        "emoji": "🔧",
+                        "custom_emoji_id": "777777777777777777",
+                    }
+                ]
+            },
+        )
+        self.assertGreaterEqual(resolved, 1)
+        self.assertEqual(
+            theme.icons["repair"].custom_emoji_id,
+            "777777777777777777",
+        )
+        self.assertEqual(
+            theme.icons["repair"].pack,
+            "vector_icons_by_fStikBot",
+        )
+
     def test_all_pinned_ids_are_numeric_and_from_approved_packs(self) -> None:
         for spec in ICONS.values():
             self.assertTrue(spec.fallback)

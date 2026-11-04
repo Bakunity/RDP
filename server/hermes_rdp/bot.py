@@ -91,6 +91,38 @@ class TelegramBot:
         if getattr(self, "_emoji_packs_loaded", False):
             return
         self._emoji_packs_loaded = True
+        theme = self._emoji_theme()
+
+        verified: dict[str, str] = {}
+        for _, (custom_id, expected_pack) in theme.pinned_ids().items():
+            try:
+                stickers = self.api_call(
+                    "getCustomEmojiStickers",
+                    {"custom_emoji_ids": [custom_id]},
+                    timeout=15,
+                ) or []
+            except Exception as exc:
+                LOG.debug(
+                    "custom emoji %s validation failed: %s",
+                    custom_id,
+                    exc,
+                )
+                continue
+            for sticker in stickers:
+                if not isinstance(sticker, dict):
+                    continue
+                actual_id = str(sticker.get("custom_emoji_id") or "")
+                set_name = str(sticker.get("set_name") or "")
+                if actual_id == custom_id and set_name:
+                    verified[custom_id] = set_name
+
+        invalidated = theme.invalidate_unverified(verified)
+        if invalidated:
+            LOG.info(
+                "Discarded %s unverified pinned Telegram emoji IDs",
+                invalidated,
+            )
+
         for pack_name in APPROVED_PACKS:
             try:
                 sticker_set = self.api_call(
@@ -98,10 +130,10 @@ class TelegramBot:
                     {"name": pack_name},
                     timeout=15,
                 )
-                self._emoji_theme().learn_pack(pack_name, sticker_set)
+                theme.learn_pack(pack_name, sticker_set)
             except Exception as exc:
                 LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
-        theme = self._emoji_theme()
+
         LOG.info(
             "Telegram emoji theme resolved %s/%s icons from packs: %s",
             theme.resolved_count(),
@@ -239,7 +271,7 @@ class TelegramBot:
                 self._set_live(False)
                 self.registry.set_setting("screen", "home")
                 self.registry.set_setting("selected_device", "")
-                self.render()
+                self.render(force_new=True)
             return
         callback = update.get("callback_query")
         if callback:
@@ -344,7 +376,7 @@ class TelegramBot:
         self._answer(callback_id)
 
     def _device_signature(self) -> tuple[Any, ...] | None:
-        if self.registry.get_setting("screen", "home") != "device":
+        if self.registry.get_setting("screen", "home") not in {"device", "device_details"}:
             return None
         device_id = self.registry.get_setting("selected_device", "") or ""
         if not device_id:
@@ -383,7 +415,7 @@ class TelegramBot:
         while not self.stop_event.wait(3):
             try:
                 screen = self.registry.get_setting("screen", "home")
-                if screen != "device":
+                if screen not in {"device", "device_details"}:
                     self.last_device_signature = None
                     was_active = False
                     continue
@@ -780,6 +812,20 @@ class TelegramBot:
         with self.lock:
             text, keyboard = self._render_content()
             message_id = self.registry.get_setting("dashboard_message_id", "") or ""
+            if force_new and message_id:
+                try:
+                    self.api_call(
+                        "deleteMessage",
+                        {
+                            "chat_id": self.config.telegram_chat_id,
+                            "message_id": int(message_id),
+                        },
+                        timeout=15,
+                    )
+                except Exception as exc:
+                    LOG.debug("old dashboard delete failed: %s", exc)
+                self.registry.set_setting("dashboard_message_id", "")
+                message_id = ""
             if message_id and not force_new:
                 try:
                     self._render_api_call(
