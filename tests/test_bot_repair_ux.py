@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -283,9 +284,12 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertIn("TEST PC", summary_text)
         self.assertIn("Windows 11 Pro", summary_text)
         self.assertIn("RDP: server.example:53391", summary_text)
-        self.assertIn("Подключение работает", summary_text)
-        self.assertIn("Удалённый доступ включён", summary_text)
-        self.assertIn("Система работает нормально", summary_text)
+        self.assertNotIn("СОСТОЯНИЕ", summary_text)
+        self.assertNotIn("Подключение работает", summary_text)
+        self.assertNotIn("Удалённый доступ включён", summary_text)
+        self.assertNotIn("Система работает нормально", summary_text)
+        self.assertNotIn("Пользователь:", summary_text)
+        self.assertNotIn("Данные:", summary_text)
         self.assertNotIn("SSH-туннель:", summary_text)
         self.assertNotIn("Клиент:", summary_text)
         self.assertNotIn("Обслуживание:", summary_text)
@@ -304,6 +308,8 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertNotIn("live", summary_callbacks)
 
         details_text, details_keyboard = self.bot._device_details(device)
+        self.assertNotIn("СОСТОЯНИЕ", details_text)
+        self.assertNotIn("Подключение работает", details_text)
         self.assertIn("АКТИВНОСТЬ", details_text)
         self.assertIn("Подключений через Bakunity: 1", details_text)
         self.assertIn("CPU:", details_text)
@@ -364,6 +370,13 @@ class TelegramRepairUxTests(unittest.TestCase):
         }
         self.assertIn("edit_name:dev123", callbacks)
         self.assertIn("edit_slug:dev123", callbacks)
+        labels = {
+            button["callback_data"]: button["text"]
+            for row in keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertIn("ИЗМЕНИТЬ ИМЯ", labels["edit_name:dev123"])
+        self.assertIn("ИЗМЕНИТЬ RDP-АДРЕС", labels["edit_slug:dev123"])
 
     def test_edit_name_flow_updates_device_from_plain_message(self) -> None:
         self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})
@@ -404,6 +417,40 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertEqual(device["slug"], "tima")
         text, _ = self.bot._device(device)
         self.assertIn("RDP: tima.tima.biz:53391", text)
+
+    def test_successful_edit_deletes_the_users_input_message(self) -> None:
+        calls = []
+        self.bot.api_call = lambda method, payload=None, timeout=40: calls.append(
+            (method, payload, timeout)
+        )
+        self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})
+        self.bot._handle_update(
+            {
+                "message": {
+                    "message_id": 777,
+                    "text": "Офис",
+                    "chat": {"id": 123},
+                    "from": {"id": 123},
+                }
+            }
+        )
+        self.assertEqual(
+            self.registry.get_device("dev123")["display_name"],
+            "Офис",
+        )
+        delete_calls = [
+            call for call in calls if call[0] == "deleteMessage"
+        ]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertEqual(delete_calls[0][1]["message_id"], 777)
+        self.assertEqual(delete_calls[0][1]["chat_id"], "123")
+
+    def test_product_online_status_has_heartbeat_grace(self) -> None:
+        device = self.registry.get_device("dev123")
+        device["last_seen"] = int(time.time()) - 30
+        self.assertTrue(self.bot._online(device))
+        device["last_seen"] = int(time.time()) - 46
+        self.assertFalse(self.bot._online(device))
 
     def test_pairing_colors_keep_navigation_neutral(self) -> None:
         _, keyboard = self.bot._pair()
