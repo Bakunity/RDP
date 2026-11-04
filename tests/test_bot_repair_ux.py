@@ -169,8 +169,8 @@ class TelegramRepairUxTests(unittest.TestCase):
             for button in home_buttons
             if button["callback_data"] == "device:dev123"
         )
-        self.assertEqual(add.get("style"), "success")
-        self.assertEqual(refresh.get("style"), "primary")
+        self.assertEqual(add.get("style"), "primary")
+        self.assertIsNone(refresh.get("style"))
         self.assertEqual(device.get("style"), "danger")
 
         self.bot._online = lambda device: True
