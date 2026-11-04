@@ -107,6 +107,8 @@ rollback_update() {
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
+  restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
+  restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/trusted-rdp-cert-state.json || rollback_ok=0
 
@@ -193,6 +195,8 @@ for path in \
   /usr/local/sbin/hermes-rdp-cert-package \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
+  /usr/local/bin/hermes-rdpctl \
+  /usr/local/bin/bakunity-rdpctl \
   /etc/sudoers.d/hermes-rdp-cert-package \
   /etc/hermes-rdp/trusted-rdp-cert-state.json; do
   [[ -e "$path" ]] && cp -a --parents "$path" "$BACKUP/"
@@ -265,6 +269,22 @@ rm -rf /opt/hermes-rdp/app/hermes_rdp
 cp -a "$ROOT/server/hermes_rdp" /opt/hermes-rdp/app/hermes_rdp
 chown -R root:root /opt/hermes-rdp/app
 
+cat > /usr/local/bin/hermes-rdpctl <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONPATH=/opt/hermes-rdp/app
+exec /usr/bin/python3 -m hermes_rdp.cli "$@"
+EOF
+chmod 0755 /usr/local/bin/hermes-rdpctl
+
+cat > /usr/local/bin/bakunity-rdpctl <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONPATH=/opt/hermes-rdp/app
+exec /usr/bin/python3 -m hermes_rdp.cli "$@"
+EOF
+chmod 0755 /usr/local/bin/bakunity-rdpctl
+
 install -m 0644 \
   "$ROOT/server/systemd/hermes-rdp.service" \
   /etc/systemd/system/hermes-rdp.service
@@ -322,6 +342,8 @@ systemctl is-active --quiet hermes-rdp-sshd.service
 systemctl is-active --quiet hermes-rdp.service
 wait_health
 PYTHONPATH=/opt/hermes-rdp/app python3 -m hermes_rdp.cli doctor >/dev/null
+/usr/local/bin/hermes-rdpctl doctor >/dev/null
+/usr/local/bin/bakunity-rdpctl doctor >/dev/null
 python3 - "$DB" <<'PY'
 import sqlite3
 import sys
