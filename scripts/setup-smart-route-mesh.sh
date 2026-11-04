@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 HEADSCALE_VERSION="${BAKUNITY_HEADSCALE_VERSION:-0.29.7}"
+CERTBOT_VERSION="${HERMES_CERTBOT_VERSION:-5.7.0}"
 CONFIG=/etc/hermes-rdp/config.json
 DB=/var/lib/hermes-rdp/state.sqlite3
 HEADSCALE_CONFIG=/etc/headscale/config.yaml
@@ -78,8 +80,65 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 [[ -s "$CONFIG" ]] || { echo "Missing $CONFIG" >&2; exit 1; }
 [[ -s "$DB" ]] || { echo "Missing $DB" >&2; exit 1; }
-command -v nginx >/dev/null 2>&1 || { echo "nginx is required" >&2; exit 1; }
-[[ -x /usr/local/bin/certbot ]] || { echo "Bakunity Certbot is required" >&2; exit 1; }
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq \
+  ca-certificates \
+  curl \
+  iproute2 \
+  openssl \
+  python3 \
+  python3-venv \
+  sqlite3 \
+  sudo \
+  ufw >/dev/null
+
+if ! command -v nginx >/dev/null 2>&1; then
+  for port in 80 443; do
+    if ss -H -ltn "( sport = :$port )" 2>/dev/null | grep -q .; then
+      echo "PORT_CONFLICT: tcp/$port is already occupied and nginx is not installed" >&2
+      exit 1
+    fi
+  done
+  apt-get install -y -qq nginx >/dev/null
+fi
+command -v nginx >/dev/null 2>&1 || {
+  echo "nginx installation did not provide nginx CLI" >&2
+  exit 1
+}
+
+install_certbot() {
+  local existing_version=""
+  if [[ -x /opt/certbot/bin/certbot ]]; then
+    existing_version="$(/opt/certbot/bin/certbot --version 2>/dev/null | awk '{print $2}' || true)"
+  fi
+
+  if ! python3 - "$existing_version" "$CERTBOT_VERSION" <<'PY'
+import re
+import sys
+
+def version_tuple(value: str):
+    match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', value or '')
+    return tuple(int(part) for part in match.groups()) if match else ()
+
+installed = version_tuple(sys.argv[1])
+required = version_tuple(sys.argv[2])
+raise SystemExit(0 if installed and installed >= required else 1)
+PY
+  then
+    rm -rf /opt/certbot
+    python3 -m venv /opt/certbot
+    /opt/certbot/bin/pip install \
+      --disable-pip-version-check \
+      --quiet \
+      "certbot==$CERTBOT_VERSION"
+  fi
+
+  ln -sfn /opt/certbot/bin/certbot /usr/local/bin/certbot
+  /usr/local/bin/certbot --version >/dev/null
+}
+install_certbot
 
 read -r DEVICE_DOMAIN PUBLIC_HOST < <(
   python3 - "$CONFIG" "$DB" <<'PY'
@@ -172,10 +231,6 @@ with sqlite3.connect(db_path) as conn:
 open(output_path, "w", encoding="utf-8").write(json.dumps(result))
 PY
 ROLLBACK_ARMED=1
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl nginx sqlite3 sudo ufw >/dev/null
 
 ARCH="$(dpkg --print-architecture)"
 case "$ARCH" in
@@ -310,6 +365,43 @@ if ! headscale users list 2>/dev/null | grep -Eq '(^|[[:space:]])bakunity([[:spa
 fi
 
 install -d -m 0755 "$ACME_WEBROOT/.well-known/acme-challenge"
+cat >"$NGINX_CONF" <<EOF
+# Managed by Bakunity RDP Smart Route
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $MESH_HOST;
+
+    location ^~ /.well-known/acme-challenge/ {
+        alias $ACME_WEBROOT/.well-known/acme-challenge/;
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF
+chmod 0644 "$NGINX_CONF"
+nginx -t
+systemctl enable --now nginx >/dev/null
+systemctl reload nginx
+
+ACME_PROBE="bakunity-mesh-$(openssl rand -hex 12)"
+printf '%s\n' "$ACME_PROBE" >"$ACME_WEBROOT/.well-known/acme-challenge/$ACME_PROBE"
+ACME_BODY=""
+for _ in $(seq 1 20); do
+  ACME_BODY="$(curl -fsS --max-time 2 -H "Host: $MESH_HOST" \
+    "http://127.0.0.1/.well-known/acme-challenge/$ACME_PROBE" 2>/dev/null || true)"
+  [[ "$ACME_BODY" == "$ACME_PROBE" ]] && break
+  sleep 0.25
+done
+rm -f "$ACME_WEBROOT/.well-known/acme-challenge/$ACME_PROBE"
+[[ "$ACME_BODY" == "$ACME_PROBE" ]] || {
+  echo "ACME_ROUTE_NOT_READY: nginx is not serving $MESH_HOST challenge webroot" >&2
+  exit 1
+}
+
 /usr/local/bin/certbot certonly \
   --quiet \
   --webroot \
@@ -325,6 +417,21 @@ install -d -m 0755 "$ACME_WEBROOT/.well-known/acme-challenge"
 
 cat >"$NGINX_CONF" <<EOF
 # Managed by Bakunity RDP Smart Route
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $MESH_HOST;
+
+    location ^~ /.well-known/acme-challenge/ {
+        alias $ACME_WEBROOT/.well-known/acme-challenge/;
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
 upstream bakunity_headscale {
     server 127.0.0.1:8080 max_fails=1 fail_timeout=5s;
     keepalive 2;
