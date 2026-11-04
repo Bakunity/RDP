@@ -69,7 +69,7 @@ class ZeroConfigServerInstallerTests(unittest.TestCase):
         self.assertIn("api.ipify.org", self.bootstrap)
         self.assertIn("ipv4.icanhazip.com", self.bootstrap)
         self.assertIn('setup-trusted-rdp-cert.sh" --host "$PUBLIC_IPV4"', self.bootstrap)
-        self.assertIn("Основной Hermes уже установлен и работает", self.bootstrap)
+        self.assertIn("Основной Bakunity RDP уже установлен и работает", self.bootstrap)
         # The advanced installer remains available and backward-compatible.
         self.assertIn("--trusted-rdp-cert", self.advanced)
         self.assertIn("--telegram-chat-id", self.advanced)
@@ -80,7 +80,7 @@ class ZeroConfigServerInstallerTests(unittest.TestCase):
         self.assertIn("https://deb.debian.org/debian", self.bootstrap)
         self.assertIn("https://security.debian.org/debian-security", self.bootstrap)
         self.assertIn("apt-sources-", self.bootstrap)
-        self.assertIn("Hermes ещё не устанавливался", self.bootstrap)
+        self.assertIn("Bakunity RDP ещё не устанавливался", self.bootstrap)
 
     def test_public_docs_offer_one_primary_server_command(self) -> None:
         command = (
