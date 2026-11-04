@@ -172,6 +172,25 @@ class NativeTransportTests(unittest.TestCase):
         ):
             self.assertIn(marker, lib)
 
+    def test_native_host_errors_are_reported_without_breaking_fallbacks(self) -> None:
+        state_module = (
+            ROOT / "server/hermes_rdp/native_transport.py"
+        ).read_text(encoding="utf-8")
+        host_worker = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn(
+            '"last_error": str(payload.get("last_error") or "")[:500]',
+            state_module,
+        )
+        for marker in (
+            "$Telemetry.last_error = $ErrorText",
+            "NATIVE_TRANSPORT=ERROR",
+            "return $Telemetry",
+            "native-transport-telemetry",
+        ):
+            self.assertIn(marker, host_worker)
+
     def test_host_and_connector_both_receive_native_transport_library(self) -> None:
         host_setup = (
             ROOT / "scripts/setup-smart-route-host.ps1"
