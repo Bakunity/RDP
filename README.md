@@ -121,11 +121,19 @@ Fresh pairing и Repair намеренно разделены. Repair не со�
 
 Windows Home не является штатным RDP host и не поддерживается.
 
-## Быстрый старт v1.3.0
+## Быстрый старт
 
 ### 1. Установить сервер
 
-Базовый OpenSSH gateway:
+Основной zero-config путь для current main:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/main/scripts/install.sh | sudo bash
+```
+
+Установщик сам проверит Debian/Ubuntu, определит public IPv4, безопасно запросит Telegram bot token, проверит бота и попросит подтвердить владельца командой `/claim <CODE>`. Trusted RDP certificate lifecycle настраивается автоматически, когда окружение это поддерживает.
+
+Для production с immutable stable **v1.3.0** пока используйте advanced installer release tag:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/v1.3.0/scripts/install-server.sh -o /tmp/install-bakunity-rdp.sh
@@ -138,20 +146,12 @@ unset TG_TOKEN
 rm -f /tmp/install-bakunity-rdp.sh
 ```
 
-С trusted public-IP RDP certificate lifecycle добавьте `--trusted-rdp-cert` и используйте public IPv4 в `--host`:
+Advanced trusted public-IP mode v1.3.0 использует тот же installer с `--trusted-rdp-cert`.
+
+Проверка current main:
 
 ```bash
-sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-bakunity-rdp.sh \
-  --host PUBLIC_IPV4 \
-  --telegram-token "$TG_TOKEN" \
-  --telegram-chat-id TELEGRAM_USER_ID \
-  --trusted-rdp-cert
-```
-
-Проверка:
-
-```bash
-sudo hermes-rdpctl doctor
+sudo bakunity-rdpctl doctor
 sudo systemctl is-active hermes-rdp-sshd.service hermes-rdp.service
 ```
 
