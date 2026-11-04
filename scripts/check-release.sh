@@ -16,6 +16,7 @@ PYTHONPATH=server python3 -m unittest discover -s tests -v
 echo '== Bakunity native transport =='
 (
   cd native-transport
+  GOTOOLCHAIN=go1.25.7+auto go mod download
   GOTOOLCHAIN=go1.25.7+auto go test ./...
   GOTOOLCHAIN=go1.25.7+auto GOOS=windows GOARCH=amd64 \
     go build -trimpath -o /tmp/BakunityTransport.exe ./cmd/bakunity-transport
