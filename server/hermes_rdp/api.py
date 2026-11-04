@@ -250,6 +250,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "hostname": f"{slug}.{domain}",
                     "rdp_port": int(device["rdp_port"]),
                     "enabled": bool(device.get("enabled", True)),
+                    "route_policy": self.server.registry.get_connector_device_route_policy(
+                        str(connector["id"]),
+                        str(device["id"]),
+                    ),
                     "routes": {
                         "lan": [
                             {"host": address, "port": 3389}
