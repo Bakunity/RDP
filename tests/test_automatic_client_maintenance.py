@@ -96,6 +96,29 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertIn("function Remove-MaintenanceTask", uninstall)
         self.assertIn("Unregister-ScheduledTask -TaskName $MaintenanceTaskName", uninstall)
 
+    def test_telegram_product_status_is_simple_and_diagnostics_are_separate(self) -> None:
+        ux = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
+        bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
+
+        home = ux.split("    def _home(", 1)[1].split("    def _human_status(", 1)[0]
+        product = ux.split(
+            "    def _device(self, device: dict[str, Any])",
+            1,
+        )[1].split("    def _device_edit(", 1)[0]
+
+        self.assertNotIn("OpenSSH", home)
+        self.assertNotIn("Диапазон RDP", home)
+        self.assertNotIn("SSH-туннель:", product)
+        self.assertNotIn("Клиент:", product)
+        self.assertNotIn("Обслуживание:", product)
+        self.assertIn("Подключение работает", ux)
+        self.assertIn("Удалённый доступ включён", ux)
+        self.assertIn("Защищённое подключение настроено", ux)
+        self.assertIn("Система работает нормально", ux)
+        self.assertIn("ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ", ux)
+        self.assertIn('self.registry.set_setting("screen", "device_technical")', ux)
+        self.assertIn('"device_technical"', bot)
+
     def test_telegram_has_one_click_repair_and_legacy_fallback(self) -> None:
         ux = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
         bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
