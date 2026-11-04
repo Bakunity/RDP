@@ -378,6 +378,13 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertIn("ИЗМЕНИТЬ ИМЯ", labels["edit_name:dev123"])
         self.assertIn("ИЗМЕНИТЬ RDP-АДРЕС", labels["edit_slug:dev123"])
 
+    def test_default_rdp_device_hides_internal_port_in_product_card(self) -> None:
+        self.registry.set_setting("device_domain", "tima.biz")
+        self.registry.set_setting("default_rdp_device_id", "dev123")
+        text, _ = self.bot._device(self.registry.get_device("dev123"))
+        self.assertIn("RDP: test-pc.tima.biz", text)
+        self.assertNotIn("RDP: test-pc.tima.biz:53391", text)
+
     def test_edit_name_flow_updates_device_from_plain_message(self) -> None:
         self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})
         self.assertEqual(self.registry.get_setting("screen"), "device_edit")
