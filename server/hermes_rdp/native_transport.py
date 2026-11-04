@@ -79,6 +79,7 @@ def normalize_native_transport_host(
         "relay_connected": bool(payload.get("relay_connected")),
         "path": path,
         "version": str(payload.get("version") or "")[:64],
+        "last_error": str(payload.get("last_error") or "")[:500],
     }
 
 
