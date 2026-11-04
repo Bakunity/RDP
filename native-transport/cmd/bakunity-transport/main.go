@@ -54,6 +54,7 @@ type forwardSpec struct {
     PeerID       string `json:"peer_id"`
     SharedSecret string `json:"shared_secret"`
     Listen       string `json:"listen"`
+    Mode         string `json:"mode"`
 }
 
 type forwardRuntime struct {
@@ -492,6 +493,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             "key": runtime.spec.Key,
             "peer_id": runtime.spec.PeerID,
             "listen": runtime.spec.Listen,
+            "mode": runtime.spec.Mode,
             "path": n.pathForPeer(pid),
         })
     }
@@ -543,6 +545,13 @@ func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
     if spec.Key == "" || spec.PeerID == "" || spec.Listen == "" {
         return errors.New("key, peer_id, shared_secret and listen are required")
     }
+    spec.Mode = strings.ToLower(strings.TrimSpace(spec.Mode))
+    if spec.Mode == "" {
+        spec.Mode = "auto"
+    }
+    if spec.Mode != "auto" && spec.Mode != "direct" {
+        return errors.New("mode must be auto or direct")
+    }
     if _, err := decodeSecret(spec.SharedSecret); err != nil {
         return fmt.Errorf("shared_secret: %w", err)
     }
@@ -563,6 +572,7 @@ func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
     if existing := n.forwards[spec.Key]; existing != nil {
         if existing.spec.PeerID == spec.PeerID &&
             existing.spec.Listen == spec.Listen &&
+            existing.spec.Mode == spec.Mode &&
             hmac.Equal([]byte(existing.spec.SharedSecret), []byte(spec.SharedSecret)) {
             return nil
         }
@@ -610,6 +620,10 @@ func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
             break
         }
         time.Sleep(100 * time.Millisecond)
+    }
+    if spec.Mode == "direct" && n.pathForPeer(pid) != "direct" {
+        log.Printf("direct path unavailable for %s", pid)
+        return
     }
 
     streamCtx := network.WithAllowLimitedConn(ctx, "bakunity-rdp")
