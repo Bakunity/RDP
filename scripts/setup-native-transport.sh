@@ -54,8 +54,10 @@ GO="$WORK/go/bin/go"
 BUILD="$WORK/bakunity-transport"
 (
   cd "$ROOT/native-transport"
-  GOMODCACHE="$WORK/gomod" GOCACHE="$WORK/gocache" \
-    "$GO" build -trimpath -ldflags='-s -w' \
+  export GOMODCACHE="$WORK/gomod"
+  export GOCACHE="$WORK/gocache"
+  "$GO" mod download
+  "$GO" build -trimpath -ldflags='-s -w' \
     -o "$BUILD" ./cmd/bakunity-transport
 )
 "$BUILD" id --identity "$WORK/test-identity.key" >/dev/null
