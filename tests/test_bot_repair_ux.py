@@ -288,7 +288,7 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertNotIn("Подключение работает", summary_text)
         self.assertNotIn("Удалённый доступ включён", summary_text)
         self.assertNotIn("Система работает нормально", summary_text)
-        self.assertNotIn("Пользователь:", summary_text)
+        self.assertIn("Пользователь: Tima", summary_text)
         self.assertNotIn("Данные:", summary_text)
         self.assertNotIn("SSH-туннель:", summary_text)
         self.assertNotIn("Клиент:", summary_text)
@@ -425,6 +425,13 @@ class TelegramRepairUxTests(unittest.TestCase):
         text, _ = self.bot._device(device)
         self.assertIn("RDP: tima.tima.biz:53391", text)
 
+    def test_address_edit_explains_that_digits_are_allowed(self) -> None:
+        self.registry.set_setting("device_domain", "tima.biz")
+        self.bot._handle_callback({"id": "cb-slug", "data": "edit_slug:dev123"})
+        text, _ = self.bot._device_edit(self.registry.get_device("dev123"))
+        self.assertIn("буквы, цифры и дефис", text)
+        self.assertIn("pc2", text)
+
     def test_successful_edit_deletes_the_users_input_message(self) -> None:
         calls = []
         self.bot.api_call = lambda method, payload=None, timeout=40: calls.append(
@@ -450,7 +457,7 @@ class TelegramRepairUxTests(unittest.TestCase):
         ]
         self.assertEqual(len(delete_calls), 1)
         self.assertEqual(delete_calls[0][1]["message_id"], 777)
-        self.assertEqual(delete_calls[0][1]["chat_id"], "123")
+        self.assertEqual(delete_calls[0][1]["chat_id"], 123)
 
     def test_product_online_status_has_heartbeat_grace(self) -> None:
         device = self.registry.get_device("dev123")
