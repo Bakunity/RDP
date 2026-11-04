@@ -27,6 +27,7 @@ class Config:
     client_installer_url: str
     repository_ref: str
     close_tunnel_helper: Path
+    client_repository_ref: str = ""
     online_after_seconds: int = 15
     pair_ttl_seconds: int = 900
     command_timeout_seconds: int = 60
@@ -91,6 +92,12 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
             data.get(
                 "close_tunnel_helper",
                 "/usr/local/sbin/hermes-rdp-close-tunnel",
+            )
+        ),
+        client_repository_ref=str(
+            data.get(
+                "client_repository_ref",
+                data.get("repository_ref", "main"),
             )
         ),
         online_after_seconds=int(data.get("online_after_seconds", 15)),
