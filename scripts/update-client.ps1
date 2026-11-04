@@ -17,6 +17,9 @@ $CandidatePath = Join-Path (
 $CertSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpUpdateCertSetup-$([Guid]::NewGuid().ToString('N')).ps1")
+$SmartRouteSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityHostSmartRouteUpdate-$([Guid]::NewGuid().ToString('N')).ps1")
 
 function Get-Sha256 {
     param([string]$Path)
@@ -78,6 +81,23 @@ function Invoke-CertificateRotationSetup {
         -RepositoryRef $ResolvedSha
     if ($LASTEXITCODE -ne 0) {
         throw "Certificate rotation setup failed with code $LASTEXITCODE"
+    }
+}
+
+function Invoke-HostSmartRouteSetup {
+    param(
+        [string]$SetupPath,
+        [string]$ResolvedSha
+    )
+
+    $NativePowerShell = Get-NativePowerShellPath
+    & $NativePowerShell `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $SetupPath `
+        -RepositoryRef $ResolvedSha
+    if ($LASTEXITCODE -ne 0) {
+        throw "Host Smart Route setup failed with code $LASTEXITCODE"
     }
 }
 
@@ -304,6 +324,10 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
+$SmartRouteSetupUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/scripts/setup-smart-route-host.ps1"
+)
 
 try {
     Invoke-WebRequest `
@@ -314,9 +338,14 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
+    Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $SmartRouteSetupUrl `
+        -OutFile $SmartRouteSetupCandidate
 
     Assert-PowerShellFile -Path $CandidatePath
     Assert-PowerShellFile -Path $CertSetupCandidate
+    Assert-PowerShellFile -Path $SmartRouteSetupCandidate
 
     $BackupRoot = Join-Path $BaseDir 'backups\updates'
     $BackupDir = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -346,6 +375,7 @@ try {
         previous_agent_sha256 = Get-Sha256 -Path $AgentPath
         candidate_agent_sha256 = Get-Sha256 -Path $CandidatePath
         candidate_cert_setup_sha256 = Get-Sha256 -Path $CertSetupCandidate
+        candidate_smart_route_setup_sha256 = Get-Sha256 -Path $SmartRouteSetupCandidate
         task_state_before = [string]$TaskBefore.State
         expected_ssh_before = [bool]$ExpectSsh
     } |
@@ -383,6 +413,9 @@ try {
         Invoke-CertificateRotationSetup `
             -SetupPath $CertSetupCandidate `
             -ResolvedSha $ResolvedSha
+        Invoke-HostSmartRouteSetup `
+            -SetupPath $SmartRouteSetupCandidate `
+            -ResolvedSha $ResolvedSha
 
         Write-ClientRef -ResolvedSha $ResolvedSha
 
@@ -394,6 +427,7 @@ try {
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"
         Write-Host 'CertificateRotation: managed'
+        Write-Host 'SmartRouteHost: managed'
     }
     catch {
         $UpdateFailure = $_
@@ -443,7 +477,7 @@ try {
 }
 finally {
     Remove-Item `
-        -LiteralPath $CandidatePath, $CertSetupCandidate `
+        -LiteralPath $CandidatePath, $CertSetupCandidate, $SmartRouteSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
