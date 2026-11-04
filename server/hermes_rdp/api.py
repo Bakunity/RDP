@@ -322,7 +322,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         command = self.server.registry.update_telemetry(device_id, telemetry)
         if command and command.get("action") in {"repair", "update"}:
             command = dict(command)
-            command["repository_ref"] = self.server.config.repository_ref
+            command["repository_ref"] = self.server.config.client_repository_ref
         current = self.server.registry.get_device(device_id)
 
         # Heavy telemetry is leased only for the currently opened device view.
@@ -343,7 +343,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "command": command,
                 "desired_enabled": bool(current["enabled"]),
-                "desired_client_ref": self.server.config.repository_ref,
+                "desired_client_ref": self.server.config.client_repository_ref,
                 "trusted_rdp_certificate_enabled": (
                     self.server.config.trusted_rdp_certificate_enabled
                 ),
