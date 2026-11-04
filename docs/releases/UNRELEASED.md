@@ -89,3 +89,5 @@ Do not regress:
 - Added Telegram editing for device display names/DNS slugs and per-device trusted certificates for named RDP endpoints.
 
 - Added the Windows Named Access Connector for portless device hostnames on one public VPS IPv4, with independent read-only connector tokens and transactional local routing sync.
+
+- Added automatic Named Access launcher fallback for Windows PCs that already own local TCP 3389; the installer now keeps local RDP untouched and installs a hostname-only Bakunity RDP launcher instead of failing.
