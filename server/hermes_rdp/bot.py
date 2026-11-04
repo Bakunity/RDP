@@ -675,7 +675,7 @@ class TelegramBot:
             and "certificate_lifecycle_ok" in telemetry
         ):
             certificate_status = (
-                f"{self.icon('shield')} УПРАВЛЯЕТСЯ"
+                f"{self.icon('shield')} АКТИВЕН"
                 if bool(telemetry.get("certificate_lifecycle_ok"))
                 else f"{self.icon('warning')} НУЖНО ВОССТАНОВЛЕНИЕ"
             )
