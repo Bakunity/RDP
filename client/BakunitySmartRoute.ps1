@@ -347,8 +347,8 @@ function Get-ExistingMap {
 
 function Build-Mappings {
     param([object]$Manifest, [object]$State)
-    $Policy = ([string]$Manifest.connector.route_policy).Trim().ToLowerInvariant()
-    if ($Policy -notin @('auto','p2p','relay','lan')) { $Policy = 'auto' }
+    $DefaultPolicy = ([string]$Manifest.connector.route_policy).Trim().ToLowerInvariant()
+    if ($DefaultPolicy -notin @('auto','p2p','relay','lan')) { $DefaultPolicy = 'auto' }
     $Mode = Get-RoutingMode
     $Existing = Get-ExistingMap -State $State
     $Used = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
@@ -366,6 +366,8 @@ function Build-Mappings {
             if (Test-LoopbackAddress -Address $Candidate) { $Loopback = $Candidate }
         }
         if (-not $Loopback) { $Loopback = Get-FreeLoopbackAddress -Used $Used }
+        $Policy = ([string]$Device.route_policy).Trim().ToLowerInvariant()
+        if ($Policy -notin @('auto','p2p','relay','lan')) { $Policy = $DefaultPolicy }
         $Route = Select-DeviceRoute -Device $Device -Policy $Policy
         $LocalPort = if ($Mode -eq 'transparent') { $TransparentPort } else { $LauncherPortStart + $Index }
         $Mappings += [pscustomobject]@{
@@ -374,6 +376,7 @@ function Build-Mappings {
             loopback=$Loopback
             local_port=[int]$LocalPort
             enabled=[bool]$Device.enabled
+            route_policy=[string]$Policy
             route_type=[string]$Route.type
             target_ipv4=[string]$Route.target_ipv4
             target_port=[int]$Route.target_port
@@ -382,7 +385,7 @@ function Build-Mappings {
         }
         $Index++
     }
-    return [pscustomobject]@{ policy=$Policy; mode=$Mode; mappings=@($Mappings) }
+    return [pscustomobject]@{ policy=$DefaultPolicy; mode=$Mode; mappings=@($Mappings) }
 }
 
 function Test-ConnectorMeshRole {
@@ -456,6 +459,7 @@ function Sync-SmartRoute {
             loopback=[string]$Mapping.loopback
             local_port=[int]$Mapping.local_port
             enabled=[bool]$Mapping.enabled
+            route_policy=[string]$Mapping.route_policy
             route_type=[string]$Mapping.route_type
             target_ipv4=[string]$Mapping.target_ipv4
             target_port=[int]$Mapping.target_port
@@ -464,6 +468,7 @@ function Sync-SmartRoute {
         }
         $RouteTelemetry[[string]$Mapping.device_id] = [ordered]@{
             hostname=[string]$Mapping.hostname
+            policy=[string]$Mapping.route_policy
             route=[string]$Mapping.route_type
             latency_ms=[int]$Mapping.latency_ms
             reason=[string]$Mapping.reason
