@@ -83,3 +83,5 @@ Do not regress:
 
 - `RL-006` remains PARTIAL only for an optional final Windows one-process observation after already-clean reconnect cycles; do not repeat the stress test.
 - `SEC-004` remains fixture-unavailable; do not reconstruct revoked credentials solely for artificial evidence.
+
+- Added stable per-device DNS slugs and optional wildcard device domains (for example `ai.tima.biz:53389`), with CLI management and DNS validation.
