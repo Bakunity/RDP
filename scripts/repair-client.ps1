@@ -18,6 +18,9 @@ $CoreCandidate = Join-Path (
 $CertSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpRepairCertSetup-$([Guid]::NewGuid().ToString('N')).ps1")
+$SmartRouteSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityHostSmartRouteRepair-$([Guid]::NewGuid().ToString('N')).ps1")
 
 function Resolve-RepositorySha {
     param([string]$Ref)
@@ -75,6 +78,40 @@ function Get-NativePowerShellPath {
     return Join-Path $System32 'WindowsPowerShell\v1.0\powershell.exe'
 }
 
+function Invoke-OptionalHostSmartRouteSetup {
+    param([string]$ResolvedSha)
+
+    $SetupUrl = (
+        "https://raw.githubusercontent.com/$Repo/" +
+        "$ResolvedSha/scripts/setup-smart-route-host.ps1"
+    )
+    try {
+        Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri $SetupUrl `
+            -OutFile $SmartRouteSetupCandidate
+        Assert-PowerShellFile -Path $SmartRouteSetupCandidate
+        $NativePowerShell = Get-NativePowerShellPath
+        $Output = & $NativePowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $SmartRouteSetupCandidate `
+            -RepositoryRef $ResolvedSha 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "Host Smart Route setup failed with code $LASTEXITCODE. $($Output.Trim())"
+        }
+        if ($Output.Trim()) { Write-Host $Output.TrimEnd() }
+        Write-Host 'SmartRouteHost: managed'
+        return $true
+    }
+    catch {
+        Write-Warning (
+            'Smart Route Host deferred; repaired RDP remains healthy. ' +
+            $_.Exception.Message
+        )
+        return $false
+    }
+}
 function Stop-MainRuntime {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -268,14 +305,20 @@ try {
     if ($CoreOutput.Trim()) {
         Write-Host $CoreOutput.TrimEnd()
     }
-    Write-ClientRef -ResolvedSha $ResolvedSha
+    $SmartRouteManaged = Invoke-OptionalHostSmartRouteSetup -ResolvedSha $ResolvedSha
+    if ($SmartRouteManaged) {
+        Write-ClientRef -ResolvedSha $ResolvedSha
+        Write-Host "ClientRef: $ResolvedSha"
+    }
+    else {
+        Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
+    }
     Write-Host 'CertificateRotation: managed'
-    Write-Host "ClientRef: $ResolvedSha"
     Write-Host 'CERT-013_REPAIR=PASS' -ForegroundColor Green
 }
 finally {
     Remove-Item `
-        -LiteralPath $CoreCandidate, $CertSetupCandidate `
+        -LiteralPath $CoreCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
