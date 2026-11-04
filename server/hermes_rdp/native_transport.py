@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import urllib.error
+import urllib.request
 from typing import Any
 
 
@@ -80,6 +82,32 @@ def normalize_native_transport_host(
     }
 
 
+def authorize_native_transport_peer(peer_id: Any) -> bool:
+    clean = _clean_peer_id(peer_id)
+    if not clean:
+        return False
+    body = json.dumps(
+        {"peer_id": clean},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "http://127.0.0.1:7445/allow",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (
+        OSError,
+        urllib.error.URLError,
+        json.JSONDecodeError,
+    ):
+        return False
+    return bool(isinstance(payload, dict) and payload.get("ok") is True)
+
+
 def set_native_transport_host(
     registry: Any,
     device_id: str,
@@ -96,6 +124,8 @@ def set_native_transport_host(
             separators=(",", ":"),
         ),
     )
+    if state["online"] and state["peer_id"]:
+        authorize_native_transport_peer(state["peer_id"])
     return state
 
 
