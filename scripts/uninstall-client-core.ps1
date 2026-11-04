@@ -8,7 +8,6 @@ Add-Type -AssemblyName System.Net.Http
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
 $RotationTaskName = 'Hermes RDP Certificate Rotation'
-$MaintenanceTaskName = 'Hermes RDP Maintenance'
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
 $RotationPath = Join-Path $BaseDir 'HermesRdpCertRotation.ps1'
 $SyncPath = Join-Path $BaseDir 'sync-rdp-certificate.ps1'
@@ -368,7 +367,7 @@ catch {
 
 Write-Host "CERT_ROLLBACK=$CertificateRollback"
 
-foreach ($HermesTask in @($TaskName, $RotationTaskName, $MaintenanceTaskName)) {
+foreach ($HermesTask in @($TaskName, $RotationTaskName)) {
     Stop-TaskBounded -Name $HermesTask
     Unregister-ScheduledTask `
         -TaskName $HermesTask `
@@ -395,7 +394,7 @@ if (Test-Path -LiteralPath $BaseDir) {
 }
 
 $TasksRemaining = @(
-    foreach ($HermesTask in @($TaskName, $RotationTaskName, $MaintenanceTaskName)) {
+    foreach ($HermesTask in @($TaskName, $RotationTaskName)) {
         if (Get-ScheduledTask -TaskName $HermesTask -ErrorAction SilentlyContinue) {
             $HermesTask
         }
@@ -407,8 +406,7 @@ $ProcessesRemaining = @(
             ($_.Name -eq 'ssh.exe' -and $_.CommandLine -and
                 $_.CommandLine.Contains('HermesRDP')) -or
             ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpAgent.ps1')) -or
-            ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpCertRotation.ps1')) -or
-            ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpMaintenance.ps1'))
+            ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpCertRotation.ps1'))
         }
 )
 $RdpListener = @(
