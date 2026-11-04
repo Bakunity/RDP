@@ -20,9 +20,6 @@ $StartupStableSeconds = 20
 $CandidatePath = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpRepair-$([Guid]::NewGuid().ToString('N')).ps1")
-$SmartRouteSetupCandidate = Join-Path (
-    [IO.Path]::GetTempPath()
-) ("BakunityHostSmartRouteRepair-$([Guid]::NewGuid().ToString('N')).ps1")
 
 $PinnedHttpClientSource = @'
 using System;
@@ -171,34 +168,6 @@ function Resolve-RepositorySha {
         throw 'Не удалось разрешить RepositoryRef в immutable commit SHA.'
     }
     return $Sha.ToLowerInvariant()
-}
-
-function Get-NativePowerShellPath {
-    $System32 = Join-Path $env:WINDIR 'System32'
-    if (
-        [Environment]::Is64BitOperatingSystem -and
-        -not [Environment]::Is64BitProcess
-    ) {
-        $System32 = Join-Path $env:WINDIR 'Sysnative'
-    }
-    return Join-Path $System32 'WindowsPowerShell\v1.0\powershell.exe'
-}
-
-function Invoke-HostSmartRouteSetup {
-    param(
-        [string]$SetupPath,
-        [string]$ResolvedSha
-    )
-
-    $NativePowerShell = Get-NativePowerShellPath
-    & $NativePowerShell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $SetupPath `
-        -RepositoryRef $ResolvedSha
-    if ($LASTEXITCODE -ne 0) {
-        throw "Host Smart Route setup failed with code $LASTEXITCODE"
-    }
 }
 
 function Ensure-OpenSshClient {
@@ -612,18 +581,10 @@ try {
         "https://raw.githubusercontent.com/$Repo/" +
         "$ResolvedSha/client/HermesRdpAgent.ps1"
     )
-    $SmartRouteSetupUrl = (
-        "https://raw.githubusercontent.com/$Repo/" +
-        "$ResolvedSha/scripts/setup-smart-route-host.ps1"
-    )
     Invoke-WebRequest `
         -UseBasicParsing `
         -Uri $CandidateUrl `
         -OutFile $CandidatePath
-    Invoke-WebRequest `
-        -UseBasicParsing `
-        -Uri $SmartRouteSetupUrl `
-        -OutFile $SmartRouteSetupCandidate
 
     $Tokens = $null
     $ParseErrors = $null
@@ -634,16 +595,6 @@ try {
     )
     if ($ParseErrors.Count -gt 0) {
         throw "Candidate parse error: $($ParseErrors[0].Message)"
-    }
-    $SmartTokens = $null
-    $SmartParseErrors = $null
-    [void][Management.Automation.Language.Parser]::ParseFile(
-        $SmartRouteSetupCandidate,
-        [ref]$SmartTokens,
-        [ref]$SmartParseErrors
-    )
-    if ($SmartParseErrors.Count -gt 0) {
-        throw "Smart Route setup parse error: $($SmartParseErrors[0].Message)"
     }
 
     $TaskBefore = Get-ScheduledTask `
@@ -716,7 +667,7 @@ try {
         Stop-HermesRuntime -KeyPath $KeyPath
 
         Copy-Item `
-            -LiteralPath $CandidatePath, $SmartRouteSetupCandidate `
+            -LiteralPath $CandidatePath `
             -Destination $AgentPath `
             -Force
 
@@ -792,10 +743,6 @@ try {
             throw 'Repair изменил защищённую identity/config boundary.'
         }
 
-        Invoke-HostSmartRouteSetup `
-            -SetupPath $SmartRouteSetupCandidate `
-            -ResolvedSha $ResolvedSha
-
         Write-Host
         Write-Host 'REPAIR=PASS' -ForegroundColor Green
         Write-Host "ResolvedRef: $ResolvedSha"
@@ -805,7 +752,6 @@ try {
         Write-Host "DesiredAccess: $DesiredEnabled"
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"
-        Write-Host 'SmartRouteHost: managed'
     }
     catch {
         $RepairFailure = $_

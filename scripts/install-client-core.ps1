@@ -30,9 +30,6 @@ $AgentCandidate = Join-Path (
 $CertSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpInstallCertSetup-$([Guid]::NewGuid().ToString('N')).ps1")
-$SmartRouteSetupCandidate = Join-Path (
-    [IO.Path]::GetTempPath()
-) ("BakunityHostSmartRouteSetup-$([Guid]::NewGuid().ToString('N')).ps1")
 $ExpectedFingerprint = (
     $Fingerprint -replace '[^0-9A-Fa-f]', ''
 ).ToUpperInvariant()
@@ -525,10 +522,6 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
-$SmartRouteSetupUrl = (
-    "https://raw.githubusercontent.com/$Repo/" +
-    "$ResolvedSha/scripts/setup-smart-route-host.ps1"
-)
 try {
     Invoke-WebRequest `
         -UseBasicParsing `
@@ -538,17 +531,12 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
-    Invoke-WebRequest `
-        -UseBasicParsing `
-        -Uri $SmartRouteSetupUrl `
-        -OutFile $SmartRouteSetupCandidate
     Assert-PowerShellFile -Path $AgentCandidate
     Assert-PowerShellFile -Path $CertSetupCandidate
-    Assert-PowerShellFile -Path $SmartRouteSetupCandidate
 }
 catch {
     Remove-Item `
-        -LiteralPath $AgentCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate `
+        -LiteralPath $AgentCandidate, $CertSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
     throw
@@ -784,16 +772,6 @@ try {
         -SetupPath $CertSetupCandidate `
         -ResolvedSha $ResolvedSha
 
-    $NativePowerShell = Get-NativePowerShellPath
-    & $NativePowerShell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $SmartRouteSetupCandidate `
-        -RepositoryRef $ResolvedSha
-    if ($LASTEXITCODE -ne 0) {
-        throw "Host Smart Route setup failed with code $LASTEXITCODE"
-    }
-
     Write-Host
     Write-Host '=== ГОТОВО ===' -ForegroundColor Green
     Write-Host "Компьютер: $($Pair.device.name)"
@@ -801,7 +779,6 @@ try {
     Write-Host "Туннель: OpenSSH"
     Write-Host "Задача: $TaskName"
     Write-Host 'Сертификат RDP: автоматическое управление'
-    Write-Host 'Smart Route Host: установлен'
     Write-Host "Лог: $BaseDir\agent.log"
 }
 catch {
@@ -855,7 +832,7 @@ finally {
         $Http.Dispose()
     }
     Remove-Item `
-        -LiteralPath $AgentCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate `
+        -LiteralPath $AgentCandidate, $CertSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
