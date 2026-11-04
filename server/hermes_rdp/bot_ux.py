@@ -219,7 +219,10 @@ class TelegramUxBot(TelegramBot):
         ):
             return f"{self.icon('warning')} Защищённое подключение требует восстановления"
 
-        if not bool(telemetry.get("maintenance_capable")):
+        if (
+            "maintenance_capable" in telemetry
+            and not bool(telemetry.get("maintenance_capable"))
+        ):
             return f"{self.icon('warning')} Bakunity RDP требует восстановления"
 
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
