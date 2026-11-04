@@ -69,6 +69,17 @@ class TelegramBot:
         self.last_device_signature: tuple[Any, ...] | None = None
         self.emoji = TelegramEmojiTheme()
 
+    def _client_ref(self) -> str:
+        explicit = str(
+            getattr(self.config, "client_repository_ref", "") or ""
+        ).strip()
+        if explicit:
+            return explicit
+        effective = str(getattr(self.config, "client_ref", "") or "").strip()
+        if effective:
+            return effective
+        return str(getattr(self.config, "repository_ref", "") or "").strip()
+
     def api_call(self, method: str, payload: dict[str, Any] | None = None, timeout: int = 40):
         request = urllib.request.Request(
             f"{self.api}/{method}",
@@ -419,7 +430,7 @@ class TelegramBot:
             f"  Server='{self.config.public_host}'\n"
             f"  PairCode='{code}'\n"
             f"  Fingerprint='{self.config.tls_fingerprint}'\n"
-            f"  RepositoryRef='{self.config.client_ref}'\n"
+            f"  RepositoryRef='{self._client_ref()}'\n"
             "}\n"
             "& ([scriptblock]::Create($s)) @p"
         )
@@ -563,7 +574,7 @@ class TelegramBot:
 
         maintenance_capable = bool(telemetry.get("maintenance_capable"))
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        desired_ref = str(self.config.client_ref or "").lower()
+        desired_ref = self._client_ref().lower()
 
         maintenance = telemetry.get("maintenance_status") or {}
         maintenance_state = str(maintenance.get("state") or "").lower()
