@@ -69,7 +69,7 @@ class TelegramUxBot(TelegramBot):
         text = text.replace("<pre><code>", guidance + "<pre><code>", 1)
         keyboard = {
             "inline_keyboard": [
-                [self.button("refresh", "НОВЫЙ КОД", "pair_new")],
+                [self.button("refresh", "НОВЫЙ КОД", "pair_new", style="primary")],
                 [self.button("back", "К СПИСКУ", "home")],
             ]
         }
