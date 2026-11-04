@@ -147,8 +147,11 @@ class TelegramRepairUxTests(unittest.TestCase):
             for button in row
             if button["callback_data"] == "repair:dev123"
         )
-        self.assertTrue(repair["text"].startswith("🛠"))
-        self.assertNotIn("icon_custom_emoji_id", repair)
+        self.assertEqual(repair["text"], "ВОССТАНОВИТЬ АВТО")
+        self.assertEqual(
+            repair.get("icon_custom_emoji_id"),
+            "5258023599419171861",
+        )
         self.assertEqual(repair.get("style"), "primary")
 
 
