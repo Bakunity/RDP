@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 REPO="bakunity/RDP"
-REF="${HERMES_RDP_REF:-main}"
-CLAIM_TIMEOUT="${HERMES_CLAIM_TIMEOUT:-600}"
+REF="${BAKUNITY_RDP_REF:-${HERMES_RDP_REF:-main}}"
+CLAIM_TIMEOUT="${BAKUNITY_RDP_CLAIM_TIMEOUT:-${HERMES_CLAIM_TIMEOUT:-600}}"
 WORK_DIR="$(mktemp -d)"
 APT_LOG="$WORK_DIR/apt-update.log"
 TG_TOKEN=""
@@ -40,7 +40,7 @@ esac
 command -v systemctl >/dev/null 2>&1 || die "systemd/systemctl не найден."
 command -v apt-get >/dev/null 2>&1 || die "apt-get не найден."
 
-say "=== HERMES RDP INSTALLER ==="
+say "=== BAKUNITY RDP INSTALLER ==="
 pass "OS: $OS_NAME"
 pass "Architecture: $(dpkg --print-architecture 2>/dev/null || uname -m)"
 pass "root/sudo"
@@ -190,7 +190,7 @@ else
     say "Последние строки apt-get update:" >&2
     tail -n 12 "$APT_LOG" >&2 || true
     say >&2
-    die "Hermes ещё не устанавливался. Исправьте APT repositories и повторите эту же команду."
+    die "Bakunity RDP ещё не устанавливался. Исправьте APT repositories и повторите эту же команду."
   fi
 fi
 
@@ -318,7 +318,7 @@ pass "Telegram bot: @$BOT_USERNAME"
 
 WEBHOOK_INFO="$(telegram_call getWebhookInfo '{}')" || die "Не удалось проверить Telegram webhook."
 WEBHOOK_URL="$(printf '%s' "$WEBHOOK_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url", ""))')"
-[[ -z "$WEBHOOK_URL" ]] || die "У @${BOT_USERNAME} уже настроен webhook. Используйте отдельного бота Hermes или сначала освободите этого бота."
+[[ -z "$WEBHOOK_URL" ]] || die "У @${BOT_USERNAME} уже настроен webhook. Используйте отдельного бота Bakunity RDP или сначала освободите этого бота."
 pass "Telegram webhook: free"
 
 BASE_UPDATES="$(telegram_call getUpdates '{"timeout":0,"limit":100,"allowed_updates":["message"]}')" || die "Telegram getUpdates недоступен."
@@ -383,7 +383,7 @@ while time.monotonic() < deadline:
         owner = str(actor["id"])
         call("sendMessage", {
             "chat_id": owner,
-            "text": "✅ Hermes RDP: владелец подтверждён. Установка на сервере продолжается.",
+            "text": "✅ Bakunity RDP: владелец подтверждён. Установка на сервере продолжается.",
         })
         call("getUpdates", {"offset": offset, "timeout": 0, "limit": 1})
         print(owner)
@@ -400,17 +400,17 @@ SOURCE_ARCHIVE="$WORK_DIR/source.tar.gz"
 curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" -o "$SOURCE_ARCHIVE"
 tar -xzf "$SOURCE_ARCHIVE" -C "$WORK_DIR"
 SOURCE_ROOT="$(find "$WORK_DIR" -maxdepth 1 -mindepth 1 -type d -name 'RDP-*' | head -n1)"
-[[ -n "$SOURCE_ROOT" && -x "$SOURCE_ROOT/scripts/install-server.sh" ]] || die "Не удалось получить Hermes source ref $REF."
-pass "Hermes source: $REF"
+[[ -n "$SOURCE_ROOT" && -x "$SOURCE_ROOT/scripts/install-server.sh" ]] || die "Не удалось получить Bakunity RDP source ref $REF."
+pass "Bakunity RDP source: $REF"
 
 say
-say "Устанавливаю Hermes RDP..."
+say "Устанавливаю Bakunity RDP..."
 "$SOURCE_ROOT/scripts/install-server.sh" \
   --host "$PUBLIC_IPV4" \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id "$OWNER_ID"
 
-pass "Hermes core installed"
+pass "Bakunity RDP core installed"
 
 TRUSTED_STATUS="unavailable"
 if [[ -x "$SOURCE_ROOT/scripts/setup-trusted-rdp-cert.sh" ]]; then
@@ -426,7 +426,7 @@ if [[ -x "$SOURCE_ROOT/scripts/setup-trusted-rdp-cert.sh" ]]; then
 fi
 
 say
-say "=== HERMES RDP READY ==="
+say "=== BAKUNITY RDP READY ==="
 say "Server: $PUBLIC_IPV4"
 say "Telegram: @$BOT_USERNAME"
 say "Owner: confirmed"
