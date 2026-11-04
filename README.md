@@ -28,6 +28,8 @@ Bakunity RDP публикует RDP нескольких Windows-компьют�
 > **Главный принцип проекта:** все Windows-компьютеры равноправны. Для каждого используется один installer и один Bakunity Agent. Специальным узлом является только Linux-сервер Hermes.
 
 > **Stable release:** [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
+>
+> **Совместимость:** публичный бренд — Bakunity RDP, но существующие Windows Scheduled Tasks и локальные runtime paths пока сохраняют legacy identifiers `Hermes RDP Agent`, `Hermes RDP Certificate Rotation` и `C:\\ProgramData\\HermesRDP`. Это сделано специально, чтобы обновления не ломали уже установленные ПК.
 
 ## Что умеет Bakunity RDP
 
@@ -250,8 +252,8 @@ sudo systemctl status hermes-rdp-sshd.service hermes-rdp.service --no-pager
 Windows diagnostics:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
-Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation' -ErrorAction SilentlyContinue
+Get-ScheduledTask -TaskName 'Hermes RDP Agent'
+Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Get-Process ssh -ErrorAction SilentlyContinue
 ```
