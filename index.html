@@ -144,9 +144,9 @@
       <div class="container">
         <div class="section-heading reveal"><span class="eyebrow">АРХИТЕКТУРА</span><h2>Windows подключается к серверу сам</h2><p>Домашнему или офисному роутеру не нужен проброс входящих портов. Windows инициирует исходящий OpenSSH-сеанс и поднимает reverse forwarding до локального RDP.</p></div>
         <div class="flow reveal">
-          <article class="flow-node"><span class="node-number">01</span><small>WINDOWS</small><h3>OpenSSH + Hermes Agent</h3><p>Системный <code>ssh.exe</code> держит туннель, а PowerShell Agent отправляет heartbeat, telemetry и выполняет команды.</p><code>127.0.0.1:3389</code></article>
+          <article class="flow-node"><span class="node-number">01</span><small>WINDOWS</small><h3>OpenSSH + Bakunity Agent</h3><p>Системный <code>ssh.exe</code> держит туннель, а PowerShell Agent отправляет heartbeat, telemetry и выполняет команды.</p><code>127.0.0.1:3389</code></article>
           <div class="flow-arrow"><span>SSH</span><i></i></div>
-          <article class="flow-node flow-node-accent"><span class="node-number">02</span><small>LINUX SERVER</small><h3>Hermes Gateway</h3><p>Отдельный <code>sshd</code>, HTTPS API, SQLite, Telegram controller и optional certificate lifecycle работают как один управляющий узел.</p><code>7000 · 7443</code></article>
+          <article class="flow-node flow-node-accent"><span class="node-number">02</span><small>LINUX SERVER</small><h3>Bakunity Gateway</h3><p>Отдельный <code>sshd</code>, HTTPS API, SQLite, Telegram controller и optional certificate lifecycle работают как один управляющий узел.</p><code>7000 · 7443</code></article>
           <div class="flow-arrow"><span>RDP</span><i></i></div>
           <article class="flow-node"><span class="node-number">03</span><small>REMOTE CLIENT</small><h3>Постоянный endpoint</h3><p>Стандартный Microsoft Remote Desktop подключается к адресу сервера и закреплённому порту устройства.</p><code>SERVER:53389</code></article>
         </div>
@@ -155,7 +155,7 @@
 
     <section class="section section-muted" id="features">
       <div class="container">
-        <div class="section-heading reveal"><span class="eyebrow">ВОЗМОЖНОСТИ</span><h2>Не просто SSH-команда</h2><p>Hermes объединяет регистрацию, выдачу портов, ключи, автозапуск, recovery, certificate lifecycle, telemetry и управление устройствами.</p></div>
+        <div class="section-heading reveal"><span class="eyebrow">ВОЗМОЖНОСТИ</span><h2>Не просто SSH-команда</h2><p>Bakunity RDP объединяет регистрацию, выдачу портов, ключи, автозапуск, recovery, certificate lifecycle, telemetry и управление устройствами.</p></div>
         <div class="feature-grid">
           <article class="feature-card feature-wide reveal"><span class="feature-icon">⌁</span><div><h3>Несколько ПК по одной схеме</h3><p>Каждый компьютер использует тот же installer и получает отдельные credentials и endpoint.</p></div><div class="port-stack"><span><b>PC-01</b><code>:53389</code></span><span><b>PC-02</b><code>:53390</code></span><span><b>PC-03</b><code>:53391</code></span></div></article>
           <article class="feature-card reveal"><span class="feature-icon">◉</span><h3>Telegram Dashboard</h3><p>ONLINE/OFFLINE, desired access, transport, endpoint, telemetry и команды ON/OFF/RESTART/Repair.</p></article>
@@ -163,7 +163,7 @@
           <article class="feature-card reveal"><span class="feature-icon">↻</span><h3>Автовосстановление</h3><p>Scheduled Task от SYSTEM восстанавливает tunnel после загрузки или обрыва сети. Update и Repair имеют rollback boundaries.</p></article>
           <article class="feature-card reveal"><span class="feature-icon">✓</span><h3>Trusted RDP certificate</h3><p>v1.3.0 автоматически синхронизирует публично доверенный certificate с Windows RDP listener и ротирует его отдельно от Agent loop.</p></article>
           <article class="feature-card reveal"><span class="feature-icon">＋</span><h3>Pairing за минуты</h3><p>Одноразовый код и готовая PowerShell-команда создаются прямо в Telegram.</p></article>
-          <article class="feature-card reveal"><span class="feature-icon">▣</span><h3>Диагностика</h3><p><code>hermes-rdpctl doctor</code>, systemd-журналы и Windows agent log дают прозрачную проверку.</p></article>
+          <article class="feature-card reveal"><span class="feature-icon">▣</span><h3>Диагностика</h3><p><code>bakunity-rdpctl doctor</code>, systemd-журналы и Windows agent log дают прозрачную проверку.</p></article>
           <article class="feature-card reveal"><span class="feature-icon">⇡</span><h3>Backup и отзыв</h3><p>Transactional updates сохраняют rollback state, а DELETE отзывает API-token, SSH key и освобождает порт.</p></article>
         </div>
       </div>
@@ -184,7 +184,7 @@
     <section class="section" id="security">
       <div class="container security-layout">
         <div class="security-copy reveal">
-          <span class="eyebrow">SECURITY BY DEFAULT</span><h2>Ключи и контроль остаются у вас</h2><p>Каждый ПК получает отдельный API-token, SSH-ключ и разрешение только на свой RDP-порт. Отдельный Hermes sshd не предоставляет shell или SFTP.</p>
+          <span class="eyebrow">SECURITY BY DEFAULT</span><h2>Ключи и контроль остаются у вас</h2><p>Каждый ПК получает отдельный API-token, SSH-ключ и разрешение только на свой RDP-порт. Отдельный Bakunity tunnel sshd не предоставляет shell или SFTP.</p>
           <ul class="check-list">
             <li><span>✓</span><div><strong>HTTPS certificate pinning</strong><small>Windows проверяет SHA-256 сертификата API.</small></div></li>
             <li><span>✓</span><div><strong>SSH host key pinning</strong><small>Ключ сервера приходит через уже закреплённый HTTPS API.</small></div></li>
@@ -192,7 +192,7 @@
             <li><span>✓</span><div><strong>Trusted RDP listener TLS</strong><small>Опциональный public-IP certificate lifecycle отделён от API TLS и управляется автоматически.</small></div></li>
             <li><span>✓</span><div><strong>Отзыв устройства</strong><small>DELETE отзывает token и key, закрывает listener и освобождает порт.</small></div></li>
           </ul>
-          <div class="security-note"><strong>Важно:</strong> Hermes не заменяет Windows authentication. Используйте сильный уникальный пароль, NLA, обновления и ограничение источников в firewall там, где это возможно.</div>
+          <div class="security-note"><strong>Важно:</strong> Bakunity RDP не заменяет Windows authentication. Используйте сильный уникальный пароль, NLA, обновления и ограничение источников в firewall там, где это возможно.</div>
           <a class="text-link" href="https://github.com/bakunity/RDP/blob/v1.3.0/docs/SECURITY.md" target="_blank" rel="noreferrer">Открыть модель безопасности →</a>
         </div>
         <div class="security-visual reveal reveal-delay" aria-hidden="true"><div class="shield-ring ring-one"></div><div class="shield-ring ring-two"></div><div class="shield-core"><svg viewBox="0 0 120 140"><path d="M60 5 111 30v34.6c0 28-17.7 48.1-51 58C26.7 112.7 9 92.6 9 64.6V30L60 5Z" fill="currentColor" opacity=".15"/><path d="M60 15 101 35v28c0 22.8-14.1 39.2-41 47.6C33.1 102.2 19 85.8 19 63V35l41-20Z" fill="none" stroke="currentColor" stroke-width="3"/><path d="m40 62 13 13 28-31" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>SELF-HOSTED</strong><span>HTTPS + SSH + RDP trust</span></div><div class="security-tag tag-a">ED25519</div><div class="security-tag tag-b">SHA-256</div><div class="security-tag tag-c">ACL</div><div class="security-tag tag-d">PINNING</div></div>
@@ -213,11 +213,12 @@
           <div class="terminal">
             <div class="terminal-bar"><span></span><span></span><span></span><strong data-terminal-title>SERVER · BASH</strong></div>
             <div class="terminal-panel active" id="step-server" role="tabpanel" data-panel="server"><div class="code-block"><button class="copy-button" type="button" data-copy="#code-server">Копировать</button><pre id="code-server"><code><span class="comment"># Stable release v1.3.0</span>
+<span class="comment"># v1.3.0 использует legacy env name HERMES_RDP_REF для immutable ref</span>
 curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/v1.3.0/scripts/install-server.sh \
-  -o /tmp/install-hermes-rdp.sh
+  -o /tmp/install-bakunity-rdp.sh
 
 read -rsp 'Telegram bot token: ' TG_TOKEN; echo
-sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-hermes-rdp.sh \
+sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-bakunity-rdp.sh \
   --host SERVER_IP_OR_DOMAIN \
   --telegram-token "$TG_TOKEN" \
   --telegram-chat-id TELEGRAM_USER_ID
