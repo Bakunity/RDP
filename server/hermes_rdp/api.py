@@ -28,6 +28,20 @@ DEVICE_CERT_TIMEOUT_SECONDS = 25
 CERT_STATE_FILE = Path("/etc/hermes-rdp/trusted-rdp-cert-state.json")
 
 
+def parse_helper_json(text: str) -> dict[str, Any]:
+    for line in reversed(str(text or "").splitlines()):
+        candidate = line.strip()
+        if not candidate:
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("helper returned no JSON object")
+
+
 class ApiServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
@@ -348,14 +362,13 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return None
         try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError:
+            return parse_helper_json(result.stdout)
+        except ValueError:
             LOG.error(
                 "device RDP certificate helper returned invalid JSON for %s",
                 device_id,
             )
             return None
-        return payload if isinstance(payload, dict) else None
 
     @staticmethod
     def _validate_certificate_metadata(payload: dict[str, Any]) -> dict[str, Any]:
