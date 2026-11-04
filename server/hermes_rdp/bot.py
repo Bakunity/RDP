@@ -14,6 +14,7 @@ from typing import Any
 from .config import Config
 from .db import Registry
 from .tunnel import close_tunnel
+from .telegram_icons import APPROVED_PACKS, TelegramEmojiTheme
 
 
 LOG = logging.getLogger("hermes_rdp.bot")
@@ -66,6 +67,8 @@ class TelegramBot:
         self.lock = threading.RLock()
         self.last_render = 0.0
         self.last_device_signature: tuple[Any, ...] | None = None
+        self.emoji = TelegramEmojiTheme()
+        self._emoji_packs_loaded = False
 
     def api_call(self, method: str, payload: dict[str, Any] | None = None, timeout: int = 40):
         request = urllib.request.Request(
@@ -84,8 +87,77 @@ class TelegramBot:
             raise RuntimeError(result.get("description", "Telegram API error"))
         return result.get("result")
 
+    def _load_emoji_packs(self) -> None:
+        if self._emoji_packs_loaded:
+            return
+        self._emoji_packs_loaded = True
+        for pack_name in APPROVED_PACKS:
+            try:
+                sticker_set = self.api_call(
+                    "getStickerSet",
+                    {"name": pack_name},
+                    timeout=15,
+                )
+                self.emoji.learn_pack(pack_name, sticker_set)
+            except Exception as exc:
+                LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
+
+    def icon(self, name: str) -> str:
+        return self.emoji.html(name)
+
+    def button(
+        self,
+        icon: str,
+        text: str,
+        callback_data: str,
+        *,
+        style: str | None = None,
+    ) -> dict[str, Any]:
+        return self.emoji.button(
+            icon,
+            text,
+            callback_data=callback_data,
+            style=style,
+        )
+
+    @staticmethod
+    def _is_custom_emoji_error(exc: Exception) -> bool:
+        value = str(exc).lower()
+        return any(
+            marker in value
+            for marker in (
+                "custom emoji",
+                "custom_emoji",
+                "icon_custom",
+                "premium",
+            )
+        )
+
+    def _render_api_call(
+        self,
+        method: str,
+        payload: dict[str, Any],
+    ) -> Any:
+        try:
+            return self.api_call(method, payload)
+        except Exception as exc:
+            if (
+                self.emoji.enabled
+                and self.emoji.payload_has_custom_emoji(payload)
+                and self._is_custom_emoji_error(exc)
+            ):
+                LOG.info("custom emoji unavailable; falling back to unicode: %s", exc)
+                self.emoji.enabled = False
+                text, keyboard = self._render_content()
+                fallback_payload = dict(payload)
+                fallback_payload["text"] = text
+                fallback_payload["reply_markup"] = keyboard
+                return self.api_call(method, fallback_payload)
+            raise
+
     def run(self) -> None:
         self.api_call("deleteWebhook", {"drop_pending_updates": False})
+        self._load_emoji_packs()
         updater = threading.Thread(target=self._live_loop, daemon=True)
         updater.start()
         failures = 0
@@ -659,7 +731,7 @@ class TelegramBot:
             message_id = self.registry.get_setting("dashboard_message_id", "") or ""
             if message_id and not force_new:
                 try:
-                    self.api_call(
+                    self._render_api_call(
                         "editMessageText",
                         {
                             "chat_id": self.config.telegram_chat_id,
@@ -679,7 +751,7 @@ class TelegramBot:
                         return
                     if "message to edit not found" not in value and "message can't be edited" not in value:
                         raise
-            result = self.api_call(
+            result = self._render_api_call(
                 "sendMessage",
                 {
                     "chat_id": self.config.telegram_chat_id,
