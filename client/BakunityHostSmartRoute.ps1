@@ -176,6 +176,7 @@ function Get-HostNativeTransportTelemetry {
         relay_connected = [bool]($Status -and $Status.relay_connected)
         path = 'idle'
         version = $Version
+        last_error = ''
     }
 }
 
@@ -199,21 +200,130 @@ function Sync-HostNativeTransport {
         $NativeRole -notin @('host','both')
     )
     if ($NeedsNativeHost) {
-        $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-bootstrap" -Body @{}
-        if ($Bootstrap -and [bool]$Bootstrap.enabled) {
-            $RepositoryRef = ''
-            if (Test-Path -LiteralPath $ClientRefPath) {
-                $RepositoryRef = (
-                    Get-Content -LiteralPath $ClientRefPath -Raw
-                ).Trim()
+        try {
+            $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-bootstrap" -Body @{}
+            if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+                $RepositoryRef = ''
+                if (Test-Path -LiteralPath $ClientRefPath) {
+                    $RepositoryRef = (
+                        Get-Content -LiteralPath $ClientRefPath -Raw
+                    ).Trim()
+                }
+                if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}    [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+    return $Telemetry
+}
+
+function Sync-HostSmartRoute {
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        throw "Missing Host config: $ConfigPath"
+    }
+    if (-not (Test-Path -LiteralPath $MeshLibPath)) {
+        throw "Missing mesh library: $MeshLibPath"
+    }
+
+    $Config = Read-Json -Path $ConfigPath
+    $DeviceId = [string]$Config.device_id
+    if ($DeviceId -notmatch '^[0-9a-fA-F]{32}$') {
+        throw 'Invalid Host device id.'
+    }
+
+    $NativeTelemetry = Sync-HostNativeTransport -Config $Config -DeviceId $DeviceId
+    $Telemetry = New-SmartRouteTelemetry
+    $Response = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry }
+
+    if ($Response -and [bool]$Response.mesh_enabled) {
+        $Mesh = Get-BakunityTailscaleStatus
+        $NeedsEnrollment = [bool](
+            -not $Mesh.conflict -and (
+                -not $Mesh.online -or
+                -not (Test-HasMeshRole -Mesh $Mesh -Role 'host') -or
+                [string]$Mesh.control_url -ne [string]$Response.control_url
+            )
+        )
+
+        if ($NeedsEnrollment) {
+            $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-bootstrap" -Body @{}
+            if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+                $Result = Ensure-BakunityMeshRole -Role host -Bootstrap $Bootstrap
+                if ($Result.conflict) {
+                    Write-HostRouteLog 'MESH=CONFLICT foreign Tailscale detected'
+                }
+                else {
+                    Write-HostRouteLog 'MESH=ONLINE role=host'
+                }
             }
-            if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
-                throw 'Host Smart Route client ref is unavailable for native transport.'
+        }
+
+        $Telemetry = New-SmartRouteTelemetry
+        [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry })
+    }
+
+    $Final = Get-BakunityTailscaleStatus
+    $LanCount = @(Get-LanIPv4).Count
+    Write-HostRouteLog "SYNC=PASS lan=$LanCount native_online=$([bool]$NativeTelemetry.online) mesh_online=$([bool]$Final.online) mesh_conflict=$([bool]$Final.conflict)"
+}
+
+New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $MeshLibPath)) {
+    throw "Missing mesh library: $MeshLibPath"
+}
+if (-not (Test-Path -LiteralPath $NativeTransportLibPath)) {
+    throw "Missing native transport library: $NativeTransportLibPath"
+}
+. $MeshLibPath
+. $NativeTransportLibPath
+
+$Mutex = New-Object Threading.Mutex($false, 'Global\BakunityRdpHostSmartRoute')
+$HasMutex = $false
+try {
+    $HasMutex = $Mutex.WaitOne(0)
+    if (-not $HasMutex) {
+        if ($Once) { Write-Host 'HOST_SMART_ROUTE=ALREADY_RUNNING' }
+        exit 0
+    }
+
+    do {
+        try {
+            Sync-HostSmartRoute
+            if ($Once) { Write-Host 'HOST_SMART_ROUTE=PASS' }
+        }
+        catch {
+            Write-HostRouteLog "SYNC=ERROR $($_.Exception.Message)"
+            if ($Once) {
+                Write-Host "HOST_SMART_ROUTE=ERROR:$($_.Exception.Message)"
+                exit 1
             }
-            Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
-            Set-BakunityNativeTransportConfig -Role both -RelayAddr ([string]$Bootstrap.relay_addr) -SharedSecret ([string]$Bootstrap.shared_secret)
-            $Status = Start-BakunityNativeTransport
-            Write-HostRouteLog "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
+        }
+
+        if ($Once) { break }
+        Start-Sleep -Seconds $PollSeconds
+    } while ($true)
+}
+finally {
+    if ($HasMutex) {
+        try { $Mutex.ReleaseMutex() } catch {}
+    }
+    $Mutex.Dispose()
+}
+) {
+                    throw 'Host Smart Route client ref is unavailable for native transport.'
+                }
+                Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
+                Set-BakunityNativeTransportConfig -Role both -RelayAddr ([string]$Bootstrap.relay_addr) -SharedSecret ([string]$Bootstrap.shared_secret)
+                $Status = Start-BakunityNativeTransport
+                Write-HostRouteLog "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
+            }
+        }
+        catch {
+            $Telemetry = Get-HostNativeTransportTelemetry
+            $ErrorText = [string]$_.Exception.Message
+            if ($ErrorText.Length -gt 500) {
+                $ErrorText = $ErrorText.Substring(0, 500)
+            }
+            $Telemetry.last_error = $ErrorText
+            [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+            Write-HostRouteLog "NATIVE_TRANSPORT=ERROR $ErrorText"
+            return $Telemetry
         }
     }
 
