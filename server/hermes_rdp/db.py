@@ -4,10 +4,12 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import secrets
 import sqlite3
 import struct
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any
@@ -35,13 +37,15 @@ CREATE TABLE IF NOT EXISTS devices (
     pending_created_at INTEGER,
     last_result_json TEXT,
     ssh_key_type TEXT,
-    ssh_public_key TEXT
+    ssh_public_key TEXT,
+    slug TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pair_codes (
     code_hash TEXT PRIMARY KEY,
     display_name TEXT,
     preferred_port INTEGER,
+    slug TEXT,
     expires_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     used_at INTEGER
@@ -88,6 +92,47 @@ def normalize_ssh_public_key(value: str) -> str:
     return f"ssh-ed25519 {parts[1]}"
 
 
+_CYRILLIC_TRANSLIT = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
+    "ё": "e", "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k",
+    "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "h", "ц": "c",
+    "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "",
+    "э": "e", "ю": "yu", "я": "ya",
+})
+
+
+def normalize_device_slug(value: str) -> str:
+    raw = str(value or "").strip().lower().translate(_CYRILLIC_TRANSLIT)
+    ascii_value = (
+        unicodedata.normalize("NFKD", raw)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value).strip("-")
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug[:48].rstrip("-")
+
+
+def normalize_device_domain(value: str) -> str:
+    domain = str(value or "").strip().lower().rstrip(".")
+    if not domain or len(domain) > 253:
+        raise ValueError("invalid device domain")
+    labels = domain.split(".")
+    if len(labels) < 2:
+        raise ValueError("device domain must contain at least one dot")
+    for label in labels:
+        if (
+            not label
+            or len(label) > 63
+            or label.startswith("-")
+            or label.endswith("-")
+            or not re.fullmatch(r"[a-z0-9-]+", label)
+        ):
+            raise ValueError("invalid device domain")
+    return domain
+
+
 class Registry:
     def __init__(
         self,
@@ -120,10 +165,44 @@ class Registry:
                 conn.execute("ALTER TABLE devices ADD COLUMN ssh_key_type TEXT")
             if "ssh_public_key" not in columns:
                 conn.execute("ALTER TABLE devices ADD COLUMN ssh_public_key TEXT")
+            if "slug" not in columns:
+                conn.execute("ALTER TABLE devices ADD COLUMN slug TEXT")
+
+            pair_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(pair_codes)").fetchall()
+            }
+            if "slug" not in pair_columns:
+                conn.execute("ALTER TABLE pair_codes ADD COLUMN slug TEXT")
+
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_active_ssh_key "
                 "ON devices(ssh_public_key) "
                 "WHERE revoked=0 AND ssh_public_key IS NOT NULL AND ssh_public_key<>''"
+            )
+
+            # Existing installations are upgraded in-place. Device slugs are
+            # stable identifiers: display-name changes do not silently change
+            # the public DNS name later.
+            rows = conn.execute(
+                "SELECT id,display_name,machine_name FROM devices "
+                "WHERE slug IS NULL OR slug=''"
+            ).fetchall()
+            for row in rows:
+                slug = self._allocate_slug_in_connection(
+                    conn,
+                    str(row["display_name"] or ""),
+                    str(row["machine_name"] or ""),
+                )
+                conn.execute(
+                    "UPDATE devices SET slug=? WHERE id=?",
+                    (slug, str(row["id"])),
+                )
+
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_active_slug "
+                "ON devices(slug) "
+                "WHERE revoked=0 AND slug IS NOT NULL AND slug<>''"
             )
 
     def get_setting(self, key: str, default: str | None = None) -> str | None:
@@ -139,29 +218,58 @@ class Registry:
                 (key, value),
             )
 
+    def get_device_domain(self) -> str:
+        value = str(self.get_setting("device_domain", "") or "").strip()
+        if not value:
+            return ""
+        return normalize_device_domain(value)
+
+    def set_device_domain(self, value: str) -> str:
+        domain = normalize_device_domain(value)
+        self.set_setting("device_domain", domain)
+        return domain
+
+    def clear_device_domain(self) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM settings WHERE key='device_domain'")
+
     def create_pair_code(
         self,
         *,
         display_name: str | None = None,
         preferred_port: int | None = None,
+        slug: str | None = None,
         ttl_seconds: int = 900,
     ) -> str:
         if preferred_port is not None:
             self._validate_port(preferred_port)
             if self.port_in_use(preferred_port):
                 raise ValueError(f"port {preferred_port} is already assigned")
+        requested_slug = normalize_device_slug(slug or "") if slug else ""
+        if slug and not requested_slug:
+            raise ValueError("invalid device slug")
+        if requested_slug:
+            with self.connect() as conn:
+                if conn.execute(
+                    "SELECT 1 FROM devices WHERE slug=? AND revoked=0",
+                    (requested_slug,),
+                ).fetchone():
+                    raise ValueError(f"device slug {requested_slug} is already assigned")
+
         alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         for _ in range(20):
             code = "".join(secrets.choice(alphabet) for _ in range(8))
             try:
                 with self.connect() as conn:
                     conn.execute(
-                        "INSERT INTO pair_codes(code_hash,display_name,preferred_port,expires_at,created_at) "
-                        "VALUES(?,?,?,?,?)",
+                        "INSERT INTO pair_codes("
+                        "code_hash,display_name,preferred_port,slug,expires_at,created_at"
+                        ") VALUES(?,?,?,?,?,?)",
                         (
                             hash_secret(code),
                             display_name,
                             preferred_port,
+                            requested_slug or None,
                             now() + int(ttl_seconds),
                             now(),
                         ),
@@ -235,6 +343,55 @@ class Registry:
         with self.connect() as conn:
             return self._allocate_port_in_connection(conn, preferred_port)
 
+    def _allocate_slug_in_connection(
+        self,
+        conn: sqlite3.Connection,
+        *candidates: str,
+        exclude_device_id: str | None = None,
+    ) -> str:
+        base = ""
+        for candidate in candidates:
+            base = normalize_device_slug(candidate)
+            if base:
+                break
+        base = base or "pc"
+
+        for suffix in range(1, 10000):
+            suffix_text = "" if suffix == 1 else f"-{suffix}"
+            max_base = 63 - len(suffix_text)
+            candidate = f"{base[:max_base].rstrip('-')}{suffix_text}"
+            params: list[Any] = [candidate]
+            query = "SELECT 1 FROM devices WHERE slug=? AND revoked=0"
+            if exclude_device_id is not None:
+                query += " AND id<>?"
+                params.append(exclude_device_id)
+            if not conn.execute(query, tuple(params)).fetchone():
+                return candidate
+        raise RuntimeError("unable to allocate a unique device slug")
+
+    def set_device_slug(self, device_id: str, slug: str) -> str:
+        normalized = normalize_device_slug(slug)
+        if not normalized:
+            raise ValueError("invalid device slug")
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT 1 FROM devices WHERE id=? AND revoked=0",
+                (device_id,),
+            ).fetchone()
+            if not row:
+                raise KeyError(device_id)
+            if conn.execute(
+                "SELECT 1 FROM devices WHERE slug=? AND id<>? AND revoked=0",
+                (normalized, device_id),
+            ).fetchone():
+                raise ValueError(f"device slug {normalized} is already assigned")
+            conn.execute(
+                "UPDATE devices SET slug=?,updated_at=? WHERE id=? AND revoked=0",
+                (normalized, now(), device_id),
+            )
+        return normalized
+
     def pair_device(
         self,
         *,
@@ -259,12 +416,25 @@ class Registry:
             name = (pair["display_name"] or display_name or machine_name).strip()
             name = name[:64] or machine_name[:64] or "Windows PC"
             clean_machine_name = machine_name.strip()[:128] or "unknown"
+            slug = (
+                normalize_device_slug(str(pair["slug"] or ""))
+                or self._allocate_slug_in_connection(
+                    conn,
+                    name,
+                    clean_machine_name,
+                )
+            )
+            if conn.execute(
+                "SELECT 1 FROM devices WHERE slug=? AND revoked=0",
+                (slug,),
+            ).fetchone():
+                raise ValueError(f"device slug {slug} is already assigned")
             try:
                 conn.execute(
                     "INSERT INTO devices("
                     "id,display_name,machine_name,fingerprint,token_hash,rdp_port,"
-                    "created_at,updated_at,ssh_key_type,ssh_public_key"
-                    ") VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    "created_at,updated_at,ssh_key_type,ssh_public_key,slug"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         device_id,
                         name,
@@ -276,6 +446,7 @@ class Registry:
                         timestamp,
                         key_type,
                         normalized_key,
+                        slug,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -298,17 +469,32 @@ class Registry:
         normalized_key = normalize_ssh_public_key(ssh_public_key)
         device_id = uuid.uuid4().hex
         token = secrets.token_urlsafe(40)
-        port = self.allocate_port(pair.get("preferred_port"))
         name = (pair.get("display_name") or display_name or machine_name).strip()
         name = name[:64] or machine_name[:64] or "Windows PC"
         machine_name = machine_name.strip()[:128] or "unknown"
         timestamp = now()
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            port = self._allocate_port_in_connection(
+                conn,
+                pair.get("preferred_port"),
+            )
+            requested_slug = normalize_device_slug(str(pair.get("slug") or ""))
+            slug = requested_slug or self._allocate_slug_in_connection(
+                conn,
+                name,
+                machine_name,
+            )
+            if conn.execute(
+                "SELECT 1 FROM devices WHERE slug=? AND revoked=0",
+                (slug,),
+            ).fetchone():
+                raise ValueError(f"device slug {slug} is already assigned")
             conn.execute(
                 "INSERT INTO devices("
                 "id,display_name,machine_name,fingerprint,token_hash,rdp_port,"
-                "created_at,updated_at,ssh_key_type,ssh_public_key"
-                ") VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "created_at,updated_at,ssh_key_type,ssh_public_key,slug"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     device_id,
                     name,
@@ -320,6 +506,7 @@ class Registry:
                     timestamp,
                     normalized_key.split(" ", 1)[0],
                     normalized_key,
+                    slug,
                 ),
             )
         return self.get_device(device_id), token
