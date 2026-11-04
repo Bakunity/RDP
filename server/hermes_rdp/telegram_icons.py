@@ -59,6 +59,8 @@ ICONS: dict[str, IconSpec] = {
 class TelegramEmojiTheme:
     def __init__(self) -> None:
         self.enabled = True
+        self.text_enabled = True
+        self.buttons_enabled = True
         self.icons = dict(ICONS)
 
     def _pack_priority(self, spec: IconSpec, pack_name: str) -> int:
@@ -135,17 +137,33 @@ class TelegramEmojiTheme:
             if spec.custom_emoji_id and spec.pack
         }
 
-    def invalidate_unverified(
+    def reconcile_pack_membership(
         self,
-        verified: dict[str, str],
+        membership: dict[str, str],
+        loaded_packs: dict[str, str],
     ) -> int:
         invalidated = 0
+        normalized_loaded = {
+            str(requested).lower(): str(actual).lower()
+            for requested, actual in loaded_packs.items()
+        }
         for name, spec in tuple(self.icons.items()):
             if not spec.custom_emoji_id or not spec.pack:
                 continue
-            actual_pack = verified.get(str(spec.custom_emoji_id), "")
-            if actual_pack.lower() == str(spec.pack).lower():
+
+            requested_pack = str(spec.pack).lower()
+            actual_expected = normalized_loaded.get(requested_pack)
+            if not actual_expected:
+                # Do not throw away a curated ID merely because Telegram could
+                # not load that set during this startup attempt.
                 continue
+
+            actual_pack = str(
+                membership.get(str(spec.custom_emoji_id), "")
+            ).lower()
+            if actual_pack == actual_expected:
+                continue
+
             self.icons[name] = replace(
                 spec,
                 custom_emoji_id=None,
@@ -156,7 +174,7 @@ class TelegramEmojiTheme:
 
     def html(self, name: str) -> str:
         spec = self.icons[name]
-        if not self.enabled or not spec.custom_emoji_id:
+        if not self.enabled or not self.text_enabled or not spec.custom_emoji_id:
             return spec.fallback
         return (
             f'<tg-emoji emoji-id="{spec.custom_emoji_id}">'
@@ -172,7 +190,11 @@ class TelegramEmojiTheme:
         style: str | None = None,
     ) -> dict[str, Any]:
         spec = self.icons[name]
-        custom_id = spec.custom_emoji_id if self.enabled else None
+        custom_id = (
+            spec.custom_emoji_id
+            if self.enabled and self.buttons_enabled
+            else None
+        )
         result: dict[str, Any] = {
             "text": text if custom_id else f"{spec.fallback} {text}",
             "callback_data": callback_data,
@@ -182,6 +204,19 @@ class TelegramEmojiTheme:
         if style:
             result["style"] = style
         return result
+
+    @staticmethod
+    def payload_has_button_custom_emoji(payload: dict[str, Any]) -> bool:
+        keyboard = (payload.get("reply_markup") or {}).get("inline_keyboard") or []
+        return any(
+            isinstance(button, dict) and button.get("icon_custom_emoji_id")
+            for row in keyboard
+            for button in row
+        )
+
+    @staticmethod
+    def payload_has_text_custom_emoji(payload: dict[str, Any]) -> bool:
+        return "<tg-emoji " in str(payload.get("text") or "")
 
     @staticmethod
     def payload_has_custom_emoji(payload: dict[str, Any]) -> bool:

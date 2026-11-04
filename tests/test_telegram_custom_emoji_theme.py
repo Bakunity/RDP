@@ -96,10 +96,15 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
 
     def test_invalid_pinned_id_is_dropped_and_can_be_rediscovered(self) -> None:
         theme = TelegramEmojiTheme()
-        invalidated = theme.invalidate_unverified(
+        invalidated = theme.reconcile_pack_membership(
             {
                 str(ICONS["computer"].custom_emoji_id): "tgmacicons",
-            }
+            },
+            {
+                "tgmacicons": "tgmacicons",
+                "vector_icons_by_fStikBot": "vector_icons_by_fStikBot",
+                "tgiosicons": "tgiosicons",
+            },
         )
         self.assertGreater(invalidated, 0)
         self.assertIsNone(theme.icons["repair"].custom_emoji_id)
@@ -125,6 +130,38 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
             theme.icons["repair"].pack,
             "vector_icons_by_fStikBot",
         )
+
+    def test_button_fallback_does_not_disable_text_custom_emoji(self) -> None:
+        theme = TelegramEmojiTheme()
+        theme.buttons_enabled = False
+        self.assertIn("<tg-emoji ", theme.html("computer"))
+
+        button = theme.button(
+            "add",
+            "ДОБАВИТЬ ПК",
+            callback_data="add",
+            style="primary",
+        )
+        self.assertNotIn("icon_custom_emoji_id", button)
+        self.assertTrue(button["text"].startswith(ICONS["add"].fallback))
+        self.assertEqual(button["style"], "primary")
+
+    def test_missing_pack_load_does_not_invalidate_curated_id(self) -> None:
+        theme = TelegramEmojiTheme()
+        before = theme.icons["computer"]
+        invalidated = theme.reconcile_pack_membership(
+            {},
+            {
+                "tgiosicons": "tgiosicons",
+            },
+        )
+        self.assertGreater(invalidated, 0)
+        self.assertEqual(theme.icons["computer"], before)
+        self.assertEqual(
+            theme.icons["computer"].custom_emoji_id,
+            ICONS["computer"].custom_emoji_id,
+        )
+        self.assertEqual(theme.icons["computer"].pack, "tgmacicons")
 
     def test_all_pinned_ids_are_numeric_and_from_approved_packs(self) -> None:
         for spec in ICONS.values():
