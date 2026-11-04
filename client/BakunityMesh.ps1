@@ -1,4 +1,4 @@
-$script:BakunityTailscaleVersion = '1.104.5'
+﻿$script:BakunityTailscaleVersion = '1.104.5'
 $script:BakunityMeshRoot = 'C:\ProgramData\BakunityRDP\Mesh'
 $script:BakunityMeshOwnerPath = Join-Path $script:BakunityMeshRoot 'owned.json'
 
