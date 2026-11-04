@@ -831,31 +831,7 @@ function Get-SmartRouteTelemetry {
                 $MeshCandidates = @(
                     $Status.TailscaleIPs |
                         Where-Object {
-                            ([string]$_) -match '^\d+\.\d+\.\d+\.\d+$'
-                        }
-                )
-                $MeshIPv4 = [string](
-                    $MeshCandidates |
-                        Select-Object -First 1
-                )
-            }
-        }
-        catch {
-            $MeshOnline = $false
-            $MeshIPv4 = ''
-        }
-    }
-
-    return [ordered]@{
-        lan_ipv4 = @($Lan)
-        mesh_installed = [bool]$MeshInstalled
-        mesh_online = [bool]$MeshOnline
-        mesh_ipv4 = [string]$MeshIPv4
-    }
-}
-
-function Get-SlowTelemetry {
-    $Os = Get-CimInstance Win32_OperatingSystem
+                            ([string]$_) -match '^\d+\.\d+\.\d+\.\d+    $Os = Get-CimInstance Win32_OperatingSystem
     $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
     $RamTotal = [int64]$Os.TotalVisibleMemorySize * 1KB
     $RamFree = [int64]$Os.FreePhysicalMemory * 1KB
@@ -1330,10 +1306,10 @@ while ($true) {
     Start-Sleep -Milliseconds $SleepMs
 }
 
-                            }
-                    ) |
-                        Select-Object -First 1
+                        }
                 )
+                $FirstMesh = $MeshCandidates | Select-Object -First 1
+                $MeshIPv4 = [string]$FirstMesh
             }
         }
         catch {
