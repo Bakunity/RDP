@@ -615,6 +615,7 @@ class TelegramUxBot(TelegramBot):
             "lan": "🏠 LAN DIRECT",
             "p2p": "⚡ P2P DIRECT",
             "native_p2p": "⚡ BAKUNITY P2P",
+            "native_auto": "⚡ BAKUNITY AUTO",
             "native_relay": "🔁 BAKUNITY RELAY",
             "relay": "☁️ VPS RELAY",
             "unavailable": "○ НЕТ МАРШРУТА",
@@ -712,14 +713,16 @@ class TelegramUxBot(TelegramBot):
             or connector.get("name")
             or "Windows"
         )
+        latency_text = f" · {latency} мс" if latency > 0 else ""
+        reason_text = f"\nПричина: {escape(reason)}" if reason else ""
         text = (
             f"{self.icon('globe')} МАРШРУТ\n\n"
             f"Откуда: {escape(source_name)}\n"
             f"Куда: {escape(device['display_name'])}\n"
             f"Сейчас: {escape(self._route_label(raw_route))}"
-            f"{f' · {latency} мс' if latency > 0 else ''}\n"
+            f"{latency_text}\n"
             f"Режим: {escape(policy.upper())}"
-            f"{f'\nПричина: {escape(reason)}' if reason else ''}\n\n"
+            f"{reason_text}\n\n"
             "АВТО сначала пробует локальную сеть и прямой Bakunity P2P, "
             "а при невозможности использует relay."
         )
