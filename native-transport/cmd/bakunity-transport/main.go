@@ -1,0 +1,681 @@
+package main
+
+import (
+    "context"
+    "crypto/hmac"
+    "crypto/rand"
+    "crypto/sha256"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "flag"
+    "fmt"
+    "io"
+    "log"
+    "net"
+    "net/http"
+    "os"
+    "os/signal"
+    "path/filepath"
+    "sort"
+    "strings"
+    "sync"
+    "syscall"
+    "time"
+
+    libp2p "github.com/libp2p/go-libp2p"
+    corecrypto "github.com/libp2p/go-libp2p/core/crypto"
+    "github.com/libp2p/go-libp2p/core/host"
+    "github.com/libp2p/go-libp2p/core/network"
+    "github.com/libp2p/go-libp2p/core/peer"
+    "github.com/libp2p/go-libp2p/core/protocol"
+    circuitclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
+    circuitrelay "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+    ma "github.com/multiformats/go-multiaddr"
+)
+
+const (
+    transportVersion = "0.1.0"
+    rdpProtocol      = protocol.ID("/bakunity/rdp/1.0.0")
+    authMagic        = "BKT1"
+)
+
+type nodeConfig struct {
+    Role         string `json:"role"`
+    IdentityPath string `json:"identity_path"`
+    RelayAddr    string `json:"relay_addr"`
+    ControlAddr  string `json:"control_addr"`
+    Target       string `json:"target"`
+    SharedSecret string `json:"shared_secret"`
+}
+
+type forwardSpec struct {
+    Key          string `json:"key"`
+    PeerID       string `json:"peer_id"`
+    SharedSecret string `json:"shared_secret"`
+    Listen       string `json:"listen"`
+}
+
+type forwardRuntime struct {
+    spec     forwardSpec
+    listener net.Listener
+}
+
+type nodeRuntime struct {
+    host      host.Host
+    relayInfo *peer.AddrInfo
+    cfg       nodeConfig
+    mu        sync.RWMutex
+    forwards  map[string]*forwardRuntime
+}
+
+func main() {
+    log.SetFlags(log.LstdFlags | log.LUTC | log.Lmicroseconds)
+    if len(os.Args) < 2 {
+        fatalf("usage: bakunity-transport relay|node|id")
+    }
+
+    switch os.Args[1] {
+    case "relay":
+        runRelay(os.Args[2:])
+    case "node":
+        runNode(os.Args[2:])
+    case "id":
+        printIdentity(os.Args[2:])
+    default:
+        fatalf("unknown command: %s", os.Args[1])
+    }
+}
+
+func fatalf(format string, args ...any) {
+    log.Printf(format, args...)
+    os.Exit(1)
+}
+
+func contextWithSignals() (context.Context, context.CancelFunc) {
+    ctx, cancel := signal.NotifyContext(
+        context.Background(),
+        os.Interrupt,
+        syscall.SIGTERM,
+    )
+    return ctx, cancel
+}
+
+func loadOrCreateIdentity(path string) (corecrypto.PrivKey, error) {
+    if strings.TrimSpace(path) == "" {
+        return nil, errors.New("identity path is required")
+    }
+    if raw, err := os.ReadFile(path); err == nil {
+        key, err := corecrypto.UnmarshalPrivateKey(raw)
+        if err != nil {
+            return nil, fmt.Errorf("parse identity: %w", err)
+        }
+        return key, nil
+    } else if !os.IsNotExist(err) {
+        return nil, fmt.Errorf("read identity: %w", err)
+    }
+
+    key, _, err := corecrypto.GenerateEd25519Key(rand.Reader)
+    if err != nil {
+        return nil, fmt.Errorf("generate identity: %w", err)
+    }
+    raw, err := corecrypto.MarshalPrivateKey(key)
+    if err != nil {
+        return nil, fmt.Errorf("marshal identity: %w", err)
+    }
+    if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+        return nil, fmt.Errorf("create identity dir: %w", err)
+    }
+    temp := path + ".tmp"
+    if err := os.WriteFile(temp, raw, 0o600); err != nil {
+        return nil, fmt.Errorf("write identity: %w", err)
+    }
+    if err := os.Chmod(temp, 0o600); err != nil && !errors.Is(err, os.ErrPermission) {
+        return nil, fmt.Errorf("chmod identity: %w", err)
+    }
+    if err := os.Rename(temp, path); err != nil {
+        return nil, fmt.Errorf("install identity: %w", err)
+    }
+    return key, nil
+}
+
+func printIdentity(args []string) {
+    fs := flag.NewFlagSet("id", flag.ExitOnError)
+    identity := fs.String("identity", "", "identity key path")
+    _ = fs.Parse(args)
+
+    key, err := loadOrCreateIdentity(*identity)
+    if err != nil {
+        fatalf("identity: %v", err)
+    }
+    id, err := peer.IDFromPrivateKey(key)
+    if err != nil {
+        fatalf("peer id: %v", err)
+    }
+    fmt.Println(id.String())
+}
+
+func runRelay(args []string) {
+    fs := flag.NewFlagSet("relay", flag.ExitOnError)
+    identity := fs.String("identity", "", "identity key path")
+    port := fs.Int("port", 7444, "public TCP/UDP port")
+    control := fs.String("control", "127.0.0.1:7445", "local control address")
+    _ = fs.Parse(args)
+
+    key, err := loadOrCreateIdentity(*identity)
+    if err != nil {
+        fatalf("identity: %v", err)
+    }
+    h, err := libp2p.New(
+        libp2p.Identity(key),
+        libp2p.ListenAddrStrings(
+            fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", *port),
+            fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", *port),
+        ),
+        libp2p.EnableNATService(),
+    )
+    if err != nil {
+        fatalf("create relay host: %v", err)
+    }
+    defer h.Close()
+
+    relayService, err := circuitrelay.New(h)
+    if err != nil {
+        fatalf("start relay service: %v", err)
+    }
+    defer relayService.Close()
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        writeJSON(w, http.StatusOK, map[string]any{
+            "status": "pass",
+            "version": transportVersion,
+        })
+    })
+    mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+        addrs := make([]string, 0, len(h.Addrs()))
+        for _, addr := range h.Addrs() {
+            addrs = append(addrs, addr.String())
+        }
+        sort.Strings(addrs)
+        writeJSON(w, http.StatusOK, map[string]any{
+            "ok": true,
+            "version": transportVersion,
+            "peer_id": h.ID().String(),
+            "addrs": addrs,
+        })
+    })
+
+    server := &http.Server{
+        Addr:              *control,
+        Handler:           mux,
+        ReadHeaderTimeout: 5 * time.Second,
+    }
+    go func() {
+        if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+            log.Printf("control server: %v", err)
+        }
+    }()
+
+    ctx, cancel := contextWithSignals()
+    defer cancel()
+    log.Printf("BAKUNITY_TRANSPORT_RELAY=READY peer_id=%s", h.ID())
+    <-ctx.Done()
+
+    shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+    defer stop()
+    _ = server.Shutdown(shutdownCtx)
+}
+
+func readNodeConfig(path string) (nodeConfig, error) {
+    raw, err := os.ReadFile(path)
+    if err != nil {
+        return nodeConfig{}, err
+    }
+    var cfg nodeConfig
+    if err := json.Unmarshal(raw, &cfg); err != nil {
+        return nodeConfig{}, err
+    }
+    cfg.Role = strings.ToLower(strings.TrimSpace(cfg.Role))
+    if cfg.Role != "host" && cfg.Role != "connector" && cfg.Role != "both" {
+        return nodeConfig{}, errors.New("role must be host, connector, or both")
+    }
+    if cfg.ControlAddr == "" {
+        cfg.ControlAddr = "127.0.0.1:48389"
+    }
+    if cfg.Target == "" {
+        cfg.Target = "127.0.0.1:3389"
+    }
+    if cfg.IdentityPath == "" {
+        return nodeConfig{}, errors.New("identity_path is required")
+    }
+    if cfg.RelayAddr == "" {
+        return nodeConfig{}, errors.New("relay_addr is required")
+    }
+    if (cfg.Role == "host" || cfg.Role == "both") && cfg.SharedSecret == "" {
+        return nodeConfig{}, errors.New("shared_secret is required for host role")
+    }
+    return cfg, nil
+}
+
+func runNode(args []string) {
+    fs := flag.NewFlagSet("node", flag.ExitOnError)
+    configPath := fs.String("config", "", "node config JSON path")
+    _ = fs.Parse(args)
+
+    cfg, err := readNodeConfig(*configPath)
+    if err != nil {
+        fatalf("config: %v", err)
+    }
+    key, err := loadOrCreateIdentity(cfg.IdentityPath)
+    if err != nil {
+        fatalf("identity: %v", err)
+    }
+
+    relayAddr, err := ma.NewMultiaddr(cfg.RelayAddr)
+    if err != nil {
+        fatalf("relay multiaddr: %v", err)
+    }
+    relayInfo, err := peer.AddrInfoFromP2pAddr(relayAddr)
+    if err != nil {
+        fatalf("relay peer: %v", err)
+    }
+
+    h, err := libp2p.New(
+        libp2p.Identity(key),
+        libp2p.ListenAddrStrings(
+            "/ip4/0.0.0.0/tcp/0",
+            "/ip4/0.0.0.0/udp/0/quic-v1",
+        ),
+        libp2p.EnableRelay(),
+        libp2p.EnableHolePunching(),
+        libp2p.NATPortMap(),
+        libp2p.ForceReachabilityPrivate(),
+    )
+    if err != nil {
+        fatalf("create node: %v", err)
+    }
+    defer h.Close()
+
+    runtime := &nodeRuntime{
+        host:      h,
+        relayInfo: relayInfo,
+        cfg:       cfg,
+        forwards:  map[string]*forwardRuntime{},
+    }
+
+    if cfg.Role == "host" || cfg.Role == "both" {
+        h.SetStreamHandler(rdpProtocol, runtime.handleRDPStream)
+    }
+
+    ctx, cancel := contextWithSignals()
+    defer cancel()
+
+    if err := runtime.ensureRelay(ctx, true); err != nil {
+        fatalf("relay connect: %v", err)
+    }
+
+    server := runtime.controlServer()
+    go func() {
+        if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+            log.Printf("control server: %v", err)
+            cancel()
+        }
+    }()
+    go runtime.maintainRelay(ctx)
+
+    log.Printf(
+        "BAKUNITY_TRANSPORT_NODE=READY role=%s peer_id=%s",
+        cfg.Role,
+        h.ID(),
+    )
+    <-ctx.Done()
+
+    runtime.closeForwards()
+    shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+    defer stop()
+    _ = server.Shutdown(shutdownCtx)
+}
+
+func (n *nodeRuntime) ensureRelay(ctx context.Context, reserve bool) error {
+    connectCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+    defer cancel()
+    if err := n.host.Connect(connectCtx, *n.relayInfo); err != nil {
+        return err
+    }
+    if reserve && (n.cfg.Role == "host" || n.cfg.Role == "both") {
+        if _, err := circuitclient.Reserve(connectCtx, n.host, *n.relayInfo); err != nil {
+            return fmt.Errorf("reserve relay: %w", err)
+        }
+    }
+    return nil
+}
+
+func (n *nodeRuntime) maintainRelay(ctx context.Context) {
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    reservationTick := 0
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            reservationTick++
+            reserve := reservationTick%40 == 0
+            if n.host.Network().Connectedness(n.relayInfo.ID) != network.Connected || reserve {
+                if err := n.ensureRelay(ctx, reserve); err != nil {
+                    log.Printf("relay maintenance: %v", err)
+                }
+            }
+        }
+    }
+}
+
+func (n *nodeRuntime) handleRDPStream(stream network.Stream) {
+    defer stream.Close()
+    if err := verifyStreamAuth(stream, n.cfg.SharedSecret); err != nil {
+        log.Printf("reject stream from %s: %v", stream.Conn().RemotePeer(), err)
+        _ = stream.Reset()
+        return
+    }
+
+    target, err := net.DialTimeout("tcp", n.cfg.Target, 5*time.Second)
+    if err != nil {
+        log.Printf("local RDP target %s: %v", n.cfg.Target, err)
+        _ = stream.Reset()
+        return
+    }
+    defer target.Close()
+    bridge(stream, target)
+}
+
+func bridge(a io.ReadWriteCloser, b io.ReadWriteCloser) {
+    done := make(chan struct{}, 2)
+    go func() {
+        _, _ = io.Copy(a, b)
+        done <- struct{}{}
+    }()
+    go func() {
+        _, _ = io.Copy(b, a)
+        done <- struct{}{}
+    }()
+    <-done
+}
+
+func decodeSecret(value string) ([]byte, error) {
+    secret, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
+    if err != nil {
+        return nil, err
+    }
+    if len(secret) < 24 {
+        return nil, errors.New("shared secret is too short")
+    }
+    return secret, nil
+}
+
+func authMAC(secret []byte, nonce []byte, peerID string) []byte {
+    mac := hmac.New(sha256.New, secret)
+    _, _ = mac.Write(nonce)
+    _, _ = mac.Write([]byte(peerID))
+    return mac.Sum(nil)
+}
+
+func writeStreamAuth(stream network.Stream, secretValue string, localPeer peer.ID) error {
+    secret, err := decodeSecret(secretValue)
+    if err != nil {
+        return err
+    }
+    nonce := make([]byte, 16)
+    if _, err := rand.Read(nonce); err != nil {
+        return err
+    }
+    payload := make([]byte, 0, 4+16+32)
+    payload = append(payload, []byte(authMagic)...)
+    payload = append(payload, nonce...)
+    payload = append(payload, authMAC(secret, nonce, localPeer.String())...)
+    _ = stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
+    _, err = stream.Write(payload)
+    _ = stream.SetWriteDeadline(time.Time{})
+    return err
+}
+
+func verifyStreamAuth(stream network.Stream, secretValue string) error {
+    secret, err := decodeSecret(secretValue)
+    if err != nil {
+        return err
+    }
+    payload := make([]byte, 4+16+32)
+    _ = stream.SetReadDeadline(time.Now().Add(5 * time.Second))
+    if _, err := io.ReadFull(stream, payload); err != nil {
+        return err
+    }
+    _ = stream.SetReadDeadline(time.Time{})
+    if string(payload[:4]) != authMagic {
+        return errors.New("invalid auth magic")
+    }
+    nonce := payload[4:20]
+    expected := authMAC(secret, nonce, stream.Conn().RemotePeer().String())
+    if !hmac.Equal(expected, payload[20:]) {
+        return errors.New("invalid transport authorization")
+    }
+    return nil
+}
+
+func (n *nodeRuntime) controlServer() *http.Server {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        writeJSON(w, http.StatusOK, map[string]any{
+            "status": "pass",
+            "version": transportVersion,
+        })
+    })
+    mux.HandleFunc("/status", n.handleStatus)
+    mux.HandleFunc("/forward", n.handleForward)
+
+    return &http.Server{
+        Addr:              n.cfg.ControlAddr,
+        Handler:           mux,
+        ReadHeaderTimeout: 5 * time.Second,
+    }
+}
+
+func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false})
+        return
+    }
+    n.mu.RLock()
+    forwards := make([]map[string]any, 0, len(n.forwards))
+    for _, runtime := range n.forwards {
+        pid, _ := peer.Decode(runtime.spec.PeerID)
+        forwards = append(forwards, map[string]any{
+            "key": runtime.spec.Key,
+            "peer_id": runtime.spec.PeerID,
+            "listen": runtime.spec.Listen,
+            "path": n.pathForPeer(pid),
+        })
+    }
+    n.mu.RUnlock()
+    sort.Slice(forwards, func(i, j int) bool {
+        return fmt.Sprint(forwards[i]["key"]) < fmt.Sprint(forwards[j]["key"])
+    })
+
+    writeJSON(w, http.StatusOK, map[string]any{
+        "ok": true,
+        "version": transportVersion,
+        "role": n.cfg.Role,
+        "peer_id": n.host.ID().String(),
+        "relay_peer_id": n.relayInfo.ID.String(),
+        "relay_connected": n.host.Network().Connectedness(n.relayInfo.ID) == network.Connected,
+        "forwards": forwards,
+    })
+}
+
+func (n *nodeRuntime) handleForward(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false})
+        return
+    }
+    defer r.Body.Close()
+    dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+    dec.DisallowUnknownFields()
+    var spec forwardSpec
+    if err := dec.Decode(&spec); err != nil {
+        writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+        return
+    }
+    if err := n.ensureForward(spec); err != nil {
+        writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+        return
+    }
+    pid, _ := peer.Decode(spec.PeerID)
+    writeJSON(w, http.StatusOK, map[string]any{
+        "ok": true,
+        "path": n.pathForPeer(pid),
+        "listen": spec.Listen,
+    })
+}
+
+func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
+    spec.Key = strings.TrimSpace(spec.Key)
+    spec.PeerID = strings.TrimSpace(spec.PeerID)
+    spec.Listen = strings.TrimSpace(spec.Listen)
+    if spec.Key == "" || spec.PeerID == "" || spec.Listen == "" {
+        return errors.New("key, peer_id, shared_secret and listen are required")
+    }
+    if _, err := decodeSecret(spec.SharedSecret); err != nil {
+        return fmt.Errorf("shared_secret: %w", err)
+    }
+    if _, err := peer.Decode(spec.PeerID); err != nil {
+        return fmt.Errorf("peer_id: %w", err)
+    }
+    hostPart, _, err := net.SplitHostPort(spec.Listen)
+    if err != nil {
+        return fmt.Errorf("listen: %w", err)
+    }
+    ip := net.ParseIP(hostPart)
+    if ip == nil || !ip.IsLoopback() {
+        return errors.New("forward listener must be loopback-only")
+    }
+
+    n.mu.Lock()
+    defer n.mu.Unlock()
+    if existing := n.forwards[spec.Key]; existing != nil {
+        if existing.spec.PeerID == spec.PeerID &&
+            existing.spec.Listen == spec.Listen &&
+            hmac.Equal([]byte(existing.spec.SharedSecret), []byte(spec.SharedSecret)) {
+            return nil
+        }
+        _ = existing.listener.Close()
+        delete(n.forwards, spec.Key)
+    }
+
+    listener, err := net.Listen("tcp", spec.Listen)
+    if err != nil {
+        return err
+    }
+    runtime := &forwardRuntime{spec: spec, listener: listener}
+    n.forwards[spec.Key] = runtime
+    go n.serveForward(runtime)
+    return nil
+}
+
+func (n *nodeRuntime) serveForward(runtime *forwardRuntime) {
+    for {
+        conn, err := runtime.listener.Accept()
+        if err != nil {
+            return
+        }
+        go n.handleForwardConn(runtime.spec, conn)
+    }
+}
+
+func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
+    defer local.Close()
+    pid, err := peer.Decode(spec.PeerID)
+    if err != nil {
+        return
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+    if err := n.connectPeer(ctx, pid); err != nil {
+        log.Printf("connect peer %s: %v", pid, err)
+        return
+    }
+
+    punchDeadline := time.Now().Add(2500 * time.Millisecond)
+    for time.Now().Before(punchDeadline) {
+        if n.pathForPeer(pid) == "direct" {
+            break
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+
+    streamCtx := network.WithAllowLimitedConn(ctx, "bakunity-rdp")
+    stream, err := n.host.NewStream(streamCtx, pid, rdpProtocol)
+    if err != nil {
+        log.Printf("open RDP stream %s: %v", pid, err)
+        return
+    }
+    if err := writeStreamAuth(stream, spec.SharedSecret, n.host.ID()); err != nil {
+        _ = stream.Reset()
+        return
+    }
+    bridge(local, stream)
+}
+
+func (n *nodeRuntime) connectPeer(ctx context.Context, pid peer.ID) error {
+    if n.host.Network().Connectedness(pid) == network.Connected {
+        return nil
+    }
+    relayCircuit, err := ma.NewMultiaddr(
+        fmt.Sprintf(
+            "/p2p/%s/p2p-circuit/p2p/%s",
+            n.relayInfo.ID,
+            pid,
+        ),
+    )
+    if err != nil {
+        return err
+    }
+    return n.host.Connect(
+        ctx,
+        peer.AddrInfo{
+            ID: pid,
+            Addrs: []ma.Multiaddr{relayCircuit},
+        },
+    )
+}
+
+func (n *nodeRuntime) pathForPeer(pid peer.ID) string {
+    if pid == "" {
+        return "unavailable"
+    }
+    conns := n.host.Network().ConnsToPeer(pid)
+    if len(conns) == 0 {
+        return "unavailable"
+    }
+    for _, conn := range conns {
+        if !conn.Stat().Limited {
+            return "direct"
+        }
+    }
+    return "relay"
+}
+
+func (n *nodeRuntime) closeForwards() {
+    n.mu.Lock()
+    defer n.mu.Unlock()
+    for key, runtime := range n.forwards {
+        _ = runtime.listener.Close()
+        delete(n.forwards, key)
+    }
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.Header().Set("Cache-Control", "no-store")
+    w.WriteHeader(status)
+    _ = json.NewEncoder(w).Encode(payload)
+}
