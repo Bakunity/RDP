@@ -138,6 +138,10 @@ class DeviceDomainSlugTests(unittest.TestCase):
         )
         self.assertEqual(pair.slug, "ai")
 
+        certificates = parser.parse_args(["certificates", "sync"])
+        self.assertEqual(certificates.command, "certificates")
+        self.assertEqual(certificates.certificates_command, "sync")
+
 
 if __name__ == "__main__":
     unittest.main()
