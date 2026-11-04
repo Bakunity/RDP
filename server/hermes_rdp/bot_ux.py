@@ -4,6 +4,7 @@ import html
 from typing import Any
 
 from .bot import TelegramBot, bar, escape, format_bytes, format_duration
+from .device_certificates import set_device_slug_with_certificate
 
 
 class TelegramUxBot(TelegramBot):
@@ -24,7 +25,12 @@ class TelegramUxBot(TelegramBot):
                     if input_mode == "device_name":
                         self.registry.rename_device(device_id, raw_text)
                     else:
-                        self.registry.set_device_slug(device_id, raw_text)
+                        set_device_slug_with_certificate(
+                            self.config,
+                            self.registry,
+                            device_id,
+                            raw_text,
+                        )
                     self.registry.set_setting("input_mode", "")
                     self.registry.set_setting("input_error", "")
                     self.registry.set_setting("screen", "device")
