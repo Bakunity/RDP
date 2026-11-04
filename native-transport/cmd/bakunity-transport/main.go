@@ -70,6 +70,46 @@ type nodeRuntime struct {
     forwards  map[string]*forwardRuntime
 }
 
+type relayACL struct {
+    mu      sync.RWMutex
+    allowed map[peer.ID]struct{}
+}
+
+func newRelayACL() *relayACL {
+    return &relayACL{allowed: make(map[peer.ID]struct{})}
+}
+
+func (a *relayACL) allow(id peer.ID) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    a.allowed[id] = struct{}{}
+}
+
+func (a *relayACL) AllowReserve(id peer.ID, _ ma.Multiaddr) bool {
+    a.mu.RLock()
+    defer a.mu.RUnlock()
+    _, ok := a.allowed[id]
+    return ok
+}
+
+func (a *relayACL) AllowConnect(
+    src peer.ID,
+    _ ma.Multiaddr,
+    dest peer.ID,
+) bool {
+    a.mu.RLock()
+    defer a.mu.RUnlock()
+    _, sourceOK := a.allowed[src]
+    _, destOK := a.allowed[dest]
+    return sourceOK && destOK
+}
+
+func (a *relayACL) count() int {
+    a.mu.RLock()
+    defer a.mu.RUnlock()
+    return len(a.allowed)
+}
+
 func main() {
     log.SetFlags(log.LstdFlags | log.LUTC | log.Lmicroseconds)
     if len(os.Args) < 2 {
@@ -180,7 +220,20 @@ func runRelay(args []string) {
     }
     defer h.Close()
 
-    relayService, err := circuitrelay.New(h)
+    acl := newRelayACL()
+    resources := circuitrelay.DefaultResources()
+    resources.Limit = &circuitrelay.RelayLimit{
+        Duration: 12 * time.Hour,
+        Data:     16 << 30,
+    }
+    resources.MaxReservations = 256
+    resources.MaxCircuits = 8
+    resources.BufferSize = 64 * 1024
+    relayService, err := circuitrelay.New(
+        h,
+        circuitrelay.WithACL(acl),
+        circuitrelay.WithResources(resources),
+    )
     if err != nil {
         fatalf("start relay service: %v", err)
     }
@@ -193,6 +246,29 @@ func runRelay(args []string) {
             "version": transportVersion,
         })
     })
+    mux.HandleFunc("/allow", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"ok": false})
+            return
+        }
+        defer r.Body.Close()
+        var body struct {
+            PeerID string `json:"peer_id"`
+        }
+        dec := json.NewDecoder(io.LimitReader(r.Body, 8*1024))
+        dec.DisallowUnknownFields()
+        if err := dec.Decode(&body); err != nil {
+            writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+            return
+        }
+        id, err := peer.Decode(strings.TrimSpace(body.PeerID))
+        if err != nil {
+            writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid peer_id"})
+            return
+        }
+        acl.allow(id)
+        writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+    })
     mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
         addrs := make([]string, 0, len(h.Addrs()))
         for _, addr := range h.Addrs() {
@@ -204,6 +280,7 @@ func runRelay(args []string) {
             "version": transportVersion,
             "peer_id": h.ID().String(),
             "addrs": addrs,
+            "allowed_peers": acl.count(),
         })
     })
 
@@ -312,10 +389,6 @@ func runNode(args []string) {
     ctx, cancel := contextWithSignals()
     defer cancel()
 
-    if err := runtime.ensureRelay(ctx, true); err != nil {
-        fatalf("relay connect: %v", err)
-    }
-
     server := runtime.controlServer()
     go func() {
         if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -323,6 +396,9 @@ func runNode(args []string) {
             cancel()
         }
     }()
+    if err := runtime.ensureRelay(ctx, true); err != nil {
+        log.Printf("initial relay admission pending: %v", err)
+    }
     go runtime.maintainRelay(ctx)
 
     log.Printf(
@@ -353,7 +429,7 @@ func (n *nodeRuntime) ensureRelay(ctx context.Context, reserve bool) error {
 }
 
 func (n *nodeRuntime) maintainRelay(ctx context.Context) {
-    ticker := time.NewTicker(30 * time.Second)
+    ticker := time.NewTicker(5 * time.Second)
     defer ticker.Stop()
     reservationTick := 0
     for {
@@ -362,7 +438,7 @@ func (n *nodeRuntime) maintainRelay(ctx context.Context) {
             return
         case <-ticker.C:
             reservationTick++
-            reserve := reservationTick%40 == 0
+            reserve := reservationTick%240 == 0
             if n.host.Network().Connectedness(n.relayInfo.ID) != network.Connected || reserve {
                 if err := n.ensureRelay(ctx, reserve); err != nil {
                     log.Printf("relay maintenance: %v", err)
