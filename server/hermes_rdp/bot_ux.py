@@ -224,6 +224,99 @@ class TelegramUxBot(TelegramBot):
             self.render()
             return
 
+        if data == "connectors":
+            self._set_live(False)
+            self.registry.set_setting("screen", "connectors")
+            self.registry.set_setting("selected_connector", "")
+            self._answer(callback_id)
+            self.render()
+            return
+
+        if data == "connector_add":
+            self._set_live(False)
+            connector, token = self.registry.create_named_access_token(
+                "Windows connector"
+            )
+            repository_ref = self._client_ref()
+            installer_url = (
+                "https://raw.githubusercontent.com/bakunity/RDP/"
+                f"{repository_ref}/scripts/install-smart-route-connector.ps1"
+            )
+
+            def ps_quote(value: str) -> str:
+                return str(value).replace("'", "''")
+
+            command = (
+                f"$u='{ps_quote(installer_url)}'; "
+                "$s=(irm $u).TrimStart([char]0xFEFF); "
+                "& ([scriptblock]::Create($s)) "
+                f"-ApiBaseUrl '{ps_quote(self.config.api_base_url)}' "
+                f"-ApiFingerprint '{ps_quote(self.config.tls_fingerprint)}' "
+                f"-AccessToken '{ps_quote(token)}' "
+                f"-RepositoryRef '{ps_quote(repository_ref)}'"
+            )
+            self.api_call(
+                "sendMessage",
+                {
+                    "chat_id": self.config.telegram_chat_id,
+                    "parse_mode": "HTML",
+                    "text": (
+                        f"{self.icon('add')} НОВЫЙ CONNECTOR\n\n"
+                        "Открой PowerShell от администратора на Windows и "
+                        "вставь команду целиком.\n\n"
+                        f"<pre><code>{html.escape(command)}</code></pre>\n\n"
+                        "Команда содержит секрет Connector. Не пересылай её."
+                    ),
+                },
+            )
+            self.registry.set_setting("screen", "connectors")
+            self._answer(callback_id, "Команда Connector создана")
+            self.render()
+            return
+
+        if data.startswith("connector:"):
+            connector_id = data.split(":", 1)[1]
+            try:
+                self.registry.get_named_access_connector(connector_id)
+            except KeyError:
+                self._answer(callback_id, "Connector не найден")
+                self.render()
+                return
+            self.registry.set_setting("selected_connector", connector_id)
+            self.registry.set_setting("screen", "connector")
+            self._answer(callback_id)
+            self.render()
+            return
+
+        if data.startswith("route:"):
+            _, policy, connector_id = data.split(":", 2)
+            try:
+                clean = self.registry.set_named_access_route_policy(
+                    connector_id,
+                    policy,
+                )
+            except Exception as exc:
+                self._answer(callback_id, str(exc))
+                return
+            self.registry.set_setting("selected_connector", connector_id)
+            self.registry.set_setting("screen", "connector")
+            self._answer(callback_id, f"Маршрут: {clean.upper()}")
+            self.render()
+            return
+
+        if data.startswith("connector_revoke:"):
+            connector_id = data.split(":", 1)[1]
+            try:
+                self.registry.revoke_named_access_token(connector_id)
+            except KeyError:
+                self._answer(callback_id, "Connector не найден")
+                return
+            self.registry.set_setting("selected_connector", "")
+            self.registry.set_setting("screen", "connectors")
+            self._answer(callback_id, "Connector отозван")
+            self.render()
+            return
+
         if data.startswith("repair:"):
             device_id = data.split(":", 1)[1]
             try:
@@ -262,11 +355,18 @@ class TelegramUxBot(TelegramBot):
     def _home(self) -> tuple[str, dict[str, Any]]:
         devices = self.registry.list_devices()
         online = sum(1 for device in devices if self._online(device))
+        connectors = self.registry.list_named_access_tokens()
+        connector_online = sum(
+            1
+            for connector in connectors
+            if connector.get("last_seen")
+            and int(time.time()) - int(connector["last_seen"]) <= 45
+        )
         text = (
             f"{self.icon('computer')} BAKUNITY RDP\n\n"
-            f"Компьютеры: {len(devices)}\n"
-            f"В сети: {online}\n\n"
-            "Выбери компьютер."
+            f"Хосты: {len(devices)} · в сети {online}\n"
+            f"Коннекторы: {len(connectors)} · в сети {connector_online}\n\n"
+            "Выбери Host или открой Connectors."
         )
         rows = []
         for device in devices:
@@ -280,7 +380,15 @@ class TelegramUxBot(TelegramBot):
                     )
                 ]
             )
-        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
+        rows.append([self.button("add", "ДОБАВИТЬ HOST", "add", style="primary")])
+        rows.append([
+            self.button(
+                "globe",
+                "КОННЕКТОРЫ",
+                "connectors",
+                style="primary",
+            )
+        ])
         rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
         return text, {"inline_keyboard": rows}
 
@@ -321,6 +429,123 @@ class TelegramUxBot(TelegramBot):
         if default_device_id == str(device.get("id") or ""):
             return self._device_host(device)
         return self._rdp_endpoint(device)
+
+    def _connectors(self) -> tuple[str, dict[str, Any]]:
+        connectors = self.registry.list_named_access_tokens()
+        rows: list[list[dict[str, Any]]] = []
+        now = int(time.time())
+        for connector in connectors:
+            last_seen = int(connector.get("last_seen") or 0)
+            online = last_seen > 0 and now - last_seen <= 45
+            machine = str(connector.get("machine_name") or "").strip()
+            label = str(connector.get("name") or "Connector")
+            if machine:
+                label = f"{label} · {machine}"
+            rows.append(
+                [
+                    self.button(
+                        "online" if online else "offline",
+                        label,
+                        f"connector:{connector['id']}",
+                        style="success" if online else None,
+                    )
+                ]
+            )
+        rows.append(
+            [
+                self.button(
+                    "add",
+                    "ДОБАВИТЬ CONNECTOR",
+                    "connector_add",
+                    style="primary",
+                )
+            ]
+        )
+        rows.append([self.button("back", "НАЗАД", "home")])
+        text = (
+            f"{self.icon('globe')} CONNECTORS\n\n"
+            "Connector — Windows-компьютер, С КОТОРОГО ты подключаешься.\n\n"
+            f"Всего: {len(connectors)}"
+        )
+        return text, {"inline_keyboard": rows}
+
+    def _connector(
+        self,
+        connector: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        now = int(time.time())
+        last_seen = int(connector.get("last_seen") or 0)
+        online = last_seen > 0 and now - last_seen <= 45
+        telemetry = connector.get("telemetry") or {}
+        mesh = telemetry.get("mesh") or {}
+        routes = telemetry.get("routes") or {}
+        policy = str(connector.get("route_policy") or "auto").upper()
+        route_lines = []
+        for device in self.registry.list_devices():
+            route = routes.get(str(device["id"])) or {}
+            value = str(route.get("route") or "—").upper()
+            latency = int(route.get("latency_ms") or 0)
+            suffix = f" · {latency} мс" if latency > 0 else ""
+            route_lines.append(
+                f"{escape(device['display_name'])}: {escape(value)}{suffix}"
+            )
+        route_text = "\n".join(route_lines) or "Маршрутов ещё нет."
+        mesh_status = (
+            f"{self.icon('success')} В СЕТИ"
+            if bool(mesh.get("online"))
+            else f"{self.icon('info')} НЕ ПОДКЛЮЧЁН"
+        )
+        text = (
+            f"{self.icon('online' if online else 'offline')} "
+            f"{escape(connector.get('name') or 'CONNECTOR').upper()} · "
+            f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
+            f"Компьютер: {escape(connector.get('machine_name') or '—')}\n"
+            f"Политика: {escape(policy)}\n"
+            f"Mesh: {mesh_status}\n\n"
+            "МАРШРУТЫ\n"
+            f"{route_text}"
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    self.button(
+                        "success" if policy == "AUTO" else "info",
+                        "AUTO",
+                        f"route:auto:{connector['id']}",
+                    ),
+                    self.button(
+                        "success" if policy == "P2P" else "info",
+                        "P2P",
+                        f"route:p2p:{connector['id']}",
+                    ),
+                ],
+                [
+                    self.button(
+                        "success" if policy == "LAN" else "info",
+                        "LAN",
+                        f"route:lan:{connector['id']}",
+                    ),
+                    self.button(
+                        "success" if policy == "RELAY" else "info",
+                        "RELAY",
+                        f"route:relay:{connector['id']}",
+                    ),
+                ],
+                [
+                    self.button(
+                        "delete",
+                        "ОТОЗВАТЬ CONNECTOR",
+                        f"connector_revoke:{connector['id']}",
+                        style="danger",
+                    )
+                ],
+                [
+                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("back", "К CONNECTORS", "connectors"),
+                ],
+            ]
+        }
+        return text, keyboard
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
         text, _ = super()._pair()
@@ -813,6 +1038,21 @@ class TelegramUxBot(TelegramBot):
 
     def _render_content(self) -> tuple[str, dict[str, Any]]:
         screen = self.registry.get_setting("screen", "home") or "home"
+        if screen == "connectors":
+            return self._connectors()
+        if screen == "connector":
+            connector_id = self.registry.get_setting(
+                "selected_connector",
+                "",
+            ) or ""
+            try:
+                connector = self.registry.get_named_access_connector(
+                    connector_id
+                )
+            except KeyError:
+                self.registry.set_setting("screen", "connectors")
+                return self._connectors()
+            return self._connector(connector)
         if screen in {
             "repair",
             "device_details",

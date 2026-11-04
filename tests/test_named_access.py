@@ -70,12 +70,62 @@ class NamedAccessTests(unittest.TestCase):
         self.assertEqual(revoked.named_access_command, "revoke")
         self.assertEqual(revoked.connector_id, "abc123")
 
+        routed = parser.parse_args(
+            ["named-access", "route", "abc123", "p2p"]
+        )
+        self.assertEqual(routed.named_access_command, "route")
+        self.assertEqual(routed.connector_id, "abc123")
+        self.assertEqual(routed.policy, "p2p")
+
+    def test_connector_smart_route_policy_and_telemetry_persist(self) -> None:
+        connector, token = self.registry.create_named_access_token("Laptop")
+        self.assertEqual(connector["route_policy"], "auto")
+
+        self.registry.set_named_access_route_policy(
+            connector["id"],
+            "p2p",
+        )
+        self.registry.update_named_access_telemetry(
+            connector["id"],
+            machine_name="LAPTOP-01",
+            telemetry={
+                "mesh": {
+                    "installed": True,
+                    "online": True,
+                    "ipv4": "192.0.2.10",
+                },
+                "routes": {
+                    "dev123": {
+                        "route": "p2p",
+                        "latency_ms": 18,
+                    }
+                },
+            },
+        )
+
+        authenticated = self.registry.authenticate_named_access_token(token)
+        self.assertIsNotNone(authenticated)
+        self.assertEqual(authenticated["route_policy"], "p2p")
+        self.assertEqual(authenticated["machine_name"], "LAPTOP-01")
+        self.assertTrue(authenticated["telemetry"]["mesh"]["online"])
+
+        with self.assertRaisesRegex(ValueError, "route policy"):
+            self.registry.set_named_access_route_policy(
+                connector["id"],
+                "fastest",
+            )
+
     def test_manifest_is_get_only_and_contains_no_connector_secret(self) -> None:
         api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
         self.assertIn('path == "/v1/named-access/manifest"', api)
         self.assertIn("authenticate_named_access_token", api)
         self.assertIn('"hostname": f"{slug}.{domain}"', api)
         self.assertIn('"rdp_port": int(device["rdp_port"])', api)
+        self.assertIn('"manifest_version": 2', api)
+        self.assertIn('"routes": {', api)
+        self.assertIn('"p2p": {', api)
+        self.assertIn('"relay": {', api)
+        self.assertIn('path == "/v1/named-access/telemetry"', api)
         self.assertNotIn('"token_hash"', api)
         self.assertNotIn('"access_token"', api)
 
@@ -181,6 +231,45 @@ class NamedAccessTests(unittest.TestCase):
             1,
         )[1].split("Start-IpHelper", 1)[0]
         self.assertNotIn("Assert-LocalRdpPortAvailable", launcher_branch)
+
+    def test_smart_route_worker_selects_lan_p2p_then_relay(self) -> None:
+        worker = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "Select-DeviceRoute",
+            "@('auto','lan')",
+            "@('auto','p2p')",
+            "@('auto','relay')",
+            "Test-TcpCandidate",
+            "route_type",
+            "latency_ms",
+            "/v1/named-access/telemetry",
+            "manifest_version -ne 2",
+        ):
+            self.assertIn(marker, worker)
+
+    def test_smart_route_installer_is_one_command_system_task(self) -> None:
+        installer = (
+            ROOT / "scripts/install-smart-route-connector.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "Resolve-RepositorySha",
+            "Bakunity RDP Smart Route",
+            "New-ScheduledTaskPrincipal -UserId 'SYSTEM'",
+            "BakunitySmartRoute.ps1",
+            "BakunitySmartRouteLaunch.ps1",
+            "SMART_ROUTE_INSTALL=PASS",
+        ):
+            self.assertIn(marker, installer)
+
+    def test_smart_route_launcher_uses_local_proxy_endpoint(self) -> None:
+        launcher = (
+            ROOT / "client/BakunitySmartRouteLaunch.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn("local_port", launcher)
+        self.assertIn("ROUTE=", launcher)
+        self.assertIn('Start-Process -FilePath $Mstsc', launcher)
 
     def test_uninstall_removes_only_recorded_named_access_runtime(self) -> None:
         uninstall = (

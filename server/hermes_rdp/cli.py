@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     named_access_sub.add_parser("list")
     named_access_revoke = named_access_sub.add_parser("revoke")
     named_access_revoke.add_argument("connector_id")
+    named_access_route = named_access_sub.add_parser("route")
+    named_access_route.add_argument("connector_id")
+    named_access_route.add_argument(
+        "policy",
+        choices=["auto", "p2p", "relay", "lan"],
+    )
 
     default_rdp = sub.add_parser(
         "default-rdp",
@@ -356,7 +362,7 @@ def main() -> None:
             repository_ref = config.repository_ref
             installer_url = (
                 "https://raw.githubusercontent.com/bakunity/RDP/"
-                f"{repository_ref}/scripts/install-named-access.ps1"
+                f"{repository_ref}/scripts/install-smart-route-connector.ps1"
             )
 
             def ps_quote(value: str) -> str:
@@ -386,6 +392,8 @@ def main() -> None:
             for connector in connectors:
                 print(
                     f"{connector['id']}\t{connector['name']}\t"
+                    f"machine={connector.get('machine_name') or '-'}\t"
+                    f"policy={connector.get('route_policy') or 'auto'}\t"
                     f"created={connector['created_at']}\t"
                     f"last_seen={connector['last_seen'] or 'never'}"
                 )
@@ -398,6 +406,18 @@ def main() -> None:
                 raise SystemExit("Named Access connector not found")
             print("REVOKED=PASS")
             return
+        if args.named_access_command == "route":
+            try:
+                policy = registry.set_named_access_route_policy(
+                    args.connector_id,
+                    args.policy,
+                )
+            except KeyError:
+                raise SystemExit("Smart Route connector not found")
+            print(f"ROUTE_POLICY={policy}")
+            print("OK")
+            return
+
 
     if args.command == "default-rdp":
         service = "bakunity-rdp-default.service"

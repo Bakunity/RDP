@@ -62,7 +62,11 @@ CREATE TABLE IF NOT EXISTS named_access_tokens (
     token_hash TEXT NOT NULL UNIQUE,
     created_at INTEGER NOT NULL,
     last_seen INTEGER,
-    revoked_at INTEGER
+    revoked_at INTEGER,
+    machine_name TEXT,
+    route_policy TEXT NOT NULL DEFAULT 'auto',
+    telemetry_json TEXT,
+    updated_at INTEGER
 );
 """
 
@@ -184,6 +188,37 @@ class Registry:
             if "slug" not in pair_columns:
                 conn.execute("ALTER TABLE pair_codes ADD COLUMN slug TEXT")
 
+            connector_columns = {
+                str(row["name"])
+                for row in conn.execute(
+                    "PRAGMA table_info(named_access_tokens)"
+                ).fetchall()
+            }
+            if "machine_name" not in connector_columns:
+                conn.execute(
+                    "ALTER TABLE named_access_tokens "
+                    "ADD COLUMN machine_name TEXT"
+                )
+            if "route_policy" not in connector_columns:
+                conn.execute(
+                    "ALTER TABLE named_access_tokens "
+                    "ADD COLUMN route_policy TEXT NOT NULL DEFAULT 'auto'"
+                )
+            if "telemetry_json" not in connector_columns:
+                conn.execute(
+                    "ALTER TABLE named_access_tokens "
+                    "ADD COLUMN telemetry_json TEXT"
+                )
+            if "updated_at" not in connector_columns:
+                conn.execute(
+                    "ALTER TABLE named_access_tokens "
+                    "ADD COLUMN updated_at INTEGER"
+                )
+            conn.execute(
+                "UPDATE named_access_tokens SET route_policy='auto' "
+                "WHERE route_policy IS NULL OR route_policy=''"
+            )
+
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_active_ssh_key "
                 "ON devices(ssh_public_key) "
@@ -242,6 +277,29 @@ class Registry:
         with self.connect() as conn:
             conn.execute("DELETE FROM settings WHERE key='device_domain'")
 
+    @staticmethod
+    def normalize_route_policy(value: str) -> str:
+        policy = str(value or "").strip().lower()
+        if policy not in {"auto", "p2p", "relay", "lan"}:
+            raise ValueError("route policy must be auto, p2p, relay, or lan")
+        return policy
+
+    @staticmethod
+    def _connector_row(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        raw = data.get("telemetry_json")
+        if raw:
+            try:
+                data["telemetry"] = json.loads(raw)
+            except json.JSONDecodeError:
+                data["telemetry"] = None
+        else:
+            data["telemetry"] = None
+        data["route_policy"] = str(
+            data.get("route_policy") or "auto"
+        ).lower()
+        return data
+
     def create_named_access_token(
         self,
         name: str = "Windows connector",
@@ -253,13 +311,15 @@ class Registry:
         with self.connect() as conn:
             conn.execute(
                 "INSERT INTO named_access_tokens("
-                "id,name,token_hash,created_at"
-                ") VALUES(?,?,?,?)",
+                "id,name,token_hash,created_at,updated_at,route_policy"
+                ") VALUES(?,?,?,?,?,?)",
                 (
                     connector_id,
                     clean_name,
                     hash_secret(token),
                     timestamp,
+                    timestamp,
+                    "auto",
                 ),
             )
         return {
@@ -268,6 +328,10 @@ class Registry:
             "created_at": timestamp,
             "last_seen": None,
             "revoked_at": None,
+            "machine_name": None,
+            "route_policy": "auto",
+            "telemetry": None,
+            "updated_at": timestamp,
         }, token
 
     def authenticate_named_access_token(
@@ -277,7 +341,8 @@ class Registry:
         token_hash = hash_secret(str(token or ""))
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT id,name,created_at,last_seen,revoked_at "
+                "SELECT id,name,created_at,last_seen,revoked_at,"
+                "machine_name,route_policy,telemetry_json,updated_at "
                 "FROM named_access_tokens "
                 "WHERE token_hash=? AND revoked_at IS NULL",
                 (token_hash,),
@@ -289,7 +354,7 @@ class Registry:
                 "UPDATE named_access_tokens SET last_seen=? WHERE id=?",
                 (timestamp, str(row["id"])),
             )
-        data = dict(row)
+        data = self._connector_row(row)
         data["last_seen"] = timestamp
         return data
 
@@ -300,11 +365,75 @@ class Registry:
         where = "" if include_revoked else "WHERE revoked_at IS NULL"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id,name,created_at,last_seen,revoked_at "
+                "SELECT id,name,created_at,last_seen,revoked_at,"
+                "machine_name,route_policy,telemetry_json,updated_at "
                 f"FROM named_access_tokens {where} "
                 "ORDER BY created_at,name"
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._connector_row(row) for row in rows]
+
+    def get_named_access_connector(
+        self,
+        connector_id: str,
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id,name,created_at,last_seen,revoked_at,"
+                "machine_name,route_policy,telemetry_json,updated_at "
+                "FROM named_access_tokens WHERE id=?",
+                (connector_id,),
+            ).fetchone()
+        if not row:
+            raise KeyError(connector_id)
+        return self._connector_row(row)
+
+    def set_named_access_route_policy(
+        self,
+        connector_id: str,
+        policy: str,
+    ) -> str:
+        clean = self.normalize_route_policy(policy)
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE named_access_tokens "
+                "SET route_policy=?,updated_at=? "
+                "WHERE id=? AND revoked_at IS NULL",
+                (clean, now(), connector_id),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(connector_id)
+        return clean
+
+    def update_named_access_telemetry(
+        self,
+        connector_id: str,
+        *,
+        machine_name: str,
+        telemetry: dict[str, Any],
+    ) -> None:
+        if not isinstance(telemetry, dict):
+            raise ValueError("connector telemetry object required")
+        clean_machine = str(machine_name or "").strip()[:128]
+        timestamp = now()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE named_access_tokens SET "
+                "machine_name=?,telemetry_json=?,last_seen=?,updated_at=? "
+                "WHERE id=? AND revoked_at IS NULL",
+                (
+                    clean_machine or None,
+                    json.dumps(
+                        telemetry,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    timestamp,
+                    timestamp,
+                    connector_id,
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(connector_id)
 
     def revoke_named_access_token(self, connector_id: str) -> None:
         with self.connect() as conn:
