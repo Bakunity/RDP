@@ -473,6 +473,13 @@ ln -sfn "$BACKUP" /var/backups/hermes-rdp/latest-update
 
 ROLLBACK_ARMED=1
 
+rm -rf /opt/hermes-rdp/source
+install -d -m 0755 /opt/hermes-rdp/source
+cp -a "$ROOT"/. /opt/hermes-rdp/source/
+chown -R root:root /opt/hermes-rdp/source
+test -f /opt/hermes-rdp/source/scripts/setup-native-transport.sh
+test -f /opt/hermes-rdp/source/native-transport/go.mod
+
 rm -rf /opt/hermes-rdp/app/hermes_rdp
 cp -a "$ROOT/server/hermes_rdp" /opt/hermes-rdp/app/hermes_rdp
 chown -R root:root /opt/hermes-rdp/app
