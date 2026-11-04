@@ -160,6 +160,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/v1/pair":
                 self._pair()
                 return
+            if path == "/v1/named-access/telemetry":
+                self._named_access_telemetry()
+                return
             parts = [part for part in path.split("/") if part]
             if len(parts) == 4 and parts[:2] == ["v1", "devices"]:
                 device_id, action = parts[2], parts[3]
@@ -212,6 +215,15 @@ class ApiHandler(BaseHTTPRequestHandler):
             slug = str(device.get("slug") or "").strip()
             if not slug:
                 continue
+            telemetry = device.get("telemetry") or {}
+            smart = telemetry.get("smart_route") or {}
+            lan_ipv4 = [
+                str(value)
+                for value in (smart.get("lan_ipv4") or [])
+                if isinstance(value, str) and value
+            ][:16]
+            mesh_ipv4 = str(smart.get("mesh_ipv4") or "").strip()
+            mesh_online = bool(smart.get("mesh_online")) and bool(mesh_ipv4)
             devices.append(
                 {
                     "id": str(device["id"]),
@@ -220,25 +232,96 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "hostname": f"{slug}.{domain}",
                     "rdp_port": int(device["rdp_port"]),
                     "enabled": bool(device.get("enabled", True)),
+                    "routes": {
+                        "lan": [
+                            {"host": address, "port": 3389}
+                            for address in lan_ipv4
+                        ],
+                        "p2p": {
+                            "available": mesh_online,
+                            "host": mesh_ipv4,
+                            "port": 3389,
+                        },
+                        "relay": {
+                            "available": True,
+                            "host": self.server.config.public_host,
+                            "port": int(device["rdp_port"]),
+                        },
+                    },
                 }
             )
+
+        smart_route_enabled = (
+            str(
+                self.server.registry.get_setting(
+                    "smart_route_enabled",
+                    "0",
+                )
+                or "0"
+            )
+            == "1"
+        )
+        control_url = str(
+            self.server.registry.get_setting(
+                "smart_route_control_url",
+                "",
+            )
+            or ""
+        ).strip()
 
         self._json(
             HTTPStatus.OK,
             {
                 "ok": True,
-                "manifest_version": 1,
+                "manifest_version": 2,
                 "generated_at": int(time.time()),
                 "connector": {
                     "id": str(connector["id"]),
                     "name": str(connector["name"]),
+                    "route_policy": str(
+                        connector.get("route_policy") or "auto"
+                    ),
                 },
                 "server": {
                     "public_host": self.server.config.public_host,
                     "device_domain": domain,
                     "default_rdp_port": 3389,
+                    "smart_route": {
+                        "enabled": smart_route_enabled,
+                        "control_url": control_url,
+                    },
                 },
                 "devices": devices,
+            },
+        )
+
+    def _named_access_telemetry(self) -> None:
+        connector = self._named_access_auth()
+        if not connector:
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        body = self._read_json()
+        telemetry = body.get("telemetry")
+        if not isinstance(telemetry, dict):
+            raise ValueError("connector telemetry object required")
+        self.server.registry.update_named_access_telemetry(
+            str(connector["id"]),
+            machine_name=str(body.get("machine_name") or ""),
+            telemetry=telemetry,
+        )
+        current = self.server.registry.get_named_access_connector(
+            str(connector["id"])
+        )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "route_policy": str(
+                    current.get("route_policy") or "auto"
+                ),
             },
         )
 
