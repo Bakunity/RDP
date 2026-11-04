@@ -117,7 +117,10 @@ class SmartRouteMeshTests(unittest.TestCase):
             "urls: []",
             '"tag:bakunity-host"',
             '"tag:bakunity-connector"',
-            '"ip": ["3389"]',
+            '"ip": ["tcp:3389"]',
+            "HEADSCALE_STARTUP_FAILED",
+            "HEADSCALE_PORT_CONFLICT:",
+            "journalctl -u headscale.service -n 80",
             "proxy_set_header Upgrade",
             'proxy_set_header Connection "upgrade";',
             "ufw allow 443/tcp",
@@ -143,6 +146,7 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertLess(nginx_install_index, nginx_check_index)
         self.assertLess(acme_route_index, certbot_index)
         self.assertGreater(enabled_index, health_index)
+        self.assertNotIn('"ip": ["3389"]', text)
         self.assertNotIn(
             "base_domain: mesh.$DEVICE_DOMAIN",
             text,
