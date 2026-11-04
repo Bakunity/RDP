@@ -11,6 +11,7 @@ $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
+$ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $CoreCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpRepairCore-$([Guid]::NewGuid().ToString('N')).ps1")
@@ -51,6 +52,16 @@ function Assert-PowerShellFile {
     if ($Errors.Count -gt 0) {
         throw "PowerShell parse error: $($Errors[0].Message)"
     }
+}
+
+function Write-ClientRef {
+    param([string]$ResolvedSha)
+    $Temp = "$ClientRefPath.tmp"
+    Set-Content -LiteralPath $Temp -Value $ResolvedSha -Encoding ASCII
+    $Acl = Get-Acl -LiteralPath $Temp
+    $Acl.SetSecurityDescriptorSddlForm('O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+    Set-Acl -LiteralPath $Temp -AclObject $Acl
+    Move-Item -LiteralPath $Temp -Destination $ClientRefPath -Force
 }
 
 function Get-NativePowerShellPath {
@@ -257,7 +268,9 @@ try {
     if ($CoreOutput.Trim()) {
         Write-Host $CoreOutput.TrimEnd()
     }
+    Write-ClientRef -ResolvedSha $ResolvedSha
     Write-Host 'CertificateRotation: managed'
+    Write-Host "ClientRef: $ResolvedSha"
     Write-Host 'CERT-013_REPAIR=PASS' -ForegroundColor Green
 }
 finally {
