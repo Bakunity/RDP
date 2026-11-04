@@ -148,9 +148,9 @@ function Install-BakunityNativeTransportBinary {
         try {
             Push-Location $Module
             try {
-                & $GoExe mod download
+                & $GoExe mod tidy
                 if ($LASTEXITCODE -ne 0) {
-                    throw "Bakunity Transport dependency download failed: $LASTEXITCODE"
+                    throw "Bakunity Transport dependency graph resolution failed: $LASTEXITCODE"
                 }
                 & $GoExe build -trimpath -ldflags '-s -w' -o $Candidate '.\cmd\bakunity-transport'
                 if ($LASTEXITCODE -ne 0) {
