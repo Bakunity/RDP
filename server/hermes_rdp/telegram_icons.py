@@ -15,6 +15,7 @@ class IconSpec:
 ICONS: dict[str, IconSpec] = {
     "computer": IconSpec("💻"),
     "settings": IconSpec("⚙️"),
+    "edit": IconSpec("✏️"),
     "back": IconSpec("⬅️"),
     "refresh": IconSpec("🔄"),
     "repeat": IconSpec("🔁"),

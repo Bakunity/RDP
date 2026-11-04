@@ -1,1 +1,2 @@
 hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-cert-package
+hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-device-cert-package *

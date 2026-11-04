@@ -9,9 +9,82 @@ from .bot import TelegramBot, escape
 class TelegramUxBot(TelegramBot):
     """Telegram UX extensions that keep pairing and repair explicitly separate."""
 
+    def _handle_update(self, update: dict[str, Any]) -> None:
+        if "message" in update and self._authorized(update):
+            message = update.get("message") or {}
+            raw_text = str(message.get("text") or "").strip()
+            input_mode = str(self.registry.get_setting("input_mode", "") or "")
+            device_id = str(
+                self.registry.get_setting("selected_device", "") or ""
+            )
+
+            if input_mode in {"device_name", "device_slug"} and not raw_text.startswith("/"):
+                try:
+                    device = self.registry.get_device(device_id)
+                    if input_mode == "device_name":
+                        self.registry.rename_device(device_id, raw_text)
+                    else:
+                        self.registry.set_device_slug(device_id, raw_text)
+                    self.registry.set_setting("input_mode", "")
+                    self.registry.set_setting("input_error", "")
+                    self.registry.set_setting("screen", "device")
+                    self.render()
+                except Exception as exc:
+                    self.registry.set_setting("input_error", str(exc)[:180])
+                    self.render()
+                return
+
+            if raw_text.split("@", 1)[0].lower() in {"/start", "/menu", "/status"}:
+                self.registry.set_setting("input_mode", "")
+                self.registry.set_setting("input_error", "")
+
+        super()._handle_update(update)
+
     def _handle_callback(self, callback: dict[str, Any]) -> None:
         data = str(callback.get("data", "home"))
         callback_id = str(callback.get("id", ""))
+
+        if not (
+            data.startswith("edit_name:")
+            or data.startswith("edit_slug:")
+        ):
+            self.registry.set_setting("input_mode", "")
+            self.registry.set_setting("input_error", "")
+
+        if data.startswith("edit_name:") or data.startswith("edit_slug:"):
+            action, device_id = data.split(":", 1)
+            try:
+                self.registry.get_device(device_id)
+            except KeyError:
+                self._answer(callback_id, "Устройство не найдено")
+                self.render()
+                return
+            self._set_live(False)
+            self.registry.set_setting("selected_device", device_id)
+            self.registry.set_setting(
+                "input_mode",
+                "device_name" if action == "edit_name" else "device_slug",
+            )
+            self.registry.set_setting("input_error", "")
+            self.registry.set_setting("screen", "device_edit")
+            self._answer(
+                callback_id,
+                "Отправь новое имя"
+                if action == "edit_name"
+                else "Отправь новый адрес",
+            )
+            self.render()
+            return
+
+        if data.startswith("edit_cancel:"):
+            device_id = data.split(":", 1)[1]
+            self.registry.set_setting("selected_device", device_id)
+            self.registry.set_setting("input_mode", "")
+            self.registry.set_setting("input_error", "")
+            self.registry.set_setting("screen", "device")
+            self._answer(callback_id, "Изменение отменено")
+            self.render()
+            return
 
         if data == "pair_new":
             self._set_live(False)
@@ -196,6 +269,18 @@ class TelegramUxBot(TelegramBot):
                 ],
                 [
                     self.button(
+                        "edit",
+                        "ИМЯ",
+                        f"edit_name:{device['id']}",
+                    ),
+                    self.button(
+                        "globe",
+                        "АДРЕС",
+                        f"edit_slug:{device['id']}",
+                    ),
+                ],
+                [
+                    self.button(
                         "info",
                         "ПОДРОБНЕЕ",
                         f"details:{device['id']}",
@@ -205,6 +290,51 @@ class TelegramUxBot(TelegramBot):
                     self.button("refresh", "ОБНОВИТЬ", "refresh"),
                     self.button("back", "К СПИСКУ", "home"),
                 ],
+            ]
+        }
+        return text, keyboard
+
+    def _device_edit(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        mode = str(self.registry.get_setting("input_mode", "") or "")
+        error = str(self.registry.get_setting("input_error", "") or "")
+        if mode == "device_name":
+            title = "ИЗМЕНИТЬ ИМЯ"
+            current = str(device.get("display_name") or "")
+            hint = "Отправь новое название компьютера обычным сообщением."
+        else:
+            title = "ИЗМЕНИТЬ АДРЕС"
+            current = str(device.get("slug") or "")
+            domain = self._device_domain()
+            suffix = f".{domain}" if domain else ""
+            hint = (
+                "Отправь только имя до домена, например: tima\n"
+                f"Получится: tima{suffix}"
+            )
+
+        error_text = (
+            f"\n\n{self.icon('warning')} Ошибка: {escape(error)}"
+            if error
+            else ""
+        )
+        text = (
+            f"{self.icon('edit')} {title}\n\n"
+            f"Компьютер: {escape(device['display_name'])}\n"
+            f"Сейчас: {escape(current)}\n\n"
+            f"{hint}"
+            f"{error_text}"
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    self.button(
+                        "cancel",
+                        "ОТМЕНА",
+                        f"edit_cancel:{device['id']}",
+                    )
+                ]
             ]
         }
         return text, keyboard
@@ -279,7 +409,7 @@ class TelegramUxBot(TelegramBot):
 
     def _render_content(self) -> tuple[str, dict[str, Any]]:
         screen = self.registry.get_setting("screen", "home") or "home"
-        if screen in {"repair", "device_details"}:
+        if screen in {"repair", "device_details", "device_edit"}:
             device_id = self.registry.get_setting("selected_device", "") or ""
             try:
                 device = self.registry.get_device(device_id)
@@ -289,5 +419,7 @@ class TelegramUxBot(TelegramBot):
                 return self._home()
             if screen == "repair":
                 return self._repair(device)
+            if screen == "device_edit":
+                return self._device_edit(device)
             return self._device_details(device)
         return super()._render_content()

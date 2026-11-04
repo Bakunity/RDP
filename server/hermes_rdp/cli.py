@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
+from pathlib import Path
 
 from .config import load_config
 from .db import Registry
@@ -46,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     domain_sub.add_parser("show")
     domain_sub.add_parser("status")
     domain_sub.add_parser("clear")
+
+    certificates = sub.add_parser(
+        "certificates",
+        help="manage per-device trusted RDP certificates",
+    )
+    certificates_sub = certificates.add_subparsers(
+        dest="certificates_command",
+        required=True,
+    )
+    certificate_sync = certificates_sub.add_parser("sync")
+    certificate_sync.add_argument("--device")
+    certificates_sub.add_parser("status")
 
     dashboard = sub.add_parser("dashboard")
     dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
@@ -188,6 +201,74 @@ def main() -> None:
             print(f"PROBE_ADDRESSES={','.join(sorted(probe_addresses))}")
             print(f"WILDCARD_DNS={'PASS' if match else 'MISMATCH'}")
             if not match:
+                raise SystemExit(1)
+            return
+
+    if args.command == "certificates":
+        helper = "/usr/local/sbin/hermes-rdp-device-cert-package"
+        domain = registry.get_device_domain()
+        if not domain:
+            print("DEVICE_DOMAIN=disabled")
+            raise SystemExit(1)
+
+        devices = registry.list_devices()
+        if getattr(args, "device", None):
+            devices = [
+                device
+                for device in devices
+                if str(device["id"]) == str(args.device)
+            ]
+            if not devices:
+                raise SystemExit("device not found")
+
+        if args.certificates_command == "status":
+            print(f"DEVICE_DOMAIN={domain}")
+            for device in devices:
+                slug = str(device.get("slug") or "")
+                host = f"{slug}.{domain}" if slug else "-"
+                lineage = f"/etc/letsencrypt/live/bakunity-rdp-device-{device['id']}/cert.pem"
+                state = "READY" if Path(lineage).is_file() else "MISSING"
+                print(f"{device['id']}\t{host}\t{state}")
+            return
+
+        if args.certificates_command == "sync":
+            if not Path(helper).is_file():
+                raise SystemExit(f"certificate helper is missing: {helper}")
+            failures = 0
+            for device in devices:
+                slug = str(device.get("slug") or "")
+                host = f"{slug}.{domain}" if slug else "-"
+                try:
+                    completed = subprocess.run(
+                        [helper, "--status", str(device["id"])],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                except subprocess.TimeoutExpired:
+                    failures += 1
+                    print(f"{device['id']}\t{host}\tFAIL timeout")
+                    continue
+                if completed.returncode != 0:
+                    failures += 1
+                    detail = (
+                        completed.stderr.strip().splitlines()[-1:]
+                        or ["helper failed"]
+                    )
+                    print(f"{device['id']}\t{host}\tFAIL {detail[0]}")
+                    continue
+                try:
+                    payload = json.loads(completed.stdout)
+                except json.JSONDecodeError:
+                    failures += 1
+                    print(f"{device['id']}\t{host}\tFAIL invalid-json")
+                    continue
+                print(
+                    f"{device['id']}\t{host}\tPASS "
+                    f"{str(payload.get('thumbprint') or '')[:12]}"
+                )
+            if failures:
                 raise SystemExit(1)
             return
 

@@ -101,3 +101,48 @@ Therefore the current supported named endpoint is:
 A future Named Access / gateway layer can hide the per-device port. The
 database slug/domain model introduced here is intentionally designed to be
 reused by that gateway later.
+
+
+## Trusted RDP certificates for named devices
+
+When a device domain is enabled, Bakunity RDP uses a separate trusted
+certificate for each device hostname instead of reusing the legacy public-IP
+certificate.
+
+Example:
+
+```text
+mipc.tima.biz  -> its own certificate
+bfsrv.tima.biz -> its own certificate
+```
+
+The certificate helper derives the hostname from the authenticated device ID,
+its stored slug and the configured device domain. It does not accept an
+arbitrary hostname from the client.
+
+Existing devices can be provisioned immediately after enabling the domain:
+
+```bash
+sudo bakunity-rdpctl certificates sync
+sudo bakunity-rdpctl certificates status
+```
+
+After the server certificate exists, the existing Windows certificate rotation
+task detects the new thumbprint and installs/binds the matching certificate.
+Changing a device slug causes the same per-device Certbot lineage to be updated
+for the new hostname.
+
+HTTP-01 validation requires TCP 80 to reach this VPS. In nginx webroot mode,
+Bakunity RDP installs a managed wildcard server_name route only for the ACME
+challenge path under the configured device domain. Exact nginx virtual hosts
+continue to take precedence.
+
+## Editing names in Telegram
+
+Open a computer in the Telegram bot. The compact card exposes:
+
+- `ИМЯ` — changes the friendly display name;
+- `АДРЕС` — changes the stable DNS slug before the base domain.
+
+For example, changing the address to `tima` with `tima.biz` configured makes
+the endpoint `tima.tima.biz:<port>`. The RDP port remains unchanged.

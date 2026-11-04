@@ -23,7 +23,7 @@ for path in \
   /etc/systemd/system/hermes-rdp-cert-renew.timer \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
-  /usr/local/sbin/hermes-rdp-cert-package \
+  /usr/local/sbin/hermes-rdp-cert-package /usr/local/sbin/hermes-rdp-device-cert-package \
   /etc/sudoers.d/hermes-rdp \
   /etc/sudoers.d/hermes-rdp-cert-package \
   /etc/nginx/conf.d/hermes-rdp-acme.conf \

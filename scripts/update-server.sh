@@ -105,6 +105,7 @@ rollback_update() {
     /etc/systemd/system/hermes-rdp-sshd.service || rollback_ok=0
 
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-package || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-device-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
   restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
@@ -172,6 +173,7 @@ test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
 if ((TRUSTED_CERT_ENABLED == 1)); then
   test -f "$ROOT/server/bin/hermes-rdp-cert-package.sh"
+  test -f "$ROOT/server/bin/hermes-rdp-device-cert-package.sh"
   test -f "$ROOT/server/bin/hermes-rdp-cert-renew.sh"
   test -f "$ROOT/server/bin/hermes-rdp-cert-state-refresh.sh"
   test -f "$ROOT/server/sudoers/hermes-rdp-cert-package"
@@ -193,6 +195,7 @@ for path in \
   /etc/systemd/system/hermes-rdp.service \
   /etc/systemd/system/hermes-rdp-sshd.service \
   /usr/local/sbin/hermes-rdp-cert-package \
+  /usr/local/sbin/hermes-rdp-device-cert-package \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/bin/hermes-rdpctl \
@@ -296,6 +299,9 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
   install -m 0755 \
     "$ROOT/server/bin/hermes-rdp-cert-package.sh" \
     /usr/local/sbin/hermes-rdp-cert-package
+  install -m 0755 \
+    "$ROOT/server/bin/hermes-rdp-device-cert-package.sh" \
+    /usr/local/sbin/hermes-rdp-device-cert-package
   install -m 0755 \
     "$ROOT/server/bin/hermes-rdp-cert-renew.sh" \
     /usr/local/sbin/hermes-rdp-cert-renew
