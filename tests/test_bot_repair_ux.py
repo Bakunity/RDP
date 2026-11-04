@@ -147,7 +147,8 @@ class TelegramRepairUxTests(unittest.TestCase):
             for button in row
             if button["callback_data"] == "repair:dev123"
         )
-        self.assertEqual(repair["text"], "ВОССТАНОВИТЬ АВТО")
+        self.assertTrue(repair["text"].startswith("🔧"))
+        self.assertIn("ВОССТАНОВИТЬ АВТО", repair["text"])
         self.assertEqual(
             repair.get("icon_custom_emoji_id"),
             "5258023599419171861",
@@ -283,6 +284,37 @@ class TelegramRepairUxTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][1].get("force_new"))
+
+    def test_emoji_command_sends_isolated_render_probe(self) -> None:
+        calls = []
+        self.bot.api_call = lambda method, payload=None, timeout=40: (
+            calls.append((method, payload, timeout)) or {"message_id": 1}
+        )
+        self.bot._handle_update(
+            {
+                "message": {
+                    "text": "/emoji",
+                    "chat": {"id": 123},
+                    "from": {"id": 123},
+                }
+            }
+        )
+        self.assertEqual(len(calls), 1)
+        method, payload, _ = calls[0]
+        self.assertEqual(method, "sendMessage")
+        self.assertIn("EMOJI TEST", payload["text"])
+        self.assertIn("<tg-emoji ", payload["text"])
+        buttons = [
+            button
+            for row in payload["reply_markup"]["inline_keyboard"]
+            for button in row
+        ]
+        custom = next(button for button in buttons if button["text"] == "CUSTOM ICON")
+        unicode_button = next(
+            button for button in buttons if "UNICODE" in button["text"]
+        )
+        self.assertTrue(custom.get("icon_custom_emoji_id"))
+        self.assertTrue(unicode_button["text"].startswith("💻"))
 
     def test_pairing_colors_keep_navigation_neutral(self) -> None:
         _, keyboard = self.bot._pair()
