@@ -346,7 +346,6 @@ class TelegramUxBot(TelegramBot):
                         "info",
                         "ПОДРОБНЕЕ",
                         f"details:{device['id']}",
-                        style="primary",
                     )
                 ],
                 [
