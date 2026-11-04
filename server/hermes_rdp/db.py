@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS named_access_tokens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER,
+    revoked_at INTEGER
+);
 """
 
 
@@ -232,6 +241,80 @@ class Registry:
     def clear_device_domain(self) -> None:
         with self.connect() as conn:
             conn.execute("DELETE FROM settings WHERE key='device_domain'")
+
+    def create_named_access_token(
+        self,
+        name: str = "Windows connector",
+    ) -> tuple[dict[str, Any], str]:
+        clean_name = str(name or "").strip()[:64] or "Windows connector"
+        connector_id = uuid.uuid4().hex
+        token = secrets.token_urlsafe(40)
+        timestamp = now()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO named_access_tokens("
+                "id,name,token_hash,created_at"
+                ") VALUES(?,?,?,?)",
+                (
+                    connector_id,
+                    clean_name,
+                    hash_secret(token),
+                    timestamp,
+                ),
+            )
+        return {
+            "id": connector_id,
+            "name": clean_name,
+            "created_at": timestamp,
+            "last_seen": None,
+            "revoked_at": None,
+        }, token
+
+    def authenticate_named_access_token(
+        self,
+        token: str,
+    ) -> dict[str, Any] | None:
+        token_hash = hash_secret(str(token or ""))
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id,name,created_at,last_seen,revoked_at "
+                "FROM named_access_tokens "
+                "WHERE token_hash=? AND revoked_at IS NULL",
+                (token_hash,),
+            ).fetchone()
+            if not row:
+                return None
+            timestamp = now()
+            conn.execute(
+                "UPDATE named_access_tokens SET last_seen=? WHERE id=?",
+                (timestamp, str(row["id"])),
+            )
+        data = dict(row)
+        data["last_seen"] = timestamp
+        return data
+
+    def list_named_access_tokens(
+        self,
+        include_revoked: bool = False,
+    ) -> list[dict[str, Any]]:
+        where = "" if include_revoked else "WHERE revoked_at IS NULL"
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,name,created_at,last_seen,revoked_at "
+                f"FROM named_access_tokens {where} "
+                "ORDER BY created_at,name"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def revoke_named_access_token(self, connector_id: str) -> None:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE named_access_tokens SET revoked_at=? "
+                "WHERE id=? AND revoked_at IS NULL",
+                (now(), connector_id),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(connector_id)
 
     def create_pair_code(
         self,
