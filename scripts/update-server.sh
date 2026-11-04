@@ -213,18 +213,24 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
 fi
 PYTHONPATH="$ROOT/server" python3 -m compileall -q "$ROOT/server/hermes_rdp"
 
-read -r PREVIOUS_REF CONFIG_CLIENT_REF < <(python3 - <<'PY'
+read -r PREVIOUS_REF CONFIG_CLIENT_REF CONFIG_COMPATIBLE_REFS < <(python3 - <<'PY'
 import json
 with open("/etc/hermes-rdp/config.json", encoding="utf-8") as handle:
     data = json.load(handle)
+compatible = [
+    str(item).strip().lower()
+    for item in (data.get("client_compatible_refs") or [])
+    if str(item).strip()
+][:32]
 print(
     str(data.get("repository_ref", "")),
     str(data.get("client_repository_ref", "")),
+    ",".join(compatible),
 )
 PY
 )
 
-TELEMETRY_CLIENT_REF="$(python3 - "$DB" <<'PY'
+TELEMETRY_CLIENT_REFS="$(python3 - "$DB" <<'PY'
 import collections
 import json
 import re
@@ -250,45 +256,89 @@ for (raw,) in rows:
     if re.fullmatch(r"[0-9a-f]{40}", ref):
         counter[ref] += 1
 
-print(counter.most_common(1)[0][0] if counter else "")
+print(" ".join(ref for ref, _ in counter.most_common(32)))
 PY
 )"
 
-PREVIOUS_CLIENT_REF="$CONFIG_CLIENT_REF"
-if ! [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-  PREVIOUS_CLIENT_REF="$TELEMETRY_CLIENT_REF"
-fi
-if ! [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-  PREVIOUS_CLIENT_REF="$PREVIOUS_REF"
-fi
-
 TARGET_CLIENT_HASH="$(client_bundle_hash "$ROOT")"
-NEW_CLIENT_REF="$RESOLVED_SHA"
+declare -a CANDIDATE_CLIENT_REFS=()
+declare -a COMPATIBLE_CLIENT_REFS=()
 
-if [[ "$PREVIOUS_CLIENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-  if [[ "$PREVIOUS_CLIENT_REF" == "$RESOLVED_SHA" ]]; then
-    NEW_CLIENT_REF="$PREVIOUS_CLIENT_REF"
-  else
-    PREVIOUS_CLIENT_ARCHIVE="$WORK/client-previous.tar.gz"
-    PREVIOUS_CLIENT_DIR="$WORK/client-previous"
-    mkdir -p "$PREVIOUS_CLIENT_DIR"
-    if curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$PREVIOUS_CLIENT_REF" -o "$PREVIOUS_CLIENT_ARCHIVE" \
-      && tar -xzf "$PREVIOUS_CLIENT_ARCHIVE" -C "$PREVIOUS_CLIENT_DIR"; then
-      PREVIOUS_CLIENT_ROOT="$(find "$PREVIOUS_CLIENT_DIR" -maxdepth 1 -mindepth 1 -type d -name 'RDP-*' | head -n1)"
-      if [[ -n "$PREVIOUS_CLIENT_ROOT" ]]; then
-        PREVIOUS_CLIENT_HASH="$(client_bundle_hash "$PREVIOUS_CLIENT_ROOT")"
-        if [[ "$PREVIOUS_CLIENT_HASH" == "$TARGET_CLIENT_HASH" ]]; then
-          NEW_CLIENT_REF="$PREVIOUS_CLIENT_REF"
-        fi
-      fi
-    else
-      echo "WARNING: unable to inspect previous client bundle; client ref will advance." >&2
-    fi
+add_candidate_client_ref() {
+  local ref="${1,,}" existing
+  [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || return 0
+  for existing in "${CANDIDATE_CLIENT_REFS[@]:-}"; do
+    [[ "$existing" == "$ref" ]] && return 0
+  done
+  CANDIDATE_CLIENT_REFS+=("$ref")
+}
+
+add_compatible_client_ref() {
+  local ref="${1,,}" existing
+  [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || return 0
+  for existing in "${COMPATIBLE_CLIENT_REFS[@]:-}"; do
+    [[ "$existing" == "$ref" ]] && return 0
+  done
+  COMPATIBLE_CLIENT_REFS+=("$ref")
+}
+
+client_bundle_hash_for_ref() {
+  local ref="$1" archive ref_dir ref_root
+  if [[ "$ref" == "$RESOLVED_SHA" ]]; then
+    printf '%s\n' "$TARGET_CLIENT_HASH"
+    return 0
   fi
-fi
+  archive="$WORK/client-ref-$ref.tar.gz"
+  ref_dir="$WORK/client-ref-$ref"
+  mkdir -p "$ref_dir"
+  if ! curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$ref" -o "$archive"; then
+    return 1
+  fi
+  if ! tar -xzf "$archive" -C "$ref_dir"; then
+    return 1
+  fi
+  ref_root="$(find "$ref_dir" -maxdepth 1 -mindepth 1 -type d -name 'RDP-*' | head -n1)"
+  [[ -n "$ref_root" ]] || return 1
+  client_bundle_hash "$ref_root"
+}
 
+add_candidate_client_ref "$CONFIG_CLIENT_REF"
+IFS=',' read -r -a CONFIG_COMPATIBLE_ARRAY <<< "$CONFIG_COMPATIBLE_REFS"
+for ref in "${CONFIG_COMPATIBLE_ARRAY[@]:-}"; do
+  add_candidate_client_ref "$ref"
+done
+for ref in $TELEMETRY_CLIENT_REFS; do
+  add_candidate_client_ref "$ref"
+done
+add_candidate_client_ref "$PREVIOUS_REF"
+add_candidate_client_ref "$RESOLVED_SHA"
+
+for ref in "${CANDIDATE_CLIENT_REFS[@]}"; do
+  if CLIENT_HASH="$(client_bundle_hash_for_ref "$ref")"; then
+    if [[ "$CLIENT_HASH" == "$TARGET_CLIENT_HASH" ]]; then
+      add_compatible_client_ref "$ref"
+    fi
+  else
+    echo "WARNING: unable to inspect client bundle ref $ref" >&2
+  fi
+done
+
+add_compatible_client_ref "$RESOLVED_SHA"
+
+NEW_CLIENT_REF="$RESOLVED_SHA"
+for ref in "$CONFIG_CLIENT_REF" $TELEMETRY_CLIENT_REFS "$PREVIOUS_REF"; do
+  for compatible in "${COMPATIBLE_CLIENT_REFS[@]}"; do
+    if [[ "${ref,,}" == "$compatible" ]]; then
+      NEW_CLIENT_REF="$compatible"
+      break 2
+    fi
+  done
+done
+
+COMPATIBLE_CLIENT_CSV="$(IFS=,; echo "${COMPATIBLE_CLIENT_REFS[*]}")"
 echo "SERVER_REF=$RESOLVED_SHA"
 echo "CLIENT_REF=$NEW_CLIENT_REF"
+echo "CLIENT_COMPATIBLE_REFS=$COMPATIBLE_CLIENT_CSV"
 
 install -d -m 0700 "$BACKUP"
 for path in \
@@ -336,6 +386,7 @@ python3 - \
   "$PREVIOUS_REF" \
   "$PREVIOUS_CLIENT_REF" \
   "$NEW_CLIENT_REF" \
+  "$COMPATIBLE_CLIENT_CSV" \
   "$DB_UID" \
   "$DB_GID" \
   "$DB_MODE" <<'PY'
@@ -350,6 +401,7 @@ from pathlib import Path
     previous_ref,
     previous_client_ref,
     new_client_ref,
+    compatible_client_refs,
     db_uid,
     db_gid,
     db_mode,
@@ -362,6 +414,9 @@ Path(path).write_text(
             "previous_repository_ref": previous_ref,
             "previous_client_repository_ref": previous_client_ref,
             "client_repository_ref": new_client_ref,
+            "client_compatible_refs": [
+                ref for ref in compatible_client_refs.split(",") if ref
+            ],
             "database_uid": int(db_uid),
             "database_gid": int(db_gid),
             "database_mode": db_mode,
@@ -425,12 +480,12 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
   test -s /etc/hermes-rdp/trusted-rdp-cert-state.json
 fi
 
-python3 - "$REF" "$RESOLVED_SHA" "$NEW_CLIENT_REF" <<'PY'
+python3 - "$REF" "$RESOLVED_SHA" "$NEW_CLIENT_REF" "$COMPATIBLE_CLIENT_CSV" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-requested_ref, resolved_sha, client_ref = sys.argv[1:]
+requested_ref, resolved_sha, client_ref, compatible_refs = sys.argv[1:]
 path = Path("/etc/hermes-rdp/config.json")
 data = json.loads(path.read_text(encoding="utf-8"))
 data["client_installer_url"] = (
@@ -440,6 +495,9 @@ data["client_installer_url"] = (
 data["repository_ref"] = resolved_sha
 data["repository_requested_ref"] = requested_ref
 data["client_repository_ref"] = client_ref
+data["client_compatible_refs"] = [
+    ref for ref in compatible_refs.split(",") if ref
+]
 path.write_text(
     json.dumps(data, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
