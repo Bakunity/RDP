@@ -16,7 +16,7 @@ class WebsiteOpenSshContentTests(unittest.TestCase):
             "OpenSSH",
             "REAL-WORLD VALIDATION",
             "permitlisten",
-            "Hermes Agent",
+            "Bakunity Agent",
             "Trusted RDP certificate",
             "Stable v1.3.0",
             '"softwareVersion": "1.3.0"',
