@@ -28,6 +28,19 @@ class TelegramUxBot(TelegramBot):
                     self.registry.set_setting("input_mode", "")
                     self.registry.set_setting("input_error", "")
                     self.registry.set_setting("screen", "device")
+                    message_id = message.get("message_id")
+                    if message_id:
+                        try:
+                            self.api_call(
+                                "deleteMessage",
+                                {
+                                    "chat_id": self.config.telegram_chat_id,
+                                    "message_id": int(message_id),
+                                },
+                                timeout=15,
+                            )
+                        except Exception:
+                            pass
                     self.render()
                 except Exception as exc:
                     self.registry.set_setting("input_error", str(exc)[:180])
@@ -187,69 +200,32 @@ class TelegramUxBot(TelegramBot):
         rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
         return text, {"inline_keyboard": rows}
 
-    def _human_status(self, device: dict[str, Any]) -> tuple[list[str], bool]:
+    def _product_notice(self, device: dict[str, Any]) -> str:
         online = self._online(device)
         telemetry = device.get("telemetry") or {}
+        if not online:
+            return f"{self.icon('offline')} Нет связи с компьютером"
+
         desired_access = bool(device.get("enabled", True))
-        applied_known = online and "access_enabled" in telemetry
-        applied_access = bool(telemetry.get("access_enabled")) if applied_known else None
-        tunnel_running = bool(telemetry.get("ssh_tunnel_running")) if online else False
-        endpoint_open = bool(telemetry.get("endpoint_available")) if online else False
+        if "access_enabled" in telemetry:
+            applied_access = bool(telemetry.get("access_enabled"))
+            if applied_access != desired_access:
+                return f"{self.icon('warning')} Изменение доступа ещё применяется"
 
-        lines: list[str] = []
-        healthy = bool(online)
+        if (
+            bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
+            and "certificate_lifecycle_ok" in telemetry
+            and not bool(telemetry.get("certificate_lifecycle_ok"))
+        ):
+            return f"{self.icon('warning')} Защищённое подключение требует восстановления"
 
-        if online and desired_access and applied_access and tunnel_running and endpoint_open:
-            lines.append(f"{self.icon('online')} Подключение работает")
-        elif online and not desired_access and applied_known and not applied_access:
-            lines.append(f"{self.icon('online')} Компьютер на связи")
-        elif online:
-            lines.append(f"{self.icon('warning')} Подключение требует внимания")
-            healthy = False
-        else:
-            lines.append(f"{self.icon('offline')} Компьютер не в сети")
-            healthy = False
+        if not bool(telemetry.get("maintenance_capable")):
+            return f"{self.icon('warning')} Bakunity RDP требует восстановления"
 
-        if applied_known and applied_access == desired_access:
-            if desired_access:
-                lines.append(f"{self.icon('access_on')} Удалённый доступ включён")
-            else:
-                lines.append(f"{self.icon('access_off')} Удалённый доступ выключен")
-        elif online:
-            lines.append(f"{self.icon('warning')} Изменение доступа ещё применяется")
-            healthy = False
-        else:
-            lines.append(f"{self.icon('info')} Состояние доступа неизвестно")
-            healthy = False
-
-        trusted_cert = bool(
-            getattr(self.config, "trusted_rdp_certificate_enabled", False)
-        )
-        if trusted_cert:
-            cert_known = online and "certificate_lifecycle_ok" in telemetry
-            if cert_known and bool(telemetry.get("certificate_lifecycle_ok")):
-                lines.append(f"{self.icon('shield')} Защищённое подключение настроено")
-            elif cert_known:
-                lines.append(f"{self.icon('warning')} Защита требует восстановления")
-                healthy = False
-            else:
-                lines.append(f"{self.icon('info')} Состояние защиты неизвестно")
-                healthy = False
-
-        maintenance_capable = bool(telemetry.get("maintenance_capable"))
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        if not maintenance_capable:
-            lines.append(f"{self.icon('warning')} Bakunity RDP требует восстановления")
-            healthy = False
-        elif client_ref and not self._client_ref_is_compatible(client_ref):
-            lines.append(f"{self.icon('upload')} Доступно обновление Bakunity RDP")
-            healthy = False
-
-        if healthy:
-            lines.append(f"{self.icon('success')} Система работает нормально")
-        else:
-            lines.append(f"{self.icon('warning')} Требуется внимание")
-        return lines, healthy
+        if client_ref and not self._client_ref_is_compatible(client_ref):
+            return f"{self.icon('upload')} Доступно обновление Bakunity RDP"
+        return ""
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
         text, _ = super()._pair()
@@ -270,30 +246,19 @@ class TelegramUxBot(TelegramBot):
     def _device(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         online = self._online(device)
         telemetry = device.get("telemetry") or {}
-        sessions = telemetry.get("sessions") or []
-        user = telemetry.get("interactive_user") or (sessions[0] if sessions else "нет")
         desired_access = bool(device.get("enabled", True))
         pending_action = str(device.get("pending_command") or "")
+        notice = self._product_notice(device)
+        notice_text = f"\n\n{notice}" if notice else ""
 
-        if device.get("last_seen"):
-            import time
-            age = max(0, int(time.time()) - int(device.get("last_seen") or 0))
-            data_age = f"{age} сек. назад"
-        else:
-            data_age = "ещё не поступили"
-
-        status_lines, _ = self._human_status(device)
         text = (
             f"{self.icon('online' if online else 'offline')} "
             f"{escape(device['display_name']).upper()} · "
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
-            f"Компьютер: {escape(device['machine_name'])}\n"
-            f"Система: {escape(telemetry.get('os', '—'))}\n"
-            f"Пользователь: {escape(user)}\n"
-            f"RDP: {self._rdp_endpoint(device)}\n"
-            f"Данные: {data_age}\n\n"
-            "СОСТОЯНИЕ\n"
-            + "\n".join(status_lines)
+            f"{escape(device['machine_name'])} · "
+            f"{escape(telemetry.get('os', '—'))}\n"
+            f"RDP: {self._rdp_endpoint(device)}"
+            f"{notice_text}"
         )
 
         if pending_action:
@@ -349,8 +314,18 @@ class TelegramUxBot(TelegramBot):
                     )
                 ],
                 [
-                    self.button("edit", "ИМЯ", f"edit_name:{device['id']}"),
-                    self.button("globe", "АДРЕС", f"edit_slug:{device['id']}"),
+                    self.button(
+                        "edit",
+                        "ИЗМЕНИТЬ ИМЯ",
+                        f"edit_name:{device['id']}",
+                    )
+                ],
+                [
+                    self.button(
+                        "globe",
+                        "ИЗМЕНИТЬ RDP-АДРЕС",
+                        f"edit_slug:{device['id']}",
+                    )
                 ],
                 [
                     self.button("refresh", "ОБНОВИТЬ", "refresh"),
@@ -369,15 +344,21 @@ class TelegramUxBot(TelegramBot):
         if mode == "device_name":
             title = "ИЗМЕНИТЬ ИМЯ"
             current = str(device.get("display_name") or "")
-            hint = "Отправь новое название компьютера обычным сообщением."
+            hint = (
+                "Отправь новое имя одним сообщением.\n"
+                "Например: Офис"
+            )
         else:
-            title = "ИЗМЕНИТЬ АДРЕС"
-            current = str(device.get("slug") or "")
+            title = "ИЗМЕНИТЬ RDP-АДРЕС"
             domain = self._device_domain()
+            slug = str(device.get("slug") or "")
+            current = f"{slug}.{domain}" if slug and domain else slug
             suffix = f".{domain}" if domain else ""
             hint = (
-                "Отправь только имя до домена, например: tima\n"
-                f"Получится: tima{suffix}"
+                f"Отправь только часть адреса до {suffix}.\n"
+                f"Например: office → office{suffix}"
+                if suffix
+                else "Отправь новый адрес одним сообщением."
             )
 
         error_text = (
@@ -387,9 +368,9 @@ class TelegramUxBot(TelegramBot):
         )
         text = (
             f"{self.icon('edit')} {title}\n\n"
-            f"Компьютер: {escape(device['display_name'])}\n"
             f"Сейчас: {escape(current)}\n\n"
-            f"{hint}"
+            f"{hint}\n\n"
+            "После сохранения твоё сообщение будет удалено из чата."
             f"{error_text}"
         )
         keyboard = {
@@ -410,7 +391,8 @@ class TelegramUxBot(TelegramBot):
         device: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
         telemetry = device.get("telemetry") or {}
-        status_lines, _ = self._human_status(device)
+        notice = self._product_notice(device)
+        notice_text = f"{notice}\n\n" if notice else ""
         cpu = float(telemetry.get("cpu_percent", 0) or 0)
         ram = float(telemetry.get("ram_percent", 0) or 0)
         disk = float(telemetry.get("disk_percent", 0) or 0)
@@ -429,9 +411,8 @@ class TelegramUxBot(TelegramBot):
         text = (
             f"{self.icon('info')} "
             f"{escape(device['display_name']).upper()} · ПОДРОБНЕЕ\n\n"
-            "СОСТОЯНИЕ\n"
-            + "\n".join(status_lines)
-            + "\n\nАКТИВНОСТЬ\n"
+            f"{notice_text}"
+            "АКТИВНОСТЬ\n"
             f"Подключений через Bakunity: {through_bakunity}\n"
             f"Прямых подключений: {direct}\n"
             f"Сессии Windows: {session_text}\n"
