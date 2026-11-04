@@ -10,6 +10,32 @@ from .device_certificates import set_device_slug_with_certificate
 class TelegramUxBot(TelegramBot):
     """Telegram UX extensions that keep pairing and repair explicitly separate."""
 
+    def _delete_input_message(self, message: dict[str, Any]) -> None:
+        message_id = message.get("message_id")
+        chat_id = (message.get("chat") or {}).get("id")
+        if not message_id or chat_id is None:
+            return
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                self.api_call(
+                    "deleteMessage",
+                    {
+                        "chat_id": chat_id,
+                        "message_id": int(message_id),
+                    },
+                    timeout=15,
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+        if last_error is not None:
+            import logging
+            logging.getLogger("hermes_rdp.bot").warning(
+                "accepted Telegram edit message delete failed: %s",
+                last_error,
+            )
+
     def _handle_update(self, update: dict[str, Any]) -> None:
         if "message" in update and self._authorized(update):
             message = update.get("message") or {}
@@ -34,20 +60,8 @@ class TelegramUxBot(TelegramBot):
                     self.registry.set_setting("input_mode", "")
                     self.registry.set_setting("input_error", "")
                     self.registry.set_setting("screen", "device")
-                    message_id = message.get("message_id")
                     # Accepted edit input is transient UI, not chat history.
-                    if message_id:
-                        try:
-                            self.api_call(
-                                "deleteMessage",
-                                {
-                                    "chat_id": self.config.telegram_chat_id,
-                                    "message_id": int(message_id),
-                                },
-                                timeout=15,
-                            )
-                        except Exception:
-                            pass
+                    self._delete_input_message(message)
                     self.render()
                 except Exception as exc:
                     self.registry.set_setting("input_error", str(exc)[:180])
@@ -275,6 +289,7 @@ class TelegramUxBot(TelegramBot):
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
             f"{escape(device['machine_name'])} · "
             f"{escape(telemetry.get('os', '—'))}\n"
+            f"Пользователь: {escape(telemetry.get('interactive_user') or '—')}\n"
             f"RDP: {self._product_rdp_endpoint(device)}"
             f"{notice_text}"
         )
@@ -382,7 +397,8 @@ class TelegramUxBot(TelegramBot):
             suffix = f".{domain}" if domain else ""
             hint = (
                 f"Отправь только часть адреса до {suffix}.\n"
-                f"Например: office → office{suffix}"
+                f"Можно буквы, цифры и дефис.\n"
+                f"Например: pc2 → pc2{suffix}"
                 if suffix
                 else "Отправь новый адрес одним сообщением."
             )
