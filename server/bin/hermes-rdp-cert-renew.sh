@@ -23,22 +23,6 @@ if ! command -v flock >/dev/null 2>&1; then
   exit 1
 fi
 
-CERT_NAME="$(python3 - <<'PY'
-import json
-from pathlib import Path
-
-path = Path('/etc/hermes-rdp/config.json')
-data = json.loads(path.read_text(encoding='utf-8'))
-trusted = data.get('trusted_rdp_certificate') or {}
-if trusted.get('enabled') is not True:
-    raise SystemExit('trusted RDP certificate is not enabled')
-name = str(trusted.get('cert_name') or '').strip()
-if not name:
-    raise SystemExit('trusted RDP certificate name is missing')
-print(name)
-PY
-)"
-
 exec 9>"$LOCK"
 if ! /usr/bin/flock -w 300 9; then
   echo "Hermes certificate renewal: timed out waiting for lock" >&2
@@ -46,8 +30,10 @@ if ! /usr/bin/flock -w 300 9; then
 fi
 
 "$CERTBOT" renew \
-  --cert-name "$CERT_NAME" \
   --quiet \
   --non-interactive
 
+# The legacy public-IP state remains useful for installations without a
+# device domain. Per-device domain certificate metadata is read directly from
+# each Certbot lineage by the bounded package helper.
 "$STATE_REFRESH" >/dev/null
