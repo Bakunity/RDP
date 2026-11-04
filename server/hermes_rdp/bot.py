@@ -419,7 +419,7 @@ class TelegramBot:
             f"  Server='{self.config.public_host}'\n"
             f"  PairCode='{code}'\n"
             f"  Fingerprint='{self.config.tls_fingerprint}'\n"
-            f"  RepositoryRef='{self.config.repository_ref}'\n"
+            f"  RepositoryRef='{self.config.client_ref}'\n"
             "}\n"
             "& ([scriptblock]::Create($s)) @p"
         )
@@ -563,9 +563,7 @@ class TelegramBot:
 
         maintenance_capable = bool(telemetry.get("maintenance_capable"))
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        desired_ref = str(
-            getattr(self.config, "client_repository_ref", "") or ""
-        ).lower()
+        desired_ref = str(self.config.client_ref or "").lower()
 
         maintenance = telemetry.get("maintenance_status") or {}
         maintenance_state = str(maintenance.get("state") or "").lower()
