@@ -230,7 +230,22 @@ ensure_certificate() {
     behavior=(--renew-with-new-domains)
   fi
 
-  "$CERTBOT" certonly     "${auth_args[@]}"     "${behavior[@]}"     --preferred-challenges http     --cert-name "$CERT_NAME"     --domain "$HOST"     --key-type rsa     --rsa-key-size 2048     --non-interactive     --agree-tos     --register-unsafely-without-email
+  # stdout is a machine-readable channel for the API/CLI. Certbot is
+  # intentionally redirected to stderr so its human-readable issuance output
+  # can never corrupt the JSON response printed below.
+  "$CERTBOT" certonly \
+    "${auth_args[@]}" \
+    "${behavior[@]}" \
+    --preferred-challenges http \
+    --cert-name "$CERT_NAME" \
+    --domain "$HOST" \
+    --key-type rsa \
+    --rsa-key-size 2048 \
+    --non-interactive \
+    --agree-tos \
+    --register-unsafely-without-email \
+    --quiet \
+    1>&2
 
   certificate_is_usable || {
     echo "issued certificate failed validation for $HOST" >&2
