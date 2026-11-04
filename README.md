@@ -28,6 +28,8 @@ Bakunity RDP публикует RDP нескольких Windows-компьют�
 > **Главный принцип проекта:** все Windows-компьютеры равноправны. Для каждого используется один installer и один Bakunity Agent. Специальным узлом является только Linux-сервер Hermes.
 
 > **Stable release:** [Bakunity RDP v1.3.0](https://github.com/bakunity/RDP/releases/tag/v1.3.0). Для production используйте release tag или другой заранее проверенный immutable ref, а не изменяемый `main`.
+>
+> **Совместимость:** публичный бренд — Bakunity RDP, но существующие Windows Scheduled Tasks и локальные runtime paths пока сохраняют legacy identifiers `Hermes RDP Agent`, `Hermes RDP Certificate Rotation` и `C:\\ProgramData\\HermesRDP`. Это сделано специально, чтобы обновления не ломали уже установленные ПК.
 
 ## Что умеет Bakunity RDP
 
@@ -119,11 +121,19 @@ Fresh pairing и Repair намеренно разделены. Repair не со�
 
 Windows Home не является штатным RDP host и не поддерживается.
 
-## Быстрый старт v1.3.0
+## Быстрый старт
 
 ### 1. Установить сервер
 
-Базовый OpenSSH gateway:
+Основной zero-config путь для current main:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/main/scripts/install.sh | sudo bash
+```
+
+Установщик сам проверит Debian/Ubuntu, определит public IPv4, безопасно запросит Telegram bot token, проверит бота и попросит подтвердить владельца командой `/claim <CODE>`. Trusted RDP certificate lifecycle настраивается автоматически, когда окружение это поддерживает.
+
+Для production с immutable stable **v1.3.0** пока используйте advanced installer release tag:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bakunity/RDP/v1.3.0/scripts/install-server.sh -o /tmp/install-bakunity-rdp.sh
@@ -136,20 +146,12 @@ unset TG_TOKEN
 rm -f /tmp/install-bakunity-rdp.sh
 ```
 
-С trusted public-IP RDP certificate lifecycle добавьте `--trusted-rdp-cert` и используйте public IPv4 в `--host`:
+Advanced trusted public-IP mode v1.3.0 использует тот же installer с `--trusted-rdp-cert`.
+
+Проверка current main:
 
 ```bash
-sudo env HERMES_RDP_REF=v1.3.0 bash /tmp/install-bakunity-rdp.sh \
-  --host PUBLIC_IPV4 \
-  --telegram-token "$TG_TOKEN" \
-  --telegram-chat-id TELEGRAM_USER_ID \
-  --trusted-rdp-cert
-```
-
-Проверка:
-
-```bash
-sudo hermes-rdpctl doctor
+sudo bakunity-rdpctl doctor
 sudo systemctl is-active hermes-rdp-sshd.service hermes-rdp.service
 ```
 
@@ -250,8 +252,8 @@ sudo systemctl status hermes-rdp-sshd.service hermes-rdp.service --no-pager
 Windows diagnostics:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
-Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation' -ErrorAction SilentlyContinue
+Get-ScheduledTask -TaskName 'Hermes RDP Agent'
+Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Get-Process ssh -ErrorAction SilentlyContinue
 ```

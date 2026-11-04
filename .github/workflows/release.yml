@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: hermes-rdp-release
+  group: bakunity-rdp-release
   cancel-in-progress: true
 
 jobs:
@@ -72,7 +72,7 @@ jobs:
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git tag -a "$TAG" -m "Hermes RDP $TAG" "$RELEASE_SHA"
+          git tag -a "$TAG" -m "Bakunity RDP $TAG" "$RELEASE_SHA"
           git push origin "$TAG"
 
       - name: Publish or synchronize current GitHub Release
@@ -85,14 +85,14 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Hermes RDP $TAG" \
+              --title "Bakunity RDP $TAG" \
               --notes-file "$NOTES"
             echo "Release $TAG synchronized from $NOTES."
             exit 0
           fi
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Hermes RDP $TAG" \
+            --title "Bakunity RDP $TAG" \
             --notes-file "$NOTES" \
             --verify-tag
 
@@ -135,7 +135,7 @@ jobs:
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               gh release edit "$TAG" \
                 --repo "$GITHUB_REPOSITORY" \
-                --title "Hermes RDP $TAG" \
+                --title "Bakunity RDP $TAG" \
                 --notes-file "$NOTES"
               echo "Historical release $TAG synchronized from $NOTES."
             else

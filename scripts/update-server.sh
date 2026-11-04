@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 REPO="bakunity/RDP"
-REF="${HERMES_RDP_REF:-main}"
+REF="${BAKUNITY_RDP_REF:-${HERMES_RDP_REF:-main}}"
 CONFIG=/etc/hermes-rdp/config.json
 DB=/var/lib/hermes-rdp/state.sqlite3
 
@@ -11,11 +11,11 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 if [[ ! -s "$CONFIG" ]]; then
-  echo "Hermes RDP is not installed." >&2
+  echo "Bakunity RDP is not installed." >&2
   exit 1
 fi
 if [[ ! -s "$DB" ]]; then
-  echo "Hermes RDP database is missing or empty." >&2
+  echo "Bakunity RDP database is missing or empty." >&2
   exit 1
 fi
 if ! python3 - <<'PY'

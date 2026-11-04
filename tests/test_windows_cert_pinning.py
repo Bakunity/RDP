@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class WindowsCertificatePinningTests(unittest.TestCase):
     def test_installer_uses_static_csharp_validator(self) -> None:
-        text = (ROOT / "scripts/install-client.ps1").read_text(encoding="utf-8-sig")
+        text = (ROOT / "scripts/install-client-core.ps1").read_text(
+            encoding="utf-8-sig"
+        )
         self.assertIn("class PinnedHttpClientFactory", text)
         self.assertIn("ValidateCertificate", text)
         self.assertIn("ServerCertificateCustomValidationCallback = delegate", text)

@@ -159,3 +159,16 @@ bash scripts/check-release.sh
 - отсутствие horizontal scroll;
 - `robots.txt` и `sitemap.xml`;
 - favicon и social preview metadata.
+
+
+## Перенос на VPS: rdp.bakunity.com
+
+Production-домен: `rdp.bakunity.com`. Статический лендинг хостится отдельно от RDP API и туннелей. Не публикуйте порты администрирования через этот виртуальный хост.
+
+1. DNS: A-запись `rdp` на публичный IPv4 VPS с nginx (IPv6/AAAA — только при рабочем IPv6).
+2. Размещение на VPS: `/opt/bakunity-rdp-site/releases/<release-id>`, симлинк `/opt/bakunity-rdp-site/current` на текущий релиз, nginx `root /opt/bakunity-rdp-site/current;`.
+3. Веб-корень содержит `index.html`, `assets/`, `robots.txt`, `sitemap.xml`, `site.webmanifest`. `server/`, `client/`, `context/`, `scripts/` и конфигурации не публиковать.
+4. Использовать конфигурацию из `deploy/nginx-rdp.bakunity.com.conf`; получить сертификат Let's Encrypt после проверки DNS, затем включить HTTPS и редирект с HTTP. Существующие nginx сайты не заменять.
+5. Проверить HTTPS, заголовки, robots/sitemap, мобильную версию, Matrix animation и обновление релиза без простоя. Пока все проверки не пройдены — Vercel не удалять.
+
+Публикация не выполнена автоматически: требуется доступ к VPS, проверка DNS и настройка TLS.

@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class OpenSshArchitectureTests(unittest.TestCase):
     def test_windows_installer_uses_only_windows_openssh(self) -> None:
-        text = (ROOT / "scripts/install-client.ps1").read_text(encoding="utf-8-sig")
+        text = (ROOT / "scripts/install-client-core.ps1").read_text(
+            encoding="utf-8-sig"
+        )
         self.assertIn("OpenSSH.Client", text)
         self.assertIn("ssh-keygen.exe", text)
         self.assertIn("ssh_public_key", text)

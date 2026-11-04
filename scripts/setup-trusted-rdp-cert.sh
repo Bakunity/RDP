@@ -12,7 +12,8 @@ Usage:
 Installs and configures the Hermes RDP trusted public-IP certificate lifecycle:
 - Certbot in /opt/certbot;
 - UFW TCP 80 rule for ACME HTTP-01;
-- isolated Let’s Encrypt staging validation before first production issuance;
+- automatic ACME mode: standalone when TCP 80 is free, nginx webroot when nginx owns TCP 80;
+- isolated Let's Encrypt staging validation before first production issuance;
 - production short-lived IP certificate;
 - Hermes-owned systemd renewal service/timer;
 - bounded root helper for authenticated Windows certificate delivery;
@@ -59,6 +60,31 @@ CERT_PACKAGE_SOURCE="$SOURCE_ROOT/server/bin/hermes-rdp-cert-package.sh"
 CERT_PACKAGE_SUDOERS_SOURCE="$SOURCE_ROOT/server/sudoers/hermes-rdp-cert-package"
 SERVICE_SOURCE="$SOURCE_ROOT/server/systemd/hermes-rdp-cert-renew.service"
 TIMER_SOURCE="$SOURCE_ROOT/server/systemd/hermes-rdp-cert-renew.timer"
+ACME_MODE="standalone"
+ACME_WEBROOT=/var/www/hermes-rdp-acme
+NGINX_CONF=""
+NGINX_CONF_CHANGED=0
+NGINX_CONF_PREEXISTED=0
+SETUP_COMPLETE=0
+WORK="$(mktemp -d)"
+STAGE_ROOT=""
+
+cleanup() {
+  local status=$?
+  if ((status != 0 && SETUP_COMPLETE == 0 && NGINX_CONF_CHANGED == 1)); then
+    if ((NGINX_CONF_PREEXISTED == 1)); then
+      cp -a "$WORK/nginx-conf.backup" "$NGINX_CONF" || true
+    else
+      rm -f "$NGINX_CONF" || true
+    fi
+    if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx >/dev/null 2>&1 || true
+    fi
+  fi
+  [[ -n "$STAGE_ROOT" ]] && rm -rf "$STAGE_ROOT"
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 for required in \
   "$CONFIG" \
@@ -74,16 +100,11 @@ for required in \
   fi
 done
 
-if ss -H -ltn '( sport = :80 )' | grep -q .; then
-  echo "TCP 80 is already occupied; standalone HTTP-01 cannot run." >&2
-  ss -ltnp '( sport = :80 )' >&2 || true
-  exit 1
-fi
-
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
   ca-certificates \
+  curl \
   openssl \
   python3 \
   python3-venv \
@@ -126,8 +147,109 @@ PY
   /usr/local/bin/certbot --version
 }
 
-install_certbot
+port80_listener() {
+  ss -H -ltnp '( sport = :80 )' 2>/dev/null || true
+}
 
+configure_nginx_webroot() {
+  command -v nginx >/dev/null 2>&1 || {
+    echo "TCP 80 is occupied by a process that looks like nginx, but nginx CLI is unavailable." >&2
+    return 1
+  }
+  systemctl is-active --quiet nginx || {
+    echo "TCP 80 is occupied by nginx, but nginx.service is not active." >&2
+    return 1
+  }
+
+  if grep -Eq '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/\*\.conf;' /etc/nginx/nginx.conf 2>/dev/null; then
+    NGINX_CONF=/etc/nginx/conf.d/hermes-rdp-acme.conf
+  elif grep -Eq '^[[:space:]]*include[[:space:]]+/etc/nginx/sites-enabled/\*;' /etc/nginx/nginx.conf 2>/dev/null; then
+    NGINX_CONF=/etc/nginx/sites-enabled/hermes-rdp-acme.conf
+  else
+    echo "nginx owns TCP 80, but no supported conf.d/sites-enabled include was found." >&2
+    return 1
+  fi
+
+  if [[ -e "$NGINX_CONF" ]]; then
+    if ! grep -q '^# Managed by Hermes RDP$' "$NGINX_CONF"; then
+      echo "Refusing to overwrite unmanaged nginx config: $NGINX_CONF" >&2
+      return 1
+    fi
+    cp -a "$NGINX_CONF" "$WORK/nginx-conf.backup"
+    NGINX_CONF_PREEXISTED=1
+  fi
+
+  install -d -m 0755 "$ACME_WEBROOT/.well-known/acme-challenge"
+  cat >"$WORK/hermes-rdp-acme.conf" <<EOF
+# Managed by Hermes RDP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $HOST;
+
+    location ^~ /.well-known/acme-challenge/ {
+        alias $ACME_WEBROOT/.well-known/acme-challenge/;
+        default_type text/plain;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF
+  install -m 0644 "$WORK/hermes-rdp-acme.conf" "$NGINX_CONF"
+  NGINX_CONF_CHANGED=1
+
+  nginx -t
+  systemctl reload nginx
+
+  local probe body attempt
+  probe="hermes-$(openssl rand -hex 12)"
+  printf '%s\n' "$probe" >"$ACME_WEBROOT/.well-known/acme-challenge/$probe"
+  body=""
+  for attempt in {1..20}; do
+    body="$(curl -fsS --max-time 2 -H "Host: $HOST" "http://127.0.0.1/.well-known/acme-challenge/$probe" 2>/dev/null || true)"
+    if [[ "$body" == "$probe" ]]; then
+      break
+    fi
+    sleep 0.25
+  done
+  rm -f "$ACME_WEBROOT/.well-known/acme-challenge/$probe"
+  [[ "$body" == "$probe" ]] || {
+    echo "nginx ACME webroot readiness probe failed after bounded retries." >&2
+    return 1
+  }
+
+  ACME_MODE="nginx-webroot"
+  return 0
+}
+
+select_acme_mode() {
+  local listeners
+  listeners="$(port80_listener)"
+  if [[ -z "$listeners" ]]; then
+    ACME_MODE="standalone"
+    return 0
+  fi
+  if grep -q 'nginx' <<<"$listeners"; then
+    configure_nginx_webroot
+    return
+  fi
+  echo "TCP 80 is already occupied by a non-nginx service; automatic HTTP-01 cannot take over the port." >&2
+  printf '%s\n' "$listeners" >&2
+  return 1
+}
+
+certbot_auth_args() {
+  if [[ "$ACME_MODE" == "nginx-webroot" ]]; then
+    printf '%s\n' --webroot --webroot-path "$ACME_WEBROOT"
+  else
+    printf '%s\n' --standalone
+  fi
+}
+
+install_certbot
+select_acme_mode
 ufw allow 80/tcp comment 'Hermes ACME HTTP-01' >/dev/null || true
 
 certificate_is_usable() {
@@ -143,6 +265,8 @@ certificate_is_usable() {
   return 0
 }
 
+mapfile -t AUTH_ARGS < <(certbot_auth_args)
+
 if ! certificate_is_usable; then
   if [[ -e "$LIVE" || -e "$RENEW" ]]; then
     echo "Existing certificate lineage for $HOST is present but is not usable." >&2
@@ -151,17 +275,12 @@ if ! certificate_is_usable; then
   fi
 
   STAGE_ROOT="$(mktemp -d)"
-  cleanup_stage() {
-    rm -rf "$STAGE_ROOT"
-  }
-  trap cleanup_stage EXIT
-
   mkdir -p "$STAGE_ROOT/config" "$STAGE_ROOT/work" "$STAGE_ROOT/logs"
 
   /usr/local/bin/certbot certonly \
     --staging \
-    --standalone \
     --preferred-profile shortlived \
+    "${AUTH_ARGS[@]}" \
     --ip-address "$HOST" \
     --cert-name "$HOST" \
     --key-type rsa \
@@ -174,16 +293,16 @@ if ! certificate_is_usable; then
     --logs-dir "$STAGE_ROOT/logs"
 
   rm -rf "$STAGE_ROOT"
-  trap - EXIT
+  STAGE_ROOT=""
 
-  if ss -H -ltn '( sport = :80 )' | grep -q .; then
-    echo "TCP 80 remained occupied after staging validation." >&2
+  if [[ "$ACME_MODE" == "standalone" ]] && [[ -n "$(port80_listener)" ]]; then
+    echo "TCP 80 remained occupied after standalone staging validation." >&2
     exit 1
   fi
 
   /usr/local/bin/certbot certonly \
-    --standalone \
     --preferred-profile shortlived \
+    "${AUTH_ARGS[@]}" \
     --ip-address "$HOST" \
     --cert-name "$HOST" \
     --key-type rsa \
@@ -226,7 +345,7 @@ visudo -cf /etc/sudoers.d/hermes-rdp-cert-package >/dev/null
 install -m 0644 "$SERVICE_SOURCE" /etc/systemd/system/hermes-rdp-cert-renew.service
 install -m 0644 "$TIMER_SOURCE" /etc/systemd/system/hermes-rdp-cert-renew.timer
 
-python3 - "$CONFIG" "$HOST" "$STATE" <<'PY'
+python3 - "$CONFIG" "$HOST" "$STATE" "$ACME_MODE" "$ACME_WEBROOT" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -234,6 +353,8 @@ from pathlib import Path
 path = Path(sys.argv[1])
 host = sys.argv[2]
 state_file = sys.argv[3]
+acme_mode = sys.argv[4]
+acme_webroot = sys.argv[5]
 data = json.loads(path.read_text(encoding='utf-8'))
 data['trusted_rdp_certificate'] = {
     'enabled': True,
@@ -242,7 +363,10 @@ data['trusted_rdp_certificate'] = {
     'profile': 'shortlived',
     'renewal_timer': 'hermes-rdp-cert-renew.timer',
     'state_file': state_file,
+    'acme_mode': acme_mode,
 }
+if acme_mode == 'nginx-webroot':
+    data['trusted_rdp_certificate']['acme_webroot'] = acme_webroot
 path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 PY
 chmod 0640 "$CONFIG"
@@ -270,11 +394,20 @@ if [[ "$(systemctl show hermes-rdp-cert-renew.service -p Result --value)" != "su
 fi
 SERIAL_AFTER="$(openssl x509 -in "$LIVE/cert.pem" -noout -serial | cut -d= -f2)"
 
-if ss -H -ltn '( sport = :80 )' | grep -q .; then
-  echo "TCP 80 remained occupied after renewal smoke test." >&2
-  exit 1
+if [[ "$ACME_MODE" == "standalone" ]]; then
+  if [[ -n "$(port80_listener)" ]]; then
+    echo "TCP 80 remained occupied after standalone renewal smoke test." >&2
+    exit 1
+  fi
+else
+  systemctl is-active --quiet nginx || {
+    echo "nginx is not active after renewal smoke test." >&2
+    exit 1
+  }
+  nginx -t >/dev/null
 fi
 
+SETUP_COMPLETE=1
 printf '\n=== HERMES TRUSTED RDP CERTIFICATE ===\n'
 echo "certificate=$LIVE/fullchain.pem"
 echo "private_key=$LIVE/privkey.pem"
@@ -285,7 +418,12 @@ if [[ "$SERIAL_BEFORE" == "$SERIAL_AFTER" ]]; then
 else
   echo "renewal_smoke=PASS_RENEWED"
 fi
-echo "tcp80=FREE"
+echo "acme_mode=$ACME_MODE"
+if [[ "$ACME_MODE" == "standalone" ]]; then
+  echo "tcp80=FREE"
+else
+  echo "tcp80=NGINX_WEBROOT"
+fi
 echo "package_helper=READY"
 echo "certificate_state=READY"
 echo "TRUSTED_RDP_CERT=PASS"

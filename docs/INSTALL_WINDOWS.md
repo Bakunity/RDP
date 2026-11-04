@@ -34,13 +34,13 @@ Installer также автоматически подключает certificate
 - отдельный Ed25519 keypair;
 - отдельный `known_hosts`;
 - `HermesRdpAgent.ps1`;
-- Scheduled Task `Bakunity RDP Agent`, работающий от `SYSTEM`.
+- Scheduled Task `Hermes RDP Agent`, работающий от `SYSTEM`.
 
 При включённом trusted RDP certificate lifecycle дополнительно управляются:
 
 - `HermesRdpCertRotation.ps1`;
 - `sync-rdp-certificate.ps1`;
-- Scheduled Task `Bakunity RDP Certificate Rotation` от LocalSystem;
+- Scheduled Task `Hermes RDP Certificate Rotation` от LocalSystem;
 - trusted certificate в `LocalMachine\My`;
 - CUSTOM certificate binding Windows RDP listener.
 
@@ -53,7 +53,7 @@ Certificate worker работает отдельно от основного 3-�
 Компьютер: office-pc
 RDP: SERVER:53389
 Туннель: OpenSSH
-Задача: Bakunity RDP Agent
+Задача: Hermes RDP Agent
 Сертификат RDP: автоматическое управление
 ```
 
@@ -101,7 +101,7 @@ Lifecycle wrapper дополнительно подтверждает управ
 Основной runtime:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Bakunity RDP Agent'
+Get-ScheduledTask -TaskName 'Hermes RDP Agent'
 Get-Process ssh -ErrorAction SilentlyContinue
 Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 ```
@@ -109,7 +109,7 @@ Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 100
 Certificate lifecycle:
 
 ```powershell
-Get-ScheduledTask -TaskName 'Bakunity RDP Certificate Rotation'
+Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation'
 Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGeneralSetting -Filter "TerminalName='RDP-tcp'" | Select-Object SSLCertificateSHA1Hash,SSLCertificateSHA1HashType
 ```
 
@@ -121,8 +121,8 @@ Get-CimInstance -Namespace 'root/cimv2/TerminalServices' -ClassName Win32_TSGene
 
 `scripts/uninstall-client.ps1` удаляет active Bakunity runtime локально:
 
-- останавливает и unregister-ит `Bakunity RDP Agent`;
-- останавливает и unregister-ит `Bakunity RDP Certificate Rotation`;
+- останавливает и unregister-ит `Hermes RDP Agent`;
+- останавливает и unregister-ит `Hermes RDP Certificate Rotation`;
 - завершает Bakunity Agent/rotation/SSH процессы;
 - переносит активный `C:\ProgramData\HermesRDP` в timestamped removal archive.
 
