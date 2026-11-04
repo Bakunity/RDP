@@ -89,6 +89,12 @@ paths = [
     "client/HermesRdpAgent.ps1",
     "client/HermesRdpMaintenance.ps1",
     "client/HermesRdpCertRotation.ps1",
+    "client/BakunityMesh.ps1",
+    "client/BakunityHostSmartRoute.ps1",
+    "client/BakunitySmartRoute.ps1",
+    "client/BakunitySmartRouteLaunch.ps1",
+    "scripts/setup-smart-route-host.ps1",
+    "scripts/install-smart-route-connector.ps1",
     "scripts/install-client.ps1",
     "scripts/install-client-core.ps1",
     "scripts/install-client-replace.ps1",
@@ -147,6 +153,8 @@ rollback_update() {
   restore_optional_file /usr/local/sbin/hermes-rdp-device-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
+  restore_optional_file /usr/local/sbin/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /etc/sudoers.d/bakunity-rdp-mesh-key || rollback_ok=0
   restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
@@ -168,6 +176,9 @@ rollback_update() {
   /usr/sbin/sshd -t -f /etc/hermes-rdp/sshd_config || rollback_ok=0
   if [[ -e /etc/sudoers.d/hermes-rdp-cert-package ]]; then
     visudo -cf /etc/sudoers.d/hermes-rdp-cert-package >/dev/null || rollback_ok=0
+  fi
+  if [[ -e /etc/sudoers.d/bakunity-rdp-mesh-key ]]; then
+    visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null || rollback_ok=0
   fi
   systemctl restart hermes-rdp-sshd.service hermes-rdp.service || rollback_ok=0
   if ((DEFAULT_RDP_WAS_ACTIVE == 1)); then
@@ -214,6 +225,14 @@ test -f "$ROOT/server/pyproject.toml"
 test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
 test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
+test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
+test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
+test -f "$ROOT/client/BakunityMesh.ps1"
+test -f "$ROOT/client/BakunityHostSmartRoute.ps1"
+test -f "$ROOT/client/BakunitySmartRoute.ps1"
+test -f "$ROOT/client/BakunitySmartRouteLaunch.ps1"
+test -f "$ROOT/scripts/setup-smart-route-host.ps1"
+test -f "$ROOT/scripts/install-smart-route-connector.ps1"
 if ((TRUSTED_CERT_ENABLED == 1)); then
   test -f "$ROOT/server/bin/hermes-rdp-cert-package.sh"
   test -f "$ROOT/server/bin/hermes-rdp-device-cert-package.sh"
@@ -363,6 +382,8 @@ for path in \
   /usr/local/sbin/hermes-rdp-device-cert-package \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
+  /usr/local/sbin/bakunity-rdp-mesh-key \
+  /etc/sudoers.d/bakunity-rdp-mesh-key \
   /usr/local/bin/hermes-rdpctl \
   /usr/local/bin/bakunity-rdpctl \
   /etc/sudoers.d/hermes-rdp-cert-package \
@@ -473,6 +494,14 @@ install -m 0644 \
 install -m 0644 \
   "$ROOT/server/systemd/bakunity-rdp-default.service" \
   /etc/systemd/system/bakunity-rdp-default.service
+
+install -m 0755 \
+  "$ROOT/server/bin/bakunity-rdp-mesh-key.sh" \
+  /usr/local/sbin/bakunity-rdp-mesh-key
+install -m 0440 \
+  "$ROOT/server/sudoers/bakunity-rdp-mesh-key" \
+  /etc/sudoers.d/bakunity-rdp-mesh-key
+visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null
 
 if ((TRUSTED_CERT_ENABLED == 1)); then
   install -m 0755 \
