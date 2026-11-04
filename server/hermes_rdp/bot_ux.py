@@ -312,6 +312,14 @@ class TelegramUxBot(TelegramBot):
             + [
                 [
                     self.button(
+                        "repair",
+                        "ВОССТАНОВИТЬ",
+                        f"repair:{device['id']}",
+                        style="primary",
+                    )
+                ],
+                [
+                    self.button(
                         "info",
                         "ПОДРОБНЕЕ",
                         f"details:{device['id']}",
