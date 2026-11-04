@@ -60,8 +60,10 @@ function Assert-PowerShellFile {
 function Set-SystemAdminAcl {
     param([string]$Path)
     $Acl = Get-Acl -LiteralPath $Path
+    # Keep the existing owner. An elevated Administrator can protect the DACL
+    # but cannot reliably assign SYSTEM as owner without extra privileges.
     $Acl.SetSecurityDescriptorSddlForm(
-        'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)'
+        'D:P(A;;FA;;;SY)(A;;FA;;;BA)'
     )
     Set-Acl -LiteralPath $Path -AclObject $Acl
 }
