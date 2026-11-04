@@ -70,7 +70,7 @@ class OpenSshMigrationSafetyTests(unittest.TestCase):
             self.assertIn("idx_devices_active_ssh_key", indexes)
 
     def test_windows_key_generation_preserves_empty_passphrase_argument(self) -> None:
-        installer = (ROOT / "scripts/install-client.ps1").read_text(
+        installer = (ROOT / "scripts/install-client-core.ps1").read_text(
             encoding="utf-8-sig"
         )
         self.assertIn("Start-Process", installer)
