@@ -115,9 +115,9 @@ host, peer = sys.argv[1:]
 try:
     ip = ipaddress.ip_address(host)
     prefix = "/ip4" if ip.version == 4 else "/ip6"
-    print(f"{prefix}/{ip}/udp/7444/quic-v1/p2p/{peer}")
+    print(f"{prefix}/{ip}/tcp/7444/p2p/{peer}")
 except ValueError:
-    print(f"/dns4/{host}/udp/7444/quic-v1/p2p/{peer}")
+    print(f"/dns4/{host}/tcp/7444/p2p/{peer}")
 PY
 )"
 
