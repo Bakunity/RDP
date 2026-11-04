@@ -16,6 +16,7 @@ from .config import Config
 from .db import Registry
 from .device_certificates import get_device_certificate_target
 from .native_transport import (
+    authorize_native_transport_peer,
     native_transport_bootstrap,
     native_transport_enabled,
     native_transport_host_manifest,
@@ -348,6 +349,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             machine_name=str(body.get("machine_name") or ""),
             telemetry=telemetry,
         )
+        native = telemetry.get("native_transport")
+        if isinstance(native, dict):
+            authorize_native_transport_peer(native.get("peer_id"))
         current = self.server.registry.get_named_access_connector(
             str(connector["id"])
         )
