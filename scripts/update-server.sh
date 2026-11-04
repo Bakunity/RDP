@@ -90,11 +90,14 @@ paths = [
     "client/HermesRdpMaintenance.ps1",
     "client/HermesRdpCertRotation.ps1",
     "client/BakunityMesh.ps1",
+    "client/BakunityNativeTransport.ps1",
     "client/BakunityHostSmartRoute.ps1",
     "client/BakunitySmartRoute.ps1",
     "client/BakunitySmartRouteLaunch.ps1",
     "scripts/setup-smart-route-host.ps1",
     "scripts/install-smart-route-connector.ps1",
+    "native-transport/go.mod",
+    "native-transport/cmd/bakunity-transport/main.go",
     "scripts/install-client.ps1",
     "scripts/install-client-core.ps1",
     "scripts/install-client-replace.ps1",
@@ -228,7 +231,12 @@ test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
 test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
 test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
 test -f "$ROOT/client/BakunityMesh.ps1"
+test -f "$ROOT/client/BakunityNativeTransport.ps1"
 test -f "$ROOT/client/BakunityHostSmartRoute.ps1"
+test -f "$ROOT/native-transport/go.mod"
+test -f "$ROOT/native-transport/cmd/bakunity-transport/main.go"
+test -f "$ROOT/scripts/setup-native-transport.sh"
+test -f "$ROOT/server/systemd/bakunity-transport.service"
 test -f "$ROOT/client/BakunitySmartRoute.ps1"
 test -f "$ROOT/client/BakunitySmartRouteLaunch.ps1"
 test -f "$ROOT/scripts/setup-smart-route-host.ps1"
