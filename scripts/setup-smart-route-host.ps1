@@ -10,6 +10,7 @@ $BaseDir = Join-Path $HermesDir 'SmartRoute'
 $TaskName = 'Bakunity RDP Host Smart Route'
 $WorkerPath = Join-Path $BaseDir 'BakunityHostSmartRoute.ps1'
 $MeshLibPath = Join-Path $BaseDir 'BakunityMesh.ps1'
+$NativeTransportLibPath = Join-Path $BaseDir 'BakunityNativeTransport.ps1'
 $RefPath = Join-Path $BaseDir 'client-ref.txt'
 $ConfigPath = Join-Path $HermesDir 'device.json'
 
@@ -75,20 +76,25 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 $ResolvedSha = Resolve-RepositorySha -Ref $RepositoryRef
 $WorkerCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunityHostSmartRoute-$([Guid]::NewGuid().ToString('N')).ps1")
 $LibCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunityMesh-$([Guid]::NewGuid().ToString('N')).ps1")
+$NativeTransportCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunityNativeTransport-$([Guid]::NewGuid().ToString('N')).ps1")
 $WorkerUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunityHostSmartRoute.ps1"
 $LibUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunityMesh.ps1"
+$NativeTransportUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunityNativeTransport.ps1"
 
 $OldTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 $OldTaskXml = if ($OldTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }
 $OldWorker = if (Test-Path -LiteralPath $WorkerPath) { Get-Content -LiteralPath $WorkerPath -Raw } else { $null }
 $OldLib = if (Test-Path -LiteralPath $MeshLibPath) { Get-Content -LiteralPath $MeshLibPath -Raw } else { $null }
+$OldNativeTransportLib = if (Test-Path -LiteralPath $NativeTransportLibPath) { Get-Content -LiteralPath $NativeTransportLibPath -Raw } else { $null }
 $OldRef = if (Test-Path -LiteralPath $RefPath) { Get-Content -LiteralPath $RefPath -Raw } else { $null }
 
 try {
     Invoke-WebRequest -UseBasicParsing -Uri $WorkerUrl -OutFile $WorkerCandidate
     Invoke-WebRequest -UseBasicParsing -Uri $LibUrl -OutFile $LibCandidate
+    Invoke-WebRequest -UseBasicParsing -Uri $NativeTransportUrl -OutFile $NativeTransportCandidate
     Assert-PowerShellFile -Path $WorkerCandidate
     Assert-PowerShellFile -Path $LibCandidate
+    Assert-PowerShellFile -Path $NativeTransportCandidate
 
     New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
     Stop-TaskBounded
@@ -96,8 +102,10 @@ try {
 
     Copy-Item -LiteralPath $WorkerCandidate -Destination $WorkerPath -Force
     Copy-Item -LiteralPath $LibCandidate -Destination $MeshLibPath -Force
+    Copy-Item -LiteralPath $NativeTransportCandidate -Destination $NativeTransportLibPath -Force
     Set-SystemAdminAcl -Path $WorkerPath
     Set-SystemAdminAcl -Path $MeshLibPath
+    Set-SystemAdminAcl -Path $NativeTransportLibPath
     Set-Content -LiteralPath $RefPath -Value $ResolvedSha -Encoding ASCII
     Set-SystemAdminAcl -Path $RefPath
 
@@ -149,6 +157,13 @@ catch {
             Remove-Item -LiteralPath $MeshLibPath -Force -ErrorAction SilentlyContinue
         }
 
+        if ($null -ne $OldNativeTransportLib) {
+            Set-Content -LiteralPath $NativeTransportLibPath -Value $OldNativeTransportLib -Encoding UTF8
+            Set-SystemAdminAcl -Path $NativeTransportLibPath
+        } else {
+            Remove-Item -LiteralPath $NativeTransportLibPath -Force -ErrorAction SilentlyContinue
+        }
+
         if ($null -ne $OldRef) {
             Set-Content -LiteralPath $RefPath -Value $OldRef -Encoding ASCII
             Set-SystemAdminAcl -Path $RefPath
@@ -167,5 +182,5 @@ catch {
     throw $Failure
 }
 finally {
-    Remove-Item -LiteralPath $WorkerCandidate,$LibCandidate -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $WorkerCandidate,$LibCandidate,$NativeTransportCandidate -Force -ErrorAction SilentlyContinue
 }
