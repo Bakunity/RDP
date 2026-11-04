@@ -256,6 +256,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "command": command,
                 "desired_enabled": bool(current["enabled"]),
+                "desired_client_ref": self.server.config.repository_ref,
+                "trusted_rdp_certificate_enabled": (
+                    self.server.config.trusted_rdp_certificate_enabled
+                ),
                 "telemetry_live": telemetry_live,
             },
         )
