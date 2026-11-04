@@ -42,10 +42,12 @@ for marker in [
 if 'CERT_PUB' not in setup or 'KEY_PUB' not in setup:
     raise SystemExit('setup script lost certificate/private-key match validation')
 
+if '--cert-name "$CERT_NAME"' in renew:
+    raise SystemExit('renew wrapper still limits renewal to the legacy public-IP lineage')
+
 for marker in [
     '/usr/bin/flock -w 300',
     '"$CERTBOT" renew',
-    '--cert-name "$CERT_NAME"',
     '--quiet',
     '--non-interactive',
 ]:
