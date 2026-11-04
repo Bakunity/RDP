@@ -84,20 +84,37 @@ function Invoke-CertificateRotationSetup {
     }
 }
 
-function Invoke-HostSmartRouteSetup {
+function Invoke-OptionalHostSmartRouteSetup {
     param(
+        [string]$SetupUrl,
         [string]$SetupPath,
         [string]$ResolvedSha
     )
 
-    $NativePowerShell = Get-NativePowerShellPath
-    & $NativePowerShell `
-        -NoProfile `
-        -ExecutionPolicy Bypass `
-        -File $SetupPath `
-        -RepositoryRef $ResolvedSha
-    if ($LASTEXITCODE -ne 0) {
-        throw "Host Smart Route setup failed with code $LASTEXITCODE"
+    try {
+        Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri $SetupUrl `
+            -OutFile $SetupPath
+        Assert-PowerShellFile -Path $SetupPath
+        $NativePowerShell = Get-NativePowerShellPath
+        $Output = & $NativePowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $SetupPath `
+            -RepositoryRef $ResolvedSha 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "Host Smart Route setup failed with code $LASTEXITCODE. $($Output.Trim())"
+        }
+        if ($Output.Trim()) { Write-Host $Output.TrimEnd() }
+        return $true
+    }
+    catch {
+        Write-Warning (
+            'Smart Route Host deferred; updated RDP remains healthy. ' +
+            $_.Exception.Message
+        )
+        return $false
     }
 }
 
@@ -338,14 +355,9 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
-    Invoke-WebRequest `
-        -UseBasicParsing `
-        -Uri $SmartRouteSetupUrl `
-        -OutFile $SmartRouteSetupCandidate
 
     Assert-PowerShellFile -Path $CandidatePath
     Assert-PowerShellFile -Path $CertSetupCandidate
-    Assert-PowerShellFile -Path $SmartRouteSetupCandidate
 
     $BackupRoot = Join-Path $BaseDir 'backups\updates'
     $BackupDir = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -375,7 +387,6 @@ try {
         previous_agent_sha256 = Get-Sha256 -Path $AgentPath
         candidate_agent_sha256 = Get-Sha256 -Path $CandidatePath
         candidate_cert_setup_sha256 = Get-Sha256 -Path $CertSetupCandidate
-        candidate_smart_route_setup_sha256 = Get-Sha256 -Path $SmartRouteSetupCandidate
         task_state_before = [string]$TaskBefore.State
         expected_ssh_before = [bool]$ExpectSsh
     } |
@@ -413,21 +424,31 @@ try {
         Invoke-CertificateRotationSetup `
             -SetupPath $CertSetupCandidate `
             -ResolvedSha $ResolvedSha
-        Invoke-HostSmartRouteSetup `
+
+        $SmartRouteManaged = Invoke-OptionalHostSmartRouteSetup `
+            -SetupUrl $SmartRouteSetupUrl `
             -SetupPath $SmartRouteSetupCandidate `
             -ResolvedSha $ResolvedSha
 
-        Write-ClientRef -ResolvedSha $ResolvedSha
+        if ($SmartRouteManaged) {
+            Write-ClientRef -ResolvedSha $ResolvedSha
+        }
 
         Write-Host
         Write-Host 'UPDATE=PASS' -ForegroundColor Green
         Write-Host "ResolvedRef: $ResolvedSha"
-        Write-Host "ClientRef: $ResolvedSha"
+        if ($SmartRouteManaged) {
+            Write-Host "ClientRef: $ResolvedSha"
+            Write-Host 'SmartRouteHost: managed'
+        }
+        else {
+            Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
+            Write-Host 'SmartRouteHost: deferred' -ForegroundColor Yellow
+        }
         Write-Host "Backup: $BackupDir"
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"
         Write-Host 'CertificateRotation: managed'
-        Write-Host 'SmartRouteHost: managed'
     }
     catch {
         $UpdateFailure = $_
