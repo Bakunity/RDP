@@ -604,6 +604,21 @@ class TelegramBot:
             and maintenance_ref
             and maintenance_ref == desired_ref
         )
+
+        # Once the installed client is already compatible/current, a terminal
+        # result from an older update attempt is historical state, not an
+        # actionable current failure. Keep running updates visible and do not
+        # suppress repair failures, because those can still describe a real
+        # certificate/runtime recovery problem.
+        if (
+            maintenance_relevant
+            and maintenance_action == "update"
+            and maintenance_state in {"failed", "completed"}
+            and client_ref
+            and self._client_ref_is_compatible(client_ref)
+        ):
+            maintenance_relevant = False
+
         if not maintenance_relevant:
             maintenance_state = ""
             maintenance_action = ""
