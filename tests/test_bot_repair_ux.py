@@ -29,6 +29,7 @@ class FakeRegistry:
                 "pending_command": "",
                 "command_seq": 0,
                 "last_result": {},
+                "slug": "test-pc",
             }
         }
         self.pair_codes: list[str] = []
@@ -56,6 +57,20 @@ class FakeRegistry:
     def queue_command(self, device_id: str, action: str):
         self.queued_commands.append((device_id, action))
         return len(self.queued_commands)
+
+
+    def rename_device(self, device_id: str, name: str) -> None:
+        clean = name.strip()
+        if not clean:
+            raise ValueError("name is empty")
+        self.devices[device_id]["display_name"] = clean
+
+    def set_device_slug(self, device_id: str, slug: str) -> str:
+        clean = slug.strip().lower()
+        if not clean:
+            raise ValueError("invalid device slug")
+        self.devices[device_id]["slug"] = clean
+        return clean
 
 
 class TelegramRepairUxTests(unittest.TestCase):
@@ -283,6 +298,56 @@ class TelegramRepairUxTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][1].get("force_new"))
+
+    def test_device_card_exposes_name_and_address_edit_actions(self) -> None:
+        _, keyboard = self.bot._device(self.registry.get_device("dev123"))
+        callbacks = {
+            button["callback_data"]
+            for row in keyboard["inline_keyboard"]
+            for button in row
+        }
+        self.assertIn("edit_name:dev123", callbacks)
+        self.assertIn("edit_slug:dev123", callbacks)
+
+    def test_edit_name_flow_updates_device_from_plain_message(self) -> None:
+        self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})
+        self.assertEqual(self.registry.get_setting("screen"), "device_edit")
+        self.assertEqual(self.registry.get_setting("input_mode"), "device_name")
+
+        self.bot._handle_update(
+            {
+                "message": {
+                    "text": "Рабочий ПК",
+                    "chat": {"id": 123},
+                    "from": {"id": 123},
+                }
+            }
+        )
+        self.assertEqual(
+            self.registry.get_device("dev123")["display_name"],
+            "Рабочий ПК",
+        )
+        self.assertEqual(self.registry.get_setting("screen"), "device")
+        self.assertEqual(self.registry.get_setting("input_mode"), "")
+
+    def test_edit_slug_flow_updates_named_endpoint(self) -> None:
+        self.registry.set_setting("device_domain", "tima.biz")
+        self.bot._handle_callback({"id": "cb-slug", "data": "edit_slug:dev123"})
+        self.assertEqual(self.registry.get_setting("input_mode"), "device_slug")
+
+        self.bot._handle_update(
+            {
+                "message": {
+                    "text": "tima",
+                    "chat": {"id": 123},
+                    "from": {"id": 123},
+                }
+            }
+        )
+        device = self.registry.get_device("dev123")
+        self.assertEqual(device["slug"], "tima")
+        text, _ = self.bot._device(device)
+        self.assertIn("RDP: tima.tima.biz:53391", text)
 
     def test_pairing_colors_keep_navigation_neutral(self) -> None:
         _, keyboard = self.bot._pair()
