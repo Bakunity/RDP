@@ -284,6 +284,12 @@ class TelegramBot:
             telemetry.get("ssh_tunnel_running"),
             telemetry.get("ssh_process_count"),
             telemetry.get("endpoint_available"),
+            telemetry.get("client_repository_ref"),
+            telemetry.get("maintenance_capable"),
+            telemetry.get("certificate_lifecycle_ok"),
+            str((telemetry.get("maintenance_status") or {}).get("state") or ""),
+            str((telemetry.get("maintenance_status") or {}).get("action") or ""),
+            bool((telemetry.get("maintenance_status") or {}).get("ok")),
         )
 
     def _live_loop(self) -> None:
