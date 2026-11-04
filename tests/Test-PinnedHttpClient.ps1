@@ -1,14 +1,14 @@
 ﻿$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 
-$InstallerPath = Join-Path $PSScriptRoot '..\scripts\install-client.ps1'
+$InstallerPath = Join-Path $PSScriptRoot '..\scripts\install-client-core.ps1'
 $InstallerText = Get-Content -LiteralPath $InstallerPath -Raw
 $Match = [regex]::Match(
     $InstallerText,
     "(?s)\$PinnedHttpClientSource = @'\r?\n(.*?)\r?\n'@"
 )
 if (-not $Match.Success) {
-    throw 'PinnedHttpClientSource was not found in install-client.ps1.'
+    throw 'PinnedHttpClientSource was not found in install-client-core.ps1.'
 }
 
 if (-not ('HermesRdp.PinnedHttpClientFactory' -as [type])) {
