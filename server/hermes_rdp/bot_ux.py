@@ -241,7 +241,11 @@ class TelegramUxBot(TelegramBot):
             return
 
         if data.startswith("connection_source:"):
-            _, device_id, connector_id = data.split(":", 2)
+            connector_id = data.split(":", 1)[1]
+            device_id = self.registry.get_setting(
+                "selected_device",
+                "",
+            ) or ""
             try:
                 self.registry.get_device(device_id)
                 self.registry.get_named_access_connector(connector_id)
@@ -249,15 +253,22 @@ class TelegramUxBot(TelegramBot):
                 self._answer(callback_id, "Устройство не найдено")
                 self.render()
                 return
-            self.registry.set_setting("selected_device", device_id)
             self.registry.set_setting("selected_connector", connector_id)
             self.registry.set_setting("screen", "device_connection_source")
             self._answer(callback_id)
             self.render()
             return
 
-        if data.startswith("route_device:"):
-            _, policy, connector_id, device_id = data.split(":", 3)
+        if data.startswith("route_pair:"):
+            policy = data.split(":", 1)[1]
+            connector_id = self.registry.get_setting(
+                "selected_connector",
+                "",
+            ) or ""
+            device_id = self.registry.get_setting(
+                "selected_device",
+                "",
+            ) or ""
             try:
                 clean = self.registry.set_connector_device_route_policy(
                     connector_id,
@@ -267,8 +278,6 @@ class TelegramUxBot(TelegramBot):
             except Exception as exc:
                 self._answer(callback_id, str(exc))
                 return
-            self.registry.set_setting("selected_device", device_id)
-            self.registry.set_setting("selected_connector", connector_id)
             self.registry.set_setting("screen", "device_connection_source")
             self._answer(callback_id, f"Маршрут: {clean.upper()}")
             self.render()
@@ -661,7 +670,7 @@ class TelegramUxBot(TelegramBot):
                     self.button(
                         "online" if online else "offline",
                         source_name,
-                        f"connection_source:{device['id']}:{connector['id']}",
+                        f"connection_source:{connector['id']}",
                         style="success" if online else None,
                     )
                 ]
@@ -733,12 +742,12 @@ class TelegramUxBot(TelegramBot):
                     self.button(
                         "success" if policy == left else "info",
                         left.upper(),
-                        f"route_device:{left}:{connector['id']}:{device['id']}",
+                        f"route_pair:{left}",
                     ),
                     self.button(
                         "success" if policy == right else "info",
                         right.upper(),
-                        f"route_device:{right}:{connector['id']}:{device['id']}",
+                        f"route_pair:{right}",
                     ),
                 ]
             )
