@@ -57,6 +57,9 @@ class FakeRegistry:
     def list_devices(self):
         return list(self.devices.values())
 
+    def list_named_access_tokens(self):
+        return []
+
     def queue_command(self, device_id: str, action: str):
         self.queued_commands.append((device_id, action))
         return len(self.queued_commands)
