@@ -74,6 +74,20 @@ def build_parser() -> argparse.ArgumentParser:
     certificate_sync.add_argument("--device")
     certificates_sub.add_parser("status")
 
+    named_access = sub.add_parser(
+        "named-access",
+        help="manage Windows Named Access connectors",
+    )
+    named_access_sub = named_access.add_subparsers(
+        dest="named_access_command",
+        required=True,
+    )
+    named_access_create = named_access_sub.add_parser("create")
+    named_access_create.add_argument("--name", default="Windows connector")
+    named_access_sub.add_parser("list")
+    named_access_revoke = named_access_sub.add_parser("revoke")
+    named_access_revoke.add_argument("connector_id")
+
     dashboard = sub.add_parser("dashboard")
     dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
     dashboard_sub.add_parser("reset")
@@ -284,6 +298,57 @@ def main() -> None:
                 )
             if failures:
                 raise SystemExit(1)
+            return
+
+    if args.command == "named-access":
+        domain = registry.get_device_domain()
+        if not domain:
+            print("DEVICE_DOMAIN=disabled")
+            raise SystemExit(1)
+
+        if args.named_access_command == "create":
+            connector, token = registry.create_named_access_token(args.name)
+            repository_ref = config.repository_ref
+            installer_url = (
+                "https://raw.githubusercontent.com/bakunity/RDP/"
+                f"{repository_ref}/scripts/install-named-access.ps1"
+            )
+
+            def ps_quote(value: str) -> str:
+                return str(value).replace("'", "''")
+
+            command = (
+                f"$u='{ps_quote(installer_url)}'; "
+                "$s=(irm $u).TrimStart([char]0xFEFF); "
+                "& ([scriptblock]::Create($s)) "
+                f"-ApiBaseUrl '{ps_quote(config.api_base_url)}' "
+                f"-ApiFingerprint '{ps_quote(config.tls_fingerprint)}' "
+                f"-AccessToken '{ps_quote(token)}' "
+                f"-RepositoryRef '{ps_quote(repository_ref)}'"
+            )
+            print(f"CONNECTOR_ID={connector['id']}")
+            print(f"CONNECTOR_NAME={connector['name']}")
+            print(f"DEVICE_DOMAIN={domain}")
+            print("POWERSHELL_ADMIN_COMMAND=" + command)
+            print("SECRET=The install command contains a read-only token; do not share it.")
+            return
+
+        if args.named_access_command == "list":
+            connectors = registry.list_named_access_tokens()
+            if not connectors:
+                print("No active Named Access connectors.")
+                return
+            for connector in connectors:
+                print(
+                    f"{connector['id']}\t{connector['name']}\t"
+                    f"created={connector['created_at']}\t"
+                    f"last_seen={connector['last_seen'] or 'never'}"
+                )
+            return
+
+        if args.named_access_command == "revoke":
+            registry.revoke_named_access_token(args.connector_id)
+            print("REVOKED=PASS")
             return
 
     if args.command == "dashboard" and args.dashboard_command == "reset":

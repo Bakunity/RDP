@@ -30,3 +30,13 @@ Get-Content 'C:\ProgramData\HermesRDP\agent.log' -Tail 50
 ## Домен устройств
 
 Подробно: [DEVICE_DOMAIN.md](DEVICE_DOMAIN.md).
+
+## Named Access
+
+```bash
+sudo bakunity-rdpctl named-access create --name "Main Windows PC"
+sudo bakunity-rdpctl named-access list
+sudo bakunity-rdpctl named-access revoke CONNECTOR_ID
+```
+
+Подробно: [NAMED_ACCESS.md](NAMED_ACCESS.md).

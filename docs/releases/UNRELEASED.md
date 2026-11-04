@@ -87,3 +87,5 @@ Do not regress:
 - Added stable per-device DNS slugs and optional wildcard device domains (for example `ai.tima.biz:53389`), with CLI management and DNS validation.
 
 - Added Telegram editing for device display names/DNS slugs and per-device trusted certificates for named RDP endpoints.
+
+- Added the Windows Named Access Connector for portless device hostnames on one public VPS IPv4, with independent read-only connector tokens and transactional local routing sync.
