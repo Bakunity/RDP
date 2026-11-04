@@ -431,8 +431,8 @@ class TelegramBot:
                     )
                 ]
             )
-        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="success")])
-        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh", style="primary")])
+        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
+        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
         return text, {"inline_keyboard": rows}
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
