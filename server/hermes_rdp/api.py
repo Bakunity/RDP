@@ -15,6 +15,13 @@ from . import __version__
 from .config import Config
 from .db import Registry
 from .device_certificates import get_device_certificate_target
+from .smart_route import (
+    create_mesh_bootstrap,
+    get_host_smart_route,
+    mesh_control_url,
+    mesh_enabled,
+    set_host_smart_route,
+)
 from .tunnel import close_tunnel, endpoint_listener_state
 
 
@@ -163,6 +170,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/v1/named-access/telemetry":
                 self._named_access_telemetry()
                 return
+            if path == "/v1/named-access/mesh-bootstrap":
+                self._named_access_mesh_bootstrap()
+                return
             parts = [part for part in path.split("/") if part]
             if len(parts) == 4 and parts[:2] == ["v1", "devices"]:
                 device_id, action = parts[2], parts[3]
@@ -180,6 +190,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                     return
                 if action == "rdp-certificate-status":
                     self._rdp_certificate_status(device_id)
+                    return
+                if action == "smart-route-telemetry":
+                    self._smart_route_telemetry(device_id)
+                    return
+                if action == "smart-route-bootstrap":
+                    self._smart_route_bootstrap(device_id)
                     return
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
         except json.JSONDecodeError:
@@ -215,8 +231,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             slug = str(device.get("slug") or "").strip()
             if not slug:
                 continue
-            telemetry = device.get("telemetry") or {}
-            smart = telemetry.get("smart_route") or {}
+            smart = get_host_smart_route(
+                self.server.registry,
+                str(device["id"]),
+            )
             lan_ipv4 = [
                 str(value)
                 for value in (smart.get("lan_ipv4") or [])
@@ -251,23 +269,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 }
             )
 
-        smart_route_enabled = (
-            str(
-                self.server.registry.get_setting(
-                    "smart_route_enabled",
-                    "0",
-                )
-                or "0"
-            )
-            == "1"
-        )
-        control_url = str(
-            self.server.registry.get_setting(
-                "smart_route_control_url",
-                "",
-            )
-            or ""
-        ).strip()
+        smart_route_enabled = mesh_enabled(self.server.registry)
+        control_url = mesh_control_url(self.server.registry)
 
         self._json(
             HTTPStatus.OK,
@@ -321,6 +324,96 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "route_policy": str(
                     current.get("route_policy") or "auto"
+                ),
+            },
+        )
+
+    def _named_access_mesh_bootstrap(self) -> None:
+        connector = self._named_access_auth()
+        if not connector:
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        bootstrap = create_mesh_bootstrap(
+            self.server.registry,
+            "connector",
+        )
+        if not bootstrap:
+            self._json(
+                HTTPStatus.OK,
+                {"ok": True, "enabled": False},
+            )
+            return
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "enabled": True,
+                "control_url": bootstrap["control_url"],
+                "auth_key": bootstrap["auth_key"],
+                "node_name": (
+                    "bakunity-connector-"
+                    + str(connector["id"])[:10]
+                ),
+            },
+        )
+
+    def _smart_route_telemetry(self, device_id: str) -> None:
+        if not self._device_auth(device_id):
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        body = self._read_json()
+        telemetry = body.get("smart_route")
+        if not isinstance(telemetry, dict):
+            raise ValueError("smart_route object required")
+        state = set_host_smart_route(
+            self.server.registry,
+            device_id,
+            telemetry,
+        )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "mesh_enabled": mesh_enabled(self.server.registry),
+                "control_url": mesh_control_url(self.server.registry),
+                "smart_route": state,
+            },
+        )
+
+    def _smart_route_bootstrap(self, device_id: str) -> None:
+        device = self._device_auth(device_id)
+        if not device:
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        bootstrap = create_mesh_bootstrap(
+            self.server.registry,
+            "host",
+        )
+        if not bootstrap:
+            self._json(
+                HTTPStatus.OK,
+                {"ok": True, "enabled": False},
+            )
+            return
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "enabled": True,
+                "control_url": bootstrap["control_url"],
+                "auth_key": bootstrap["auth_key"],
+                "node_name": (
+                    "bakunity-host-"
+                    + str(device["id"])[:10]
                 ),
             },
         )

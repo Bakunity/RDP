@@ -10,6 +10,7 @@ Add-Type -AssemblyName System.Net.Http
 $BaseDir = 'C:\ProgramData\BakunityRDP\SmartRoute'
 $ConfigPath = Join-Path $BaseDir 'config.json'
 $StatePath = Join-Path $BaseDir 'state.json'
+$MeshLibPath = Join-Path $BaseDir 'BakunityMesh.ps1'
 $LogPath = Join-Path $BaseDir 'smart-route.log'
 $HostsPath = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
 $HostsBegin = '# BEGIN BAKUNITY RDP SMART ROUTE'
@@ -236,34 +237,90 @@ function Get-RoutingMode {
 
 function Select-DeviceRoute {
     param([object]$Device, [string]$Policy)
-    $Candidates = @()
+
     if ($Policy -in @('auto','lan')) {
         foreach ($Lan in @($Device.routes.lan)) {
-            if ($Lan -and $Lan.host) { $Candidates += [pscustomobject]@{ type='lan'; host=[string]$Lan.host; port=[int]$Lan.port } }
+            if (-not $Lan -or -not $Lan.host) { continue }
+            $Latency = Test-TcpCandidate -HostName ([string]$Lan.host) -Port ([int]$Lan.port)
+            if ($null -ne $Latency) {
+                return [pscustomobject]@{
+                    type='lan'
+                    host=[string]$Lan.host
+                    target_ipv4=(Resolve-IPv4 -HostName ([string]$Lan.host))
+                    target_port=[int]$Lan.port
+                    latency_ms=[int]$Latency
+                    reason='lan_direct'
+                }
+            }
         }
-    }
-    if ($Policy -in @('auto','p2p')) {
-        $P2p = $Device.routes.p2p
-        if ($P2p -and [bool]$P2p.available -and $P2p.host) { $Candidates += [pscustomobject]@{ type='p2p'; host=[string]$P2p.host; port=[int]$P2p.port } }
-    }
-    if ($Policy -in @('auto','relay')) {
-        $Relay = $Device.routes.relay
-        if ($Relay -and [bool]$Relay.available -and $Relay.host) { $Candidates += [pscustomobject]@{ type='relay'; host=[string]$Relay.host; port=[int]$Relay.port } }
-    }
-    foreach ($Candidate in $Candidates) {
-        $Latency = Test-TcpCandidate -HostName $Candidate.host -Port $Candidate.port
-        if ($null -ne $Latency) {
+        if ($Policy -eq 'lan') {
             return [pscustomobject]@{
-                type=[string]$Candidate.type
-                host=[string]$Candidate.host
-                target_ipv4=(Resolve-IPv4 -HostName $Candidate.host)
-                target_port=[int]$Candidate.port
-                latency_ms=[int]$Latency
-                reason='reachable'
+                type='unavailable'; host=''; target_ipv4=''; target_port=0
+                latency_ms=0; reason='no reachable LAN route'
             }
         }
     }
-    return [pscustomobject]@{ type='unavailable'; host=''; target_ipv4=''; target_port=0; latency_ms=0; reason="no reachable $Policy route" }
+
+    if ($Policy -in @('auto','p2p')) {
+        $P2p = $Device.routes.p2p
+        if ($P2p -and [bool]$P2p.available -and $P2p.host) {
+            $Path = Test-BakunityMeshDirect -Target ([string]$P2p.host)
+            if ($Path.direct) {
+                $TcpLatency = Test-TcpCandidate -HostName ([string]$P2p.host) -Port ([int]$P2p.port)
+                if ($null -ne $TcpLatency) {
+                    return [pscustomobject]@{
+                        type='p2p'
+                        host=[string]$P2p.host
+                        target_ipv4=(Resolve-IPv4 -HostName ([string]$P2p.host))
+                        target_port=[int]$P2p.port
+                        latency_ms=[int]$TcpLatency
+                        reason='p2p_direct'
+                    }
+                }
+            }
+            if ($Policy -eq 'p2p') {
+                $Reason = if ($Path.peer_relay) {
+                    'peer relay only'
+                } elseif ($Path.relay) {
+                    'DERP relay only'
+                } else {
+                    'direct mesh path unavailable'
+                }
+                return [pscustomobject]@{
+                    type='unavailable'; host=''; target_ipv4=''; target_port=0
+                    latency_ms=0; reason=$Reason
+                }
+            }
+        }
+        elseif ($Policy -eq 'p2p') {
+            return [pscustomobject]@{
+                type='unavailable'; host=''; target_ipv4=''; target_port=0
+                latency_ms=0; reason='Host mesh route unavailable'
+            }
+        }
+    }
+
+    if ($Policy -in @('auto','relay')) {
+        $Relay = $Device.routes.relay
+        if ($Relay -and [bool]$Relay.available -and $Relay.host) {
+            $Latency = Test-TcpCandidate -HostName ([string]$Relay.host) -Port ([int]$Relay.port)
+            if ($null -ne $Latency) {
+                return [pscustomobject]@{
+                    type='relay'
+                    host=[string]$Relay.host
+                    target_ipv4=(Resolve-IPv4 -HostName ([string]$Relay.host))
+                    target_port=[int]$Relay.port
+                    latency_ms=[int]$Latency
+                    reason='vps_relay'
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        type='unavailable'; host=''; target_ipv4=''; target_port=0
+        latency_ms=0; reason="no reachable $Policy route"
+    }
 }
 
 function Remove-PortProxy {
@@ -328,17 +385,43 @@ function Build-Mappings {
     return [pscustomobject]@{ policy=$Policy; mode=$Mode; mappings=@($Mappings) }
 }
 
-function Get-TailscaleState {
-    $Exe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
-    if (-not (Test-Path -LiteralPath $Exe)) { return [ordered]@{ installed=$false; online=$false; ipv4='' } }
-    try {
-        $Raw = & $Exe status --json 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $Raw) { return [ordered]@{ installed=$true; online=$false; ipv4='' } }
-        $Status = ($Raw -join [Environment]::NewLine) | ConvertFrom-Json
-        $IPv4 = @($Status.TailscaleIPs | Where-Object { [string]$_ -match '^\d+\.\d+\.\d+\.\d+$' }) | Select-Object -First 1
-        return [ordered]@{ installed=$true; online=([string]$Status.BackendState -eq 'Running'); ipv4=[string]$IPv4 }
+function Test-ConnectorMeshRole {
+    param([object]$Mesh)
+    return [bool](@($Mesh.roles) -contains 'connector')
+}
+
+function Sync-ConnectorMesh {
+    param([object]$Config, [object]$Manifest)
+
+    $Enabled = [bool]$Manifest.server.smart_route.enabled
+    if (-not $Enabled) {
+        return Get-BakunityTailscaleStatus
     }
-    catch { return [ordered]@{ installed=$true; online=$false; ipv4='' } }
+
+    $Mesh = Get-BakunityTailscaleStatus
+    if ($Mesh.conflict) {
+        Write-Log 'MESH=CONFLICT foreign Tailscale detected; Relay remains available'
+        return $Mesh
+    }
+
+    $NeedsEnrollment = [bool](
+        -not $Mesh.online -or
+        -not (Test-ConnectorMeshRole -Mesh $Mesh) -or
+        [string]$Mesh.control_url -ne [string]$Manifest.server.smart_route.control_url
+    )
+    if ($NeedsEnrollment) {
+        $Bootstrap = Invoke-ControlPost -Config $Config -Path '/v1/named-access/mesh-bootstrap' -Body @{}
+        if ($Bootstrap -and [bool]$Bootstrap.enabled) {
+            $Result = Ensure-BakunityMeshRole -Role connector -Bootstrap $Bootstrap
+            if ($Result.conflict) {
+                Write-Log 'MESH=CONFLICT foreign Tailscale detected'
+            }
+            else {
+                Write-Log 'MESH=ONLINE role=connector'
+            }
+        }
+    }
+    return Get-BakunityTailscaleStatus
 }
 
 function Sync-SmartRoute {
@@ -346,6 +429,7 @@ function Sync-SmartRoute {
     if (-not $Config) { throw "Missing Smart Route config: $ConfigPath" }
     $Manifest = Invoke-ControlGet -Config $Config -Path '/v1/named-access/manifest'
     if (-not $Manifest.ok -or [int]$Manifest.manifest_version -ne 2) { throw 'Smart Route manifest v2 is required.' }
+    $Mesh = Sync-ConnectorMesh -Config $Config -Manifest $Manifest
     $State = Read-JsonFile -Path $StatePath
     $Built = Build-Mappings -Manifest $Manifest -State $State
     $Mappings = @($Built.mappings)
@@ -386,9 +470,9 @@ function Sync-SmartRoute {
         }
     }
 
-    $Tail = Get-TailscaleState
+    $Tail = Get-BakunityTailscaleStatus
     Write-JsonFile -Path $StatePath -Value ([ordered]@{
-        version=3
+        version=4
         connector_id=[string]$Manifest.connector.id
         connector_name=[string]$Manifest.connector.name
         route_policy=[string]$Built.policy
@@ -414,6 +498,10 @@ function Sync-SmartRoute {
 }
 
 New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
+if (-not (Test-Path -LiteralPath $MeshLibPath)) {
+    throw "Missing mesh library: $MeshLibPath"
+}
+. $MeshLibPath
 $Mutex = New-Object Threading.Mutex($false, 'Global\BakunityRdpSmartRoute')
 $HasMutex = $false
 try {

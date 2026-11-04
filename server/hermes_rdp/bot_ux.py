@@ -480,21 +480,31 @@ class TelegramUxBot(TelegramBot):
         mesh = telemetry.get("mesh") or {}
         routes = telemetry.get("routes") or {}
         policy = str(connector.get("route_policy") or "auto").upper()
+        route_names = {
+            "lan": "LAN DIRECT",
+            "p2p": "P2P DIRECT",
+            "relay": "VPS RELAY",
+            "unavailable": "НЕТ МАРШРУТА",
+        }
         route_lines = []
         for device in self.registry.list_devices():
             route = routes.get(str(device["id"])) or {}
-            value = str(route.get("route") or "—").upper()
+            raw_value = str(route.get("route") or "unavailable").lower()
+            value = route_names.get(raw_value, raw_value.upper())
             latency = int(route.get("latency_ms") or 0)
             suffix = f" · {latency} мс" if latency > 0 else ""
             route_lines.append(
                 f"{escape(device['display_name'])}: {escape(value)}{suffix}"
             )
         route_text = "\n".join(route_lines) or "Маршрутов ещё нет."
-        mesh_status = (
-            f"{self.icon('success')} В СЕТИ"
-            if bool(mesh.get("online"))
-            else f"{self.icon('info')} НЕ ПОДКЛЮЧЁН"
-        )
+        if bool(mesh.get("conflict")):
+            mesh_status = f"{self.icon('warning')} КОНФЛИКТ · ЧУЖОЙ TAILSCALE"
+        elif bool(mesh.get("online")):
+            mesh_status = f"{self.icon('success')} В СЕТИ"
+        elif bool(mesh.get("installed")):
+            mesh_status = f"{self.icon('timer')} ПОДКЛЮЧАЕТСЯ"
+        else:
+            mesh_status = f"{self.icon('info')} НЕ ПОДКЛЮЧЁН"
         text = (
             f"{self.icon('online' if online else 'offline')} "
             f"{escape(connector.get('name') or 'CONNECTOR').upper()} · "

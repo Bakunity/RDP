@@ -35,6 +35,9 @@ $ReplaceCandidate = Join-Path ([IO.Path]::GetTempPath()) (
 $RepairCandidate = Join-Path ([IO.Path]::GetTempPath()) (
     "HermesRdpInstallSelfHeal-$([Guid]::NewGuid().ToString('N')).ps1"
 )
+$SmartRouteSetupCandidate = Join-Path ([IO.Path]::GetTempPath()) (
+    "BakunityHostSmartRouteInstall-$([Guid]::NewGuid().ToString('N')).ps1"
+)
 
 function Write-ClientRef {
     param([string]$ResolvedSha)
@@ -92,6 +95,40 @@ function Get-NativePowerShellPath {
     return Join-Path $System32 'WindowsPowerShell\v1.0\powershell.exe'
 }
 
+function Invoke-OptionalHostSmartRouteSetup {
+    param([string]$ResolvedSha)
+
+    $SetupUrl = (
+        "https://raw.githubusercontent.com/$Repo/" +
+        "$ResolvedSha/scripts/setup-smart-route-host.ps1"
+    )
+    try {
+        Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri $SetupUrl `
+            -OutFile $SmartRouteSetupCandidate
+        Assert-PowerShellFile -Path $SmartRouteSetupCandidate
+        $NativePowerShell = Get-NativePowerShellPath
+        $Output = & $NativePowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $SmartRouteSetupCandidate `
+            -RepositoryRef $ResolvedSha 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "Host Smart Route setup failed with code $LASTEXITCODE. $($Output.Trim())"
+        }
+        if ($Output.Trim()) { Write-Host $Output.TrimEnd() }
+        Write-Host 'SmartRouteHost: managed'
+        return $true
+    }
+    catch {
+        Write-Warning (
+            'Smart Route Host deferred; core RDP remains healthy. ' +
+            $_.Exception.Message
+        )
+        return $false
+    }
+}
 function Get-ExistingHermesConfig {
     if (
         -not (Test-Path -LiteralPath $ConfigPath) -or
@@ -251,7 +288,6 @@ try {
             Invoke-SameServerSelfHeal `
                 -Config $ExistingConfig `
                 -ResolvedSha $ResolvedSha
-            Write-ClientRef -ResolvedSha $ResolvedSha
             return
         }
     }
@@ -285,13 +321,19 @@ try {
     if (-not (Test-HermesInstallComplete)) {
         throw 'Fresh/REPLACE завершился, но финальные Hermes invariants не подтверждены.'
     }
-    Write-ClientRef -ResolvedSha $ResolvedSha
-    Write-Host "ClientRef: $ResolvedSha"
+    $SmartRouteManaged = Invoke-OptionalHostSmartRouteSetup -ResolvedSha $ResolvedSha
+    if ($SmartRouteManaged) {
+        Write-ClientRef -ResolvedSha $ResolvedSha
+        Write-Host "ClientRef: $ResolvedSha"
+    }
+    else {
+        Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
+    }
     Write-Host 'INSTALL_INVARIANTS=PASS' -ForegroundColor Green
 }
 finally {
     Remove-Item `
-        -LiteralPath $ReplaceCandidate, $RepairCandidate `
+        -LiteralPath $ReplaceCandidate, $RepairCandidate, $SmartRouteSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }

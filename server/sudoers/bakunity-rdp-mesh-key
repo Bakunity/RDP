@@ -1,0 +1,2 @@
+hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/bakunity-rdp-mesh-key host
+hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/bakunity-rdp-mesh-key connector

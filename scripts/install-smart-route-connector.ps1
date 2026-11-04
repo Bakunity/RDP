@@ -19,6 +19,7 @@ $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\BakunityRDP\SmartRoute'
 $WorkerPath = Join-Path $BaseDir 'BakunitySmartRoute.ps1'
 $LauncherPath = Join-Path $BaseDir 'BakunitySmartRouteLaunch.ps1'
+$MeshLibPath = Join-Path $BaseDir 'BakunityMesh.ps1'
 $ConfigPath = Join-Path $BaseDir 'config.json'
 $StatePath = Join-Path $BaseDir 'state.json'
 $ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
@@ -26,6 +27,7 @@ $TaskName = 'Bakunity RDP Smart Route'
 $ShortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Bakunity RDP.lnk'
 $Candidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunitySmartRoute-$([Guid]::NewGuid().ToString('N')).ps1")
 $LauncherCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunitySmartRouteLaunch-$([Guid]::NewGuid().ToString('N')).ps1")
+$MeshCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunityMesh-$([Guid]::NewGuid().ToString('N')).ps1")
 
 function Resolve-RepositorySha {
     param([string]$Ref)
@@ -98,19 +100,23 @@ if ([string]::IsNullOrWhiteSpace($AccessToken)) { throw 'AccessToken is required
 $ResolvedSha = Resolve-RepositorySha -Ref $RepositoryRef
 $WorkerUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunitySmartRoute.ps1"
 $LauncherUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunitySmartRouteLaunch.ps1"
+$MeshUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/client/BakunityMesh.ps1"
 
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 $ExistingTaskXml = if ($ExistingTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }
 $ExistingConfig = if (Test-Path -LiteralPath $ConfigPath) { Get-Content -LiteralPath $ConfigPath -Raw } else { $null }
 $ExistingWorker = if (Test-Path -LiteralPath $WorkerPath) { Get-Content -LiteralPath $WorkerPath -Raw } else { $null }
 $ExistingLauncher = if (Test-Path -LiteralPath $LauncherPath) { Get-Content -LiteralPath $LauncherPath -Raw } else { $null }
+$ExistingMeshLib = if (Test-Path -LiteralPath $MeshLibPath) { Get-Content -LiteralPath $MeshLibPath -Raw } else { $null }
 $ExistingRef = if (Test-Path -LiteralPath $ClientRefPath) { Get-Content -LiteralPath $ClientRefPath -Raw } else { $null }
 
 try {
     Invoke-WebRequest -UseBasicParsing -Uri $WorkerUrl -OutFile $Candidate
     Invoke-WebRequest -UseBasicParsing -Uri $LauncherUrl -OutFile $LauncherCandidate
+    Invoke-WebRequest -UseBasicParsing -Uri $MeshUrl -OutFile $MeshCandidate
     Assert-PowerShellFile -Path $Candidate
     Assert-PowerShellFile -Path $LauncherCandidate
+    Assert-PowerShellFile -Path $MeshCandidate
 
     New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
     Stop-TaskBounded -Name $TaskName
@@ -120,6 +126,8 @@ try {
     Set-SystemAdminAcl -Path $WorkerPath
     Copy-Item -LiteralPath $LauncherCandidate -Destination $LauncherPath -Force
     Set-UserReadableAcl -Path $LauncherPath
+    Copy-Item -LiteralPath $MeshCandidate -Destination $MeshLibPath -Force
+    Set-SystemAdminAcl -Path $MeshLibPath
 
     [ordered]@{
         api_base_url=$ApiBaseUrl
@@ -171,6 +179,10 @@ catch {
             Set-Content -LiteralPath $LauncherPath -Value $ExistingLauncher -Encoding UTF8
             Set-UserReadableAcl -Path $LauncherPath
         } else { Remove-Item -LiteralPath $LauncherPath -Force -ErrorAction SilentlyContinue }
+        if ($null -ne $ExistingMeshLib) {
+            Set-Content -LiteralPath $MeshLibPath -Value $ExistingMeshLib -Encoding UTF8
+            Set-SystemAdminAcl -Path $MeshLibPath
+        } else { Remove-Item -LiteralPath $MeshLibPath -Force -ErrorAction SilentlyContinue }
         if ($null -ne $ExistingConfig) {
             Set-Content -LiteralPath $ConfigPath -Value $ExistingConfig -Encoding UTF8
             Set-SystemAdminAcl -Path $ConfigPath
@@ -190,5 +202,5 @@ catch {
     throw $Failure
 }
 finally {
-    Remove-Item -LiteralPath $Candidate,$LauncherCandidate -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Candidate,$LauncherCandidate,$MeshCandidate -Force -ErrorAction SilentlyContinue
 }
