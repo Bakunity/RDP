@@ -34,6 +34,10 @@ class Config:
     trusted_rdp_certificate_enabled: bool = False
 
     @property
+    def client_ref(self) -> str:
+        return self.client_repository_ref or self.repository_ref
+
+    @property
     def api_base_url(self) -> str:
         return f"https://{self.public_host}:{self.api_port}"
 
