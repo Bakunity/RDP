@@ -16,6 +16,20 @@ from .db import Registry
 from .tunnel import close_tunnel
 
 
+def parse_helper_json(text: str) -> dict:
+    for line in reversed(str(text or "").splitlines()):
+        candidate = line.strip()
+        if not candidate:
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("helper returned no JSON object")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bakunity-rdpctl")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -259,8 +273,8 @@ def main() -> None:
                     print(f"{device['id']}\t{host}\tFAIL {detail[0]}")
                     continue
                 try:
-                    payload = json.loads(completed.stdout)
-                except json.JSONDecodeError:
+                    payload = parse_helper_json(completed.stdout)
+                except ValueError:
                     failures += 1
                     print(f"{device['id']}\t{host}\tFAIL invalid-json")
                     continue
