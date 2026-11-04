@@ -363,6 +363,10 @@ install \
   -m 0644 \
   "$SOURCE_ROOT/server/systemd/hermes-rdp.service" \
   /etc/systemd/system/hermes-rdp.service
+install \
+  -m 0644 \
+  "$SOURCE_ROOT/server/systemd/bakunity-rdp-default.service" \
+  /etc/systemd/system/bakunity-rdp-default.service
 
 if ((MIGRATE == 1)); then
   rm -f /etc/systemd/system/frps.service /usr/local/bin/frps
@@ -372,6 +376,7 @@ fi
 ufw allow "$SSH_PORT/tcp" comment 'Hermes RDP OpenSSH' >/dev/null || true
 ufw allow "$API_PORT/tcp" comment 'Hermes RDP API' >/dev/null || true
 ufw allow "$PORT_START:$PORT_END/tcp" comment 'Hermes RDP devices' >/dev/null || true
+ufw allow "3389/tcp" comment 'Bakunity RDP default device' >/dev/null || true
 
 PYTHONPATH=/opt/hermes-rdp/app \
   python3 -m compileall -q /opt/hermes-rdp/app/hermes_rdp
