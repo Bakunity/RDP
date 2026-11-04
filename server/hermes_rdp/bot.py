@@ -493,7 +493,7 @@ class TelegramBot:
 
         maintenance_capable = bool(telemetry.get("maintenance_capable"))
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        desired_ref = str(self.config.repository_ref or "").lower()
+        desired_ref = str(getattr(self.config, "repository_ref", "") or "").lower()
         if maintenance_capable:
             if client_ref and client_ref == desired_ref:
                 client_status = f"✅ АКТУАЛЕН · {client_ref[:7]}"
@@ -505,7 +505,7 @@ class TelegramBot:
             client_status = "⚪ LEGACY · нужен один ручной Repair"
 
         if (
-            self.config.trusted_rdp_certificate_enabled
+            bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
             and online
             and "certificate_lifecycle_ok" in telemetry
         ):
