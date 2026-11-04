@@ -105,7 +105,6 @@ class ControlStateDashboardTests(unittest.TestCase):
         ):
             self.assertIn(value, text)
         for value in (
-            "ONLINE",
             "OFFLINE",
             "CONNECTED",
             "DISCONNECTED",

@@ -43,6 +43,13 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertIn("do not", bot)
         self.assertIn("suppress repair failures", bot)
 
+    def test_live_telemetry_supports_layered_device_screens(self) -> None:
+        api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'in {"device", "device_details", "device_technical"}',
+            api,
+        )
+
     def test_registry_maintenance_commands_do_not_redefine_access(self) -> None:
         db = (ROOT / "server/hermes_rdp/db.py").read_text(encoding="utf-8")
         self.assertIn('{"on", "off", "restart", "repair", "update"}', db)
@@ -100,7 +107,7 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         ux = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
         bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
 
-        home = ux.split("    def _home(", 1)[1].split("    def _human_status(", 1)[0]
+        home = ux.split("    def _home(", 1)[1].split("    def _product_notice(", 1)[0]
         product = ux.split(
             "    def _device(self, device: dict[str, Any])",
             1,
@@ -111,10 +118,11 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertNotIn("SSH-туннель:", product)
         self.assertNotIn("Клиент:", product)
         self.assertNotIn("Обслуживание:", product)
-        self.assertIn("Подключение работает", ux)
-        self.assertIn("Удалённый доступ включён", ux)
-        self.assertIn("Защищённое подключение настроено", ux)
-        self.assertIn("Система работает нормально", ux)
+        self.assertNotIn("Подключение работает", product)
+        self.assertNotIn("Удалённый доступ включён", product)
+        self.assertNotIn("Система работает нормально", product)
+        self.assertIn("Нет связи с компьютером", ux)
+        self.assertIn("Защищённое подключение требует восстановления", ux)
         self.assertIn("ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ", ux)
         self.assertIn('self.registry.set_setting("screen", "device_technical")', ux)
         self.assertIn('"device_technical"', bot)

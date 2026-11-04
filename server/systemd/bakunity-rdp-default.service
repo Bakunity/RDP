@@ -1,0 +1,20 @@
+[Unit]
+Description=Bakunity RDP default device TCP entrypoint
+After=network-online.target hermes-rdp-sshd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes-rdp
+Group=hermes-rdp
+Environment=PYTHONPATH=/opt/hermes-rdp/app
+ExecStart=/usr/bin/python3 -m hermes_rdp.default_rdp
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
