@@ -38,10 +38,14 @@ class WindowsRdpCertificateRotationTests(unittest.TestCase):
 
         sudoers = (ROOT / "server/sudoers/hermes-rdp-cert-package").read_text(
             encoding="utf-8"
-        ).strip()
-        self.assertEqual(
-            sudoers,
+        ).strip().splitlines()
+        self.assertIn(
             "hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-cert-package",
+            sudoers,
+        )
+        self.assertIn(
+            "hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-device-cert-package *",
+            sudoers,
         )
 
     def test_windows_sync_uses_pinned_authenticated_nonexportable_flow(self) -> None:
@@ -91,7 +95,9 @@ class WindowsRdpCertificateRotationTests(unittest.TestCase):
 
         for marker in (
             "hermes-rdp-cert-package.sh",
+            "hermes-rdp-device-cert-package.sh",
             "/usr/local/sbin/hermes-rdp-cert-package",
+            "/usr/local/sbin/hermes-rdp-device-cert-package",
             "/etc/sudoers.d/hermes-rdp-cert-package",
             "visudo -cf /etc/sudoers.d/hermes-rdp-cert-package",
         ):
@@ -100,8 +106,10 @@ class WindowsRdpCertificateRotationTests(unittest.TestCase):
 
         self.assertIn("TRUSTED_CERT_ENABLED", updater)
         self.assertIn("restore_optional_file /usr/local/sbin/hermes-rdp-cert-package", updater)
+        self.assertIn("restore_optional_file /usr/local/sbin/hermes-rdp-device-cert-package", updater)
         self.assertIn("restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package", updater)
         self.assertIn("/usr/local/sbin/hermes-rdp-cert-package", uninstall)
+        self.assertIn("/usr/local/sbin/hermes-rdp-device-cert-package", uninstall)
         self.assertIn("/etc/sudoers.d/hermes-rdp-cert-package", uninstall)
 
 
