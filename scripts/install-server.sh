@@ -180,6 +180,7 @@ chmod 0755 /usr/local/bin/hermes-rdpctl
 cat > /usr/local/bin/bakunity-rdpctl <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONPATH=/opt/hermes-rdp/app
 exec /usr/bin/python3 -m hermes_rdp.cli "$@"
 EOF
 chmod 0755 /usr/local/bin/bakunity-rdpctl

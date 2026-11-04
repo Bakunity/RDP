@@ -12,6 +12,10 @@ class BakunityCommandAliasTests(unittest.TestCase):
         content = Path("scripts/install-server.sh").read_text(encoding="utf-8")
         self.assertIn("/usr/local/bin/bakunity-rdpctl", content)
         self.assertIn("/usr/local/bin/hermes-rdpctl", content)
+        self.assertGreaterEqual(
+            content.count("export PYTHONPATH=/opt/hermes-rdp/app"),
+            3,
+        )
         self.assertIn('BAKUNITY_RDP_REF:-${HERMES_RDP_REF:-main}', content)
 
     def test_public_cli_has_new_name(self):
