@@ -104,6 +104,8 @@ class SmartRouteMeshTests(unittest.TestCase):
             "0.29.7",
             "CERTBOT_VERSION=",
             'MESH_HOST="mesh.$DEVICE_DOMAIN"',
+            'MESH_BASE_DOMAIN="nodes.$DEVICE_DOMAIN"',
+            "base_domain: $MESH_BASE_DOMAIN",
             "PORT_CONFLICT:",
             "apt-get install -y -qq nginx",
             "install_certbot",
@@ -141,6 +143,10 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertLess(nginx_install_index, nginx_check_index)
         self.assertLess(acme_route_index, certbot_index)
         self.assertGreater(enabled_index, health_index)
+        self.assertNotIn(
+            "base_domain: mesh.$DEVICE_DOMAIN",
+            text,
+        )
 
     def test_controller_sandbox_allows_only_headscale_runtime_write_roots(self) -> None:
         service = (

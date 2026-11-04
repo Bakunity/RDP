@@ -159,6 +159,7 @@ print(domain, str(config["public_host"]).strip())
 PY
 )
 MESH_HOST="mesh.$DEVICE_DOMAIN"
+MESH_BASE_DOMAIN="nodes.$DEVICE_DOMAIN"
 CONTROL_URL="https://$MESH_HOST"
 CGNAT_PREFIX="$(
   python3 - <<'PY'
@@ -338,7 +339,7 @@ policy:
   path: $HEADSCALE_POLICY
 dns:
   magic_dns: false
-  base_domain: mesh.$DEVICE_DOMAIN
+  base_domain: $MESH_BASE_DOMAIN
   override_local_dns: false
   nameservers:
     global: []
@@ -550,6 +551,7 @@ PY
 ROLLBACK_ARMED=0
 echo "SMART_ROUTE_MESH=PASS"
 echo "CONTROL_URL=$CONTROL_URL"
+echo "MESH_BASE_DOMAIN=$MESH_BASE_DOMAIN"
 echo "HEADSCALE_VERSION=$HEADSCALE_VERSION"
 echo "HEADSCALE=$(systemctl is-active headscale.service)"
 echo "STUN=udp/3478"
