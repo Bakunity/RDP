@@ -122,7 +122,35 @@ function Cleanup-FreshNamedAccessRuntime {
             if ($State -and $State.mappings) {
                 foreach ($Property in $State.mappings.PSObject.Properties) {
                     $Address = [string]$Property.Value.loopback
-                    if ($Address -match '^127\.77\.\d{1,3}\.\d{1,3}$ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
+                    if ($Address -match '^127\.77\.\d{1,3}\.\d{1,3}$') {
+                        & $Netsh interface portproxy delete v4tov4 listenaddress=$Address listenport=3389 protocol=tcp *> $null
+                    }
+                }
+            }
+        }
+        catch {
+        }
+    }
+
+    if (Test-Path -LiteralPath $HostsPath) {
+        try {
+            $Original = [IO.File]::ReadAllText($HostsPath)
+            $Clean = Remove-ManagedHostsBlock -Text $Original
+            if ($Clean -ne $Original) {
+                [IO.File]::WriteAllText(
+                    $HostsPath,
+                    $Clean.TrimEnd([char]13, [char]10) + [Environment]::NewLine,
+                    (New-Object Text.UTF8Encoding($false))
+                )
+                & $Ipconfig /flushdns | Out-Null
+            }
+        }
+        catch {
+        }
+    }
+}
+
+$ApiBaseUrl = $ApiBaseUrl.TrimEnd('/')
 if ($ApiBaseUrl -notmatch '^https://') {
     throw 'ApiBaseUrl must use HTTPS.'
 }
