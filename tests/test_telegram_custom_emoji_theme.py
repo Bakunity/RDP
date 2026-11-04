@@ -155,8 +155,13 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
                 "tgiosicons": "tgiosicons",
             },
         )
-        self.assertEqual(invalidated, 0)
+        self.assertGreater(invalidated, 0)
         self.assertEqual(theme.icons["computer"], before)
+        self.assertEqual(
+            theme.icons["computer"].custom_emoji_id,
+            ICONS["computer"].custom_emoji_id,
+        )
+        self.assertEqual(theme.icons["computer"].pack, "tgmacicons")
 
     def test_all_pinned_ids_are_numeric_and_from_approved_packs(self) -> None:
         for spec in ICONS.values():
