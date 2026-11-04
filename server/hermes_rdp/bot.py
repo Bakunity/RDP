@@ -563,16 +563,65 @@ class TelegramBot:
 
         maintenance_capable = bool(telemetry.get("maintenance_capable"))
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        desired_ref = str(getattr(self.config, "repository_ref", "") or "").lower()
+        desired_ref = str(
+            getattr(self.config, "client_repository_ref", "") or ""
+        ).lower()
+
+        maintenance = telemetry.get("maintenance_status") or {}
+        maintenance_state = str(maintenance.get("state") or "").lower()
+        maintenance_action = str(maintenance.get("action") or "").lower()
+        maintenance_ref = str(maintenance.get("repository_ref") or "").lower()
+        maintenance_message = str(maintenance.get("message") or "").strip()
+
+        # A maintenance result for an older target is historical noise once
+        # the server has moved to a different desired client ref.
+        maintenance_relevant = bool(
+            desired_ref
+            and maintenance_ref
+            and maintenance_ref == desired_ref
+        )
+        if not maintenance_relevant:
+            maintenance_state = ""
+            maintenance_action = ""
+            maintenance_message = ""
+
+        maintenance_names = {
+            "update": "обновление",
+            "repair": "восстановление",
+        }
+        maintenance_name = maintenance_names.get(
+            maintenance_action,
+            "обслуживание",
+        )
+
         if maintenance_capable:
-            if client_ref and client_ref == desired_ref:
-                client_status = f"{self.icon('success')} АКТУАЛЕН · {client_ref[:7]}"
+            if client_ref and desired_ref and client_ref == desired_ref:
+                client_status = (
+                    f"{self.icon('success')} АКТУАЛЕН · {client_ref[:7]}"
+                )
             elif client_ref and desired_ref:
-                client_status = f"{self.icon('upload')} ОБНОВЛЕНИЕ · {client_ref[:7]} → {desired_ref[:7]}"
+                if maintenance_state == "running" and maintenance_action == "update":
+                    client_status = (
+                        f"{self.icon('timer')} ОБНОВЛЯЕТСЯ · "
+                        f"{client_ref[:7]} → {desired_ref[:7]}"
+                    )
+                elif maintenance_state == "failed" and maintenance_action == "update":
+                    client_status = (
+                        f"{self.icon('cancel')} ОШИБКА ОБНОВЛЕНИЯ · "
+                        f"{client_ref[:7]} → {desired_ref[:7]}"
+                    )
+                else:
+                    client_status = (
+                        f"{self.icon('upload')} ОЖИДАЕТ ОБНОВЛЕНИЯ · "
+                        f"{client_ref[:7]} → {desired_ref[:7]}"
+                    )
             else:
-                client_status = f"{self.icon('warning')} REF НЕИЗВЕСТЕН"
+                client_status = f"{self.icon('warning')} ВЕРСИЯ НЕИЗВЕСТНА"
         else:
-            client_status = f"{self.icon('info')} LEGACY · нужен один ручной Repair"
+            client_status = (
+                f"{self.icon('info')} СТАРЫЙ КЛИЕНТ · "
+                "нужно одно ручное восстановление"
+            )
 
         if (
             bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
@@ -580,24 +629,34 @@ class TelegramBot:
             and "certificate_lifecycle_ok" in telemetry
         ):
             certificate_status = (
-                f"{self.icon('shield')} MANAGED"
+                f"{self.icon('shield')} УПРАВЛЯЕТСЯ"
                 if bool(telemetry.get("certificate_lifecycle_ok"))
-                else f"{self.icon('warning')} SELF-HEAL НУЖЕН"
+                else f"{self.icon('warning')} НУЖНО ВОССТАНОВЛЕНИЕ"
             )
         else:
             certificate_status = f"{self.icon('info')} НЕИЗВЕСТНО"
 
-        maintenance = telemetry.get("maintenance_status") or {}
-        maintenance_state = str(maintenance.get("state") or "")
-        maintenance_action = str(maintenance.get("action") or "")
         if maintenance_state == "running":
-            maintenance_line = f"{self.icon('timer')} {maintenance_action.upper()}"
+            maintenance_line = (
+                f"{self.icon('timer')} ИДЁТ {maintenance_name.upper()}"
+            )
         elif maintenance_state == "failed":
-            maintenance_line = f"{self.icon('cancel')} {maintenance_action.upper()}"
+            maintenance_line = (
+                f"{self.icon('cancel')} ОШИБКА · {maintenance_name.upper()}"
+            )
         elif maintenance_state == "completed" and maintenance.get("ok"):
-            maintenance_line = f"{self.icon('success')} {maintenance_action.upper()}"
+            maintenance_line = (
+                f"{self.icon('success')} ЗАВЕРШЕНО · {maintenance_name.upper()}"
+            )
         else:
             maintenance_line = "—"
+
+        maintenance_error_line = ""
+        if maintenance_state == "failed" and maintenance_message:
+            maintenance_error_line = (
+                f"Причина обслуживания: "
+                f"{escape(maintenance_message[:220])}\n"
+            )
 
         resource_line = (
             f"Ресурсы: {resource_age} сек. назад\n"
@@ -628,7 +687,8 @@ class TelegramBot:
             f"Агент: {self.icon('online' if online else 'offline')} {'В СЕТИ' if online else 'НЕ В СЕТИ'}\n"
             f"Клиент: {client_status}\n"
             f"Сертификат: {certificate_status}\n"
-            f"Maintenance: {maintenance_line}\n"
+            f"Обслуживание: {maintenance_line}\n"
+            f"{maintenance_error_line}"
             f"RDP-доступ (цель): {self.icon('access_on' if desired_access else 'access_off')} {'ВКЛЮЧЕН' if desired_access else 'ВЫКЛЮЧЕН'}\n"
             f"Агент применил: {applied_access}\n"
             f"SSH-туннель: {ssh_status}\n"
