@@ -74,6 +74,23 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
         self.assertIn("ROLLBACK=PASS", text)
         self.assertIn("ROLLBACK=FAIL", text)
 
+    def test_update_server_persists_immutable_source_snapshot(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        self.assertIn("rm -rf /opt/hermes-rdp/source", text)
+        self.assertIn("cp -a \"$ROOT\"/. /opt/hermes-rdp/source/", text)
+        self.assertIn(
+            "test -f /opt/hermes-rdp/source/scripts/setup-native-transport.sh",
+            text,
+        )
+        self.assertIn(
+            "test -f /opt/hermes-rdp/source/native-transport/go.mod",
+            text,
+        )
+        self.assertLess(
+            text.index("ROLLBACK_ARMED=1"),
+            text.index("rm -rf /opt/hermes-rdp/source"),
+        )
+
     def test_update_server_installs_cli_aliases_transactionally(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         for wrapper in (
