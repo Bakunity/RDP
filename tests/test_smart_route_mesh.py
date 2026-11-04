@@ -102,7 +102,13 @@ class SmartRouteMeshTests(unittest.TestCase):
         for marker in (
             "HEADSCALE_VERSION=",
             "0.29.7",
+            "CERTBOT_VERSION=",
             'MESH_HOST="mesh.$DEVICE_DOMAIN"',
+            "PORT_CONFLICT:",
+            "apt-get install -y -qq nginx",
+            "install_certbot",
+            "ACME_ROUTE_NOT_READY:",
+            'location ^~ /.well-known/acme-challenge/',
             "DNS_NOT_READY:",
             "headscale configtest",
             'stun_listen_addr: "0.0.0.0:3478"',
@@ -120,10 +126,20 @@ class SmartRouteMeshTests(unittest.TestCase):
         ):
             self.assertIn(marker, text)
 
+        nginx_install_index = text.index("apt-get install -y -qq nginx")
+        nginx_check_index = text.index(
+            "command -v nginx >/dev/null 2>&1 || {",
+        )
+        certbot_index = text.index("/usr/local/bin/certbot certonly")
+        acme_route_index = text.index(
+            'location ^~ /.well-known/acme-challenge/'
+        )
         enabled_index = text.index('("smart_route_enabled", "1")')
         health_index = text.index(
             'curl -fsS --max-time 3 "$CONTROL_URL/health"'
         )
+        self.assertLess(nginx_install_index, nginx_check_index)
+        self.assertLess(acme_route_index, certbot_index)
         self.assertGreater(enabled_index, health_index)
 
     def test_controller_sandbox_allows_only_headscale_runtime_write_roots(self) -> None:
