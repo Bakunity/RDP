@@ -137,6 +137,26 @@ class NativeTransportTests(unittest.TestCase):
         ):
             self.assertIn(marker, service)
 
+    def test_vps_native_build_avoids_tmpfs_and_preserves_release_source(self) -> None:
+        setup = (
+            ROOT / "scripts/setup-native-transport.sh"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            'BUILD_ROOT="${BAKUNITY_TRANSPORT_BUILD_ROOT:-/var/cache/bakunity-transport}"',
+            'WORK="$(mktemp -d -p "$BUILD_ROOT" build.XXXXXXXX)"',
+            'export TMPDIR="$WORK/tmp"',
+            'export GOTMPDIR="$WORK/tmp"',
+            'export GOMODCACHE="$WORK/gomod"',
+            'export GOCACHE="$WORK/gocache"',
+            'export GOFLAGS="-p=1"',
+            'cp -a "$ROOT/native-transport"/. "$WORK/module/"',
+            "BUILD_DISK_NOT_READY:",
+            "BUILD_INODES_NOT_READY:",
+        ):
+            self.assertIn(marker, setup)
+        self.assertNotIn('cd "$ROOT/native-transport"\n', setup)
+        self.assertNotIn('WORK="$(mktemp -d)"', setup)
+
     def test_windows_native_transport_uses_immutable_source_and_system_identity(self) -> None:
         lib = (
             ROOT / "client/BakunityNativeTransport.ps1"
