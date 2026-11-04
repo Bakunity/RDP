@@ -21,6 +21,7 @@ Add-Type -AssemblyName System.Net.Http
 $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
+$ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $ApiBase = "https://${Server}:${ApiPort}"
 $StartupTimeoutSeconds = 75
 $StartupStableSeconds = 20
@@ -702,6 +703,7 @@ try {
     $Config |
         ConvertTo-Json -Depth 5 |
         Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+    Set-Content -LiteralPath $ClientRefPath -Value $ResolvedSha -Encoding ASCII
 
     Set-ItemProperty `
         -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
@@ -745,6 +747,7 @@ try {
 
     foreach ($Secret in @(
         $ConfigPath,
+        $ClientRefPath,
         $SshKeyPath,
         $KnownHostsPath
     )) {
