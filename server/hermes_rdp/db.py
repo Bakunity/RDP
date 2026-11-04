@@ -408,7 +408,7 @@ class Registry:
         return self.pending_command(device_id)
 
     def queue_command(self, device_id: str, action: str) -> int:
-        if action not in {"on", "off", "restart"}:
+        if action not in {"on", "off", "restart", "repair", "update"}:
             raise ValueError("unsupported command")
         self.expire_stale_commands(
             self.command_timeout_seconds,
@@ -418,7 +418,7 @@ class Registry:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT command_seq,pending_command FROM devices "
+                "SELECT command_seq,pending_command,enabled FROM devices "
                 "WHERE id=? AND revoked=0",
                 (device_id,),
             ).fetchone()
@@ -427,7 +427,13 @@ class Registry:
             if row["pending_command"]:
                 raise ValueError("previous command is still pending")
             seq = int(row["command_seq"]) + 1
-            desired_enabled = 0 if action == "off" else 1
+            desired_enabled = (
+                0
+                if action == "off"
+                else 1
+                if action in {"on", "restart"}
+                else int(row["enabled"])
+            )
             conn.execute(
                 "UPDATE devices SET enabled=?,command_seq=?,pending_command=?,"
                 "pending_created_at=?,updated_at=? WHERE id=? AND revoked=0",
