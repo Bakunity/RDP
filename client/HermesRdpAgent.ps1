@@ -828,11 +828,34 @@ function Get-SmartRouteTelemetry {
             if ($LASTEXITCODE -eq 0 -and $Raw.Count -gt 0) {
                 $Status = ($Raw -join [Environment]::NewLine) | ConvertFrom-Json
                 $MeshOnline = ([string]$Status.BackendState -eq 'Running')
+                $MeshCandidates = @(
+                    $Status.TailscaleIPs |
+                        Where-Object {
+                            ([string]$_) -match '^\d+\.\d+\.\d+\.\d+$'
+                        }
+                )
                 $MeshIPv4 = [string](
-                    @(
-                        $Status.TailscaleIPs |
-                            Where-Object {
-                                [string]$_ -match '^\d+\.\d+\.\d+\.\d+    $Os = Get-CimInstance Win32_OperatingSystem
+                    $MeshCandidates |
+                        Select-Object -First 1
+                )
+            }
+        }
+        catch {
+            $MeshOnline = $false
+            $MeshIPv4 = ''
+        }
+    }
+
+    return [ordered]@{
+        lan_ipv4 = @($Lan)
+        mesh_installed = [bool]$MeshInstalled
+        mesh_online = [bool]$MeshOnline
+        mesh_ipv4 = [string]$MeshIPv4
+    }
+}
+
+function Get-SlowTelemetry {
+    $Os = Get-CimInstance Win32_OperatingSystem
     $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
     $RamTotal = [int64]$Os.TotalVisibleMemorySize * 1KB
     $RamFree = [int64]$Os.FreePhysicalMemory * 1KB
