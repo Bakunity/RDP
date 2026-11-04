@@ -420,7 +420,7 @@ if [[ -x "$SOURCE_ROOT/scripts/setup-trusted-rdp-cert.sh" ]]; then
     TRUSTED_STATUS="active"
     pass "Trusted RDP certificate lifecycle"
   else
-    warn "Trusted RDP certificate сейчас недоступен. Основной Hermes уже установлен и работает."
+    warn "Trusted RDP certificate сейчас недоступен. Основной Bakunity RDP уже установлен и работает."
     warn "Обычно причина — закрытый/занятый TCP 80 или внешний firewall. После исправления TLS можно включить отдельно."
   fi
 fi
