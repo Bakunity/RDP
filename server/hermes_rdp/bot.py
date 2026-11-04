@@ -399,7 +399,7 @@ class TelegramBot:
         devices = self.registry.list_devices()
         online = sum(1 for device in devices if self._online(device))
         text = (
-            "🖥 BAKUNITY RDP · КОМПЬЮТЕРЫ\n\n"
+            f"{self.icon('computer')} BAKUNITY RDP · КОМПЬЮТЕРЫ\n\n"
             f"Онлайн: {online} из {len(devices)}\n"
             f"OpenSSH-туннели: порт {self.config.ssh_bind_port}\n"
             f"Диапазон RDP: {self.config.port_start}–{self.config.port_end}\n"
@@ -407,17 +407,17 @@ class TelegramBot:
         )
         rows = []
         for device in devices:
-            icon = "🟢" if self._online(device) else "🔴"
             rows.append(
                 [
-                    {
-                        "text": f"{icon} {device['display_name']} · :{device['rdp_port']}",
-                        "callback_data": f"device:{device['id']}",
-                    }
+                    self.button(
+                        "success" if self._online(device) else "cancel",
+                        f"{device['display_name']} · :{device['rdp_port']}",
+                        f"device:{device['id']}",
+                    )
                 ]
             )
-        rows.append([{"text": "➕ ДОБАВИТЬ ПК", "callback_data": "add"}])
-        rows.append([{"text": "🔄 ОБНОВИТЬ", "callback_data": "refresh"}])
+        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
+        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
         return text, {"inline_keyboard": rows}
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
@@ -434,7 +434,7 @@ class TelegramBot:
             "& ([scriptblock]::Create($s)) @p"
         )
         text = (
-            "➕ ДОБАВЛЕНИЕ WINDOWS-ПК\n\n"
+            f"{self.icon('add')} ДОБАВЛЕНИЕ WINDOWS-ПК\n\n"
             f"Код: {code}\n"
             f"Действует: {self.config.pair_ttl_seconds // 60} минут\n\n"
             "1. Открой PowerShell от администратора на новом ПК.\n"
@@ -442,7 +442,7 @@ class TelegramBot:
             "3. Установщик спросит удобное название компьютера.\n\n"
             f"<pre><code>{html.escape(command)}</code></pre>"
         )
-        keyboard = {"inline_keyboard": [[{"text": "⬅️ К СПИСКУ", "callback_data": "home"}]]}
+        keyboard = {"inline_keyboard": [[self.button("back", "К СПИСКУ", "home")]]}
         return text, keyboard
 
     def _device(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -493,11 +493,15 @@ class TelegramBot:
 
         desired_access = bool(device.get("enabled", True))
         if online and "access_enabled" in telemetry:
-            applied_access = "🟢 ВКЛЮЧЕН" if bool(telemetry["access_enabled"]) else "⚪ ВЫКЛЮЧЕН"
+            applied_access = (
+                f"{self.icon('success')} ВКЛЮЧЕН"
+                if bool(telemetry["access_enabled"])
+                else f"{self.icon('access_off')} ВЫКЛЮЧЕН"
+            )
         else:
-            applied_access = "⚪ НЕИЗВЕСТНО"
+            applied_access = f"{self.icon('info')} НЕИЗВЕСТНО"
 
-        ssh_status = "⚪ НЕИЗВЕСТНО"
+        ssh_status = f"{self.icon('info')} НЕИЗВЕСТНО"
         if online and "ssh_tunnel_running" in telemetry and "ssh_process_count" in telemetry:
             try:
                 ssh_process_count = int(telemetry.get("ssh_process_count") or 0)
@@ -505,18 +509,22 @@ class TelegramBot:
                 ssh_process_count = -1
             ssh_running = bool(telemetry.get("ssh_tunnel_running"))
             if ssh_process_count > 1:
-                ssh_status = f"🟠 ДУБЛИ ({ssh_process_count})"
+                ssh_status = f"{self.icon('warning')} ДУБЛИ ({ssh_process_count})"
             elif ssh_running and ssh_process_count == 1:
-                ssh_status = "🟢 ПОДКЛЮЧЕН"
+                ssh_status = f"{self.icon('success')} ПОДКЛЮЧЕН"
             elif not ssh_running and ssh_process_count == 0:
-                ssh_status = "⚪ ОТКЛЮЧЕН"
+                ssh_status = f"{self.icon('access_off')} ОТКЛЮЧЕН"
             else:
-                ssh_status = "🟠 НЕСООТВЕТСТВИЕ"
+                ssh_status = f"{self.icon('warning')} НЕСООТВЕТСТВИЕ"
 
         if online and "endpoint_available" in telemetry:
-            endpoint_status = "🟢 ОТКРЫТ" if bool(telemetry["endpoint_available"]) else "⚪ ЗАКРЫТ"
+            endpoint_status = (
+                f"{self.icon('success')} ОТКРЫТ"
+                if bool(telemetry["endpoint_available"])
+                else f"{self.icon('access_off')} ЗАКРЫТ"
+            )
         else:
-            endpoint_status = "⚪ НЕИЗВЕСТНО"
+            endpoint_status = f"{self.icon('info')} НЕИЗВЕСТНО"
 
         if online and "rdp_hermes_connections" in telemetry:
             rdp_hermes_connections = str(
@@ -550,9 +558,9 @@ class TelegramBot:
             "update": "обновление клиента",
         }
         if pending_action:
-            command_line = "⏳ Команда: " + action_names.get(pending_action, pending_action) + "…"
+            command_line = f"{self.icon('timer')} Команда: " + action_names.get(pending_action, pending_action) + "…"
         elif last_result:
-            result_icon = "✅" if last_result.get("ok") else "❌"
+            result_icon = self.icon("success" if last_result.get("ok") else "cancel")
             result_action = action_names.get(
                 str(last_result.get("action") or ""),
                 "последняя команда",
@@ -568,13 +576,13 @@ class TelegramBot:
         desired_ref = str(getattr(self.config, "repository_ref", "") or "").lower()
         if maintenance_capable:
             if client_ref and client_ref == desired_ref:
-                client_status = f"✅ АКТУАЛЕН · {client_ref[:7]}"
+                client_status = f"{self.icon('success')} АКТУАЛЕН · {client_ref[:7]}"
             elif client_ref and desired_ref:
-                client_status = f"⬆️ ОБНОВЛЕНИЕ · {client_ref[:7]} → {desired_ref[:7]}"
+                client_status = f"{self.icon('upload')} ОБНОВЛЕНИЕ · {client_ref[:7]} → {desired_ref[:7]}"
             else:
-                client_status = "🟠 REF НЕИЗВЕСТЕН"
+                client_status = f"{self.icon('warning')} REF НЕИЗВЕСТЕН"
         else:
-            client_status = "⚪ LEGACY · нужен один ручной Repair"
+            client_status = f"{self.icon('info')} LEGACY · нужен один ручной Repair"
 
         if (
             bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
@@ -582,22 +590,22 @@ class TelegramBot:
             and "certificate_lifecycle_ok" in telemetry
         ):
             certificate_status = (
-                "✅ MANAGED"
+                f"{self.icon('shield')} MANAGED"
                 if bool(telemetry.get("certificate_lifecycle_ok"))
-                else "🟠 SELF-HEAL НУЖЕН"
+                else f"{self.icon('warning')} SELF-HEAL НУЖЕН"
             )
         else:
-            certificate_status = "⚪ НЕИЗВЕСТНО"
+            certificate_status = f"{self.icon('info')} НЕИЗВЕСТНО"
 
         maintenance = telemetry.get("maintenance_status") or {}
         maintenance_state = str(maintenance.get("state") or "")
         maintenance_action = str(maintenance.get("action") or "")
         if maintenance_state == "running":
-            maintenance_line = f"⏳ {maintenance_action.upper()}"
+            maintenance_line = f"{self.icon('timer')} {maintenance_action.upper()}"
         elif maintenance_state == "failed":
-            maintenance_line = f"❌ {maintenance_action.upper()}"
+            maintenance_line = f"{self.icon('cancel')} {maintenance_action.upper()}"
         elif maintenance_state == "completed" and maintenance.get("ok"):
-            maintenance_line = f"✅ {maintenance_action.upper()}"
+            maintenance_line = f"{self.icon('success')} {maintenance_action.upper()}"
         else:
             maintenance_line = "—"
 
@@ -609,7 +617,7 @@ class TelegramBot:
         process_body = "\n".join(process_lines) if process_lines else "—"
 
         text = (
-            f"{'🟢' if online else '🔴'} {escape(device['display_name']).upper()} · "
+            f"{self.icon('success' if online else 'cancel')} {escape(device['display_name']).upper()} · "
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
             f"Компьютер: {escape(device['machine_name'])}\n"
             f"Система: {escape(telemetry.get('os', '—'))}\n"
@@ -623,25 +631,25 @@ class TelegramBot:
             f"Диск C: {disk:.1f}%\n{bar(disk)}\n"
             f"{format_bytes(telemetry.get('disk_used_bytes'))} / {format_bytes(telemetry.get('disk_total_bytes'))}\n\n"
             "Сеть после запуска Windows\n"
-            f"⬇️ Получено: {format_bytes(telemetry.get('network_received_bytes'))}\n"
-            f"⬆️ Отправлено: {format_bytes(telemetry.get('network_sent_bytes'))}\n"
+            f"{self.icon('download')} Получено: {format_bytes(telemetry.get('network_received_bytes'))}\n"
+            f"{self.icon('upload')} Отправлено: {format_bytes(telemetry.get('network_sent_bytes'))}\n"
             f"Маршрут: {escape(telemetry.get('route', '—'))}\n\n"
             "СОСТОЯНИЕ\n"
-            f"Агент: {'🟢 В СЕТИ' if online else '🔴 НЕ В СЕТИ'}\n"
+            f"Агент: {self.icon('success' if online else 'cancel')} {'В СЕТИ' if online else 'НЕ В СЕТИ'}\n"
             f"Клиент: {client_status}\n"
             f"Сертификат: {certificate_status}\n"
             f"Maintenance: {maintenance_line}\n"
-            f"RDP-доступ (цель): {'🟢 ВКЛЮЧЕН' if desired_access else '⚪ ВЫКЛЮЧЕН'}\n"
+            f"RDP-доступ (цель): {self.icon('access_on' if desired_access else 'access_off')} {'ВКЛЮЧЕН' if desired_access else 'ВЫКЛЮЧЕН'}\n"
             f"Агент применил: {applied_access}\n"
             f"SSH-туннель: {ssh_status}\n"
             f"Публичный RDP: {endpoint_status}\n"
-            f"🌐 RDP через Bakunity: {rdp_hermes_connections}\n"
-            f"🏠 RDP напрямую (LAN/VPN): {rdp_direct_connections}\n"
+            f"{self.icon('globe')} RDP через Bakunity: {rdp_hermes_connections}\n"
+            f"{self.icon('home')} RDP напрямую (LAN/VPN): {rdp_direct_connections}\n"
             f"{rdp_other_line}"
             f"{command_line}\n"
             f"Сессии Windows: {escape(', '.join(sessions) or 'нет')}\n"
             f"Аптайм Windows: {format_duration(telemetry.get('uptime_seconds'))}\n\n"
-            "🔝 Процессы\n"
+            f"{self.icon('list')} Процессы\n"
             f"{process_status}\n"
             f"{process_body}\n\n"
             f"Обновлено: {datetime.now().strftime('%H:%M:%S')}"
@@ -649,42 +657,59 @@ class TelegramBot:
 
         if pending_action:
             control_rows = [
-                [{"text": "⏳ КОМАНДА ВЫПОЛНЯЕТСЯ", "callback_data": "refresh"}]
+                [self.button("timer", "КОМАНДА ВЫПОЛНЯЕТСЯ", "refresh")]
             ]
         elif desired_access:
             control_rows = [
                 [
-                    {
-                        "text": "🔴 ВЫКЛЮЧИТЬ ДОСТУП",
-                        "callback_data": f"cmd:off:{device['id']}",
-                    }
+                    self.button(
+                        "access_off",
+                        "ВЫКЛЮЧИТЬ ДОСТУП",
+                        f"cmd:off:{device['id']}",
+                        style="danger",
+                    )
                 ],
                 [
-                    {
-                        "text": "♻️ ПЕРЕЗАПУСК",
-                        "callback_data": f"cmd:restart:{device['id']}",
-                    }
+                    self.button(
+                        "repeat",
+                        "ПЕРЕЗАПУСК",
+                        f"cmd:restart:{device['id']}",
+                    )
                 ],
             ]
         else:
             control_rows = [[
-                {"text": "🟢 ВКЛЮЧИТЬ ДОСТУП", "callback_data": f"cmd:on:{device['id']}"},
+                self.button(
+                    "access_on",
+                    "ВКЛЮЧИТЬ ДОСТУП",
+                    f"cmd:on:{device['id']}",
+                    style="success",
+                ),
             ]]
 
         live_text = (
-            f"⏸ СТОП · {live_remaining}с"
+            f"СТОП · {live_remaining}с"
             if live_active
-            else "▶️ НАБЛЮДАТЬ 60с"
+            else "НАБЛЮДАТЬ 60с"
         )
         keyboard = {
             "inline_keyboard": control_rows + [
                 [
-                    {"text": "🔄 ОБНОВИТЬ", "callback_data": "refresh"},
-                    {"text": live_text, "callback_data": "live"},
+                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button(
+                        "watch_off" if live_active else "watch",
+                        live_text,
+                        "live",
+                    ),
                 ],
                 [
-                    {"text": "🗑 УДАЛИТЬ", "callback_data": f"delete:{device['id']}"},
-                    {"text": "⬅️ К СПИСКУ", "callback_data": "home"},
+                    self.button(
+                        "delete",
+                        "УДАЛИТЬ",
+                        f"delete:{device['id']}",
+                        style="danger",
+                    ),
+                    self.button("back", "К СПИСКУ", "home"),
                 ],
             ]
         }
@@ -692,7 +717,7 @@ class TelegramBot:
 
     def _delete(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         text = (
-            "⚠️ УДАЛЕНИЕ УСТРОЙСТВА\n\n"
+            f"{self.icon('warning')} УДАЛЕНИЕ УСТРОЙСТВА\n\n"
             f"Компьютер: {escape(device['display_name'])}\n"
             f"RDP: {self.config.public_host}:{device['rdp_port']}\n\n"
             "API-token и SSH-ключ будут отозваны, а RDP-порт освобождён. "
@@ -701,8 +726,17 @@ class TelegramBot:
         keyboard = {
             "inline_keyboard": [
                 [
-                    {"text": "✅ УДАЛИТЬ", "callback_data": f"delete_yes:{device['id']}"},
-                    {"text": "❌ ОТМЕНА", "callback_data": f"device:{device['id']}"},
+                    self.button(
+                        "delete",
+                        "УДАЛИТЬ",
+                        f"delete_yes:{device['id']}",
+                        style="danger",
+                    ),
+                    self.button(
+                        "cancel",
+                        "ОТМЕНА",
+                        f"device:{device['id']}",
+                    ),
                 ]
             ]
         }
