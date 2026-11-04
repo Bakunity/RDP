@@ -101,6 +101,13 @@ class TelegramBot:
                 self._emoji_theme().learn_pack(pack_name, sticker_set)
             except Exception as exc:
                 LOG.debug("custom emoji pack %s unavailable: %s", pack_name, exc)
+        theme = self._emoji_theme()
+        LOG.info(
+            "Telegram emoji theme resolved %s/%s icons from packs: %s",
+            theme.resolved_count(),
+            len(theme.icons),
+            ", ".join(theme.resolved_packs()) or "none",
+        )
 
     def _emoji_theme(self) -> TelegramEmojiTheme:
         theme = getattr(self, "emoji", None)
@@ -424,7 +431,7 @@ class TelegramBot:
                 ]
             )
         rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
-        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
+        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh", style="primary")])
         return text, {"inline_keyboard": rows}
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
@@ -702,7 +709,7 @@ class TelegramBot:
         keyboard = {
             "inline_keyboard": control_rows + [
                 [
-                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("refresh", "ОБНОВИТЬ", "refresh", style="primary"),
                     self.button(
                         "watch_off" if live_active else "watch",
                         live_text,
