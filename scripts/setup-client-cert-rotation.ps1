@@ -10,6 +10,10 @@ $TaskName = 'Hermes RDP Certificate Rotation'
 $ConfigPath = Join-Path $BaseDir 'device.json'
 $WorkerPath = Join-Path $BaseDir 'HermesRdpCertRotation.ps1'
 $SyncPath = Join-Path $BaseDir 'sync-rdp-certificate.ps1'
+$OriginPath = Join-Path $BaseDir 'rdp-certificate-origin.json'
+$LegacyBackupPath = Join-Path $BaseDir 'rdp-certificate-backup.json'
+$RdpNamespace = 'root/cimv2/TerminalServices'
+$RdpFilter = "TerminalName='RDP-tcp'"
 $WorkerCandidate = Join-Path ([IO.Path]::GetTempPath()) (
     "HermesRdpCertRotation-$([Guid]::NewGuid().ToString('N')).ps1"
 )
@@ -60,6 +64,81 @@ function Set-SystemScriptAcl {
         'O:SYG:SYD:P(A;;FA;;;SY)(A;;FA;;;BA)'
     )
     Set-Acl -LiteralPath $Path -AclObject $Acl
+}
+
+function Read-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    try {
+        return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        return $null
+    }
+}
+
+function Normalize-Thumbprint {
+    param([string]$Value)
+    return (($Value -replace '[^0-9A-Fa-f]', '').ToUpperInvariant())
+}
+
+function Get-RdpSetting {
+    return Get-CimInstance `
+        -Namespace $RdpNamespace `
+        -ClassName Win32_TSGeneralSetting `
+        -Filter $RdpFilter
+}
+
+function Initialize-RdpOriginSnapshot {
+    $Existing = Read-JsonFile -Path $OriginPath
+    if ($Existing) {
+        $ExistingThumbprint = Normalize-Thumbprint -Value ([string]$Existing.original_thumbprint)
+        $ExistingType = [int]$Existing.original_hash_type
+        if ($ExistingThumbprint.Length -ne 40 -or $ExistingType -notin @(1, 3)) {
+            throw 'Сохранённый RDP origin snapshot повреждён.'
+        }
+        return 'PRESERVED'
+    }
+
+    $Source = 'CURRENT_LISTENER'
+    $OriginalThumbprint = ''
+    $OriginalType = 0
+
+    $Legacy = Read-JsonFile -Path $LegacyBackupPath
+    if ($Legacy) {
+        $LegacyThumbprint = Normalize-Thumbprint -Value ([string]$Legacy.previous_thumbprint)
+        $LegacyType = [int]$Legacy.previous_hash_type
+        if ($LegacyThumbprint.Length -eq 40 -and $LegacyType -in @(1, 3)) {
+            $OriginalThumbprint = $LegacyThumbprint
+            $OriginalType = $LegacyType
+            $Source = 'LEGACY_BACKUP'
+        }
+    }
+
+    if (-not $OriginalThumbprint) {
+        $Current = Get-RdpSetting
+        $OriginalThumbprint = Normalize-Thumbprint -Value ([string]$Current.SSLCertificateSHA1Hash)
+        $OriginalType = [int]$Current.SSLCertificateSHA1HashType
+    }
+
+    if ($OriginalThumbprint.Length -ne 40 -or $OriginalType -notin @(1, 3)) {
+        throw 'Не удалось сохранить исходное состояние RDP certificate binding.'
+    }
+
+    $Temp = "$OriginPath.tmp"
+    [ordered]@{
+        captured_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        original_thumbprint = $OriginalThumbprint
+        original_hash_type = $OriginalType
+        source = $Source
+    } |
+        ConvertTo-Json -Depth 4 |
+        Set-Content -LiteralPath $Temp -Encoding UTF8
+    Move-Item -LiteralPath $Temp -Destination $OriginPath -Force
+    Set-SystemScriptAcl -Path $OriginPath
+    return $Source
 }
 
 function Get-NativePowerShellPath {
@@ -193,6 +272,8 @@ try {
     Set-SystemScriptAcl -Path $WorkerPath
     Set-SystemScriptAcl -Path $SyncPath
 
+    $OriginState = Initialize-RdpOriginSnapshot
+
     $NativePowerShell = Get-NativePowerShellPath
     & $NativePowerShell `
         -NoProfile `
@@ -220,6 +301,7 @@ try {
     }
 
     Write-Host "RESOLVED_REF=$ResolvedSha"
+    Write-Host "RDP_ORIGIN=$OriginState"
     Write-Host 'ROTATION_CHECK=PASS'
     Write-Host 'ROTATION_TASK=RUNNING'
     Write-Host 'ROTATION_TASK_SID=S-1-5-18'
