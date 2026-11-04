@@ -239,7 +239,7 @@ class TelegramBot:
                 self._set_live(False)
                 self.registry.set_setting("screen", "home")
                 self.registry.set_setting("selected_device", "")
-                self.render()
+                self.render(force_new=True)
             return
         callback = update.get("callback_query")
         if callback:
@@ -344,7 +344,7 @@ class TelegramBot:
         self._answer(callback_id)
 
     def _device_signature(self) -> tuple[Any, ...] | None:
-        if self.registry.get_setting("screen", "home") != "device":
+        if self.registry.get_setting("screen", "home") not in {"device", "device_details"}:
             return None
         device_id = self.registry.get_setting("selected_device", "") or ""
         if not device_id:
@@ -383,7 +383,7 @@ class TelegramBot:
         while not self.stop_event.wait(3):
             try:
                 screen = self.registry.get_setting("screen", "home")
-                if screen != "device":
+                if screen not in {"device", "device_details"}:
                     self.last_device_signature = None
                     was_active = False
                     continue
@@ -780,6 +780,20 @@ class TelegramBot:
         with self.lock:
             text, keyboard = self._render_content()
             message_id = self.registry.get_setting("dashboard_message_id", "") or ""
+            if force_new and message_id:
+                try:
+                    self.api_call(
+                        "deleteMessage",
+                        {
+                            "chat_id": self.config.telegram_chat_id,
+                            "message_id": int(message_id),
+                        },
+                        timeout=15,
+                    )
+                except Exception as exc:
+                    LOG.debug("old dashboard delete failed: %s", exc)
+                self.registry.set_setting("dashboard_message_id", "")
+                message_id = ""
             if message_id and not force_new:
                 try:
                     self._render_api_call(
