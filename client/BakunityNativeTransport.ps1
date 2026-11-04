@@ -259,7 +259,8 @@ function Set-BakunityNativeForward {
         [Parameter(Mandatory = $true)][string]$Key,
         [Parameter(Mandatory = $true)][string]$PeerId,
         [Parameter(Mandatory = $true)][string]$SharedSecret,
-        [Parameter(Mandatory = $true)][string]$Listen
+        [Parameter(Mandatory = $true)][string]$Listen,
+        [ValidateSet('auto','direct')][string]$Mode = 'auto'
     )
 
     $Body = @{
@@ -267,6 +268,7 @@ function Set-BakunityNativeForward {
         peer_id = $PeerId
         shared_secret = $SharedSecret
         listen = $Listen
+        mode = $Mode
     } | ConvertTo-Json -Compress
 
     return Invoke-RestMethod -UseBasicParsing -Method Post -Uri (
