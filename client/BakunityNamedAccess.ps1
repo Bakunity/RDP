@@ -453,6 +453,7 @@ function Build-Mappings {
 
         $Mappings += [pscustomobject]@{
             device_id = $DeviceId
+            slug = $Slug
             hostname = $Hostname
             loopback = $Loopback
             server_ipv4 = $ServerIPv4
@@ -498,23 +499,33 @@ function Write-NamedAccessState {
     )
 
     $MapForState = [ordered]@{}
+    $DevicesForState = @()
     foreach ($Mapping in $Mappings) {
         $MapForState[[string]$Mapping.device_id] = [ordered]@{
+            slug = [string]$Mapping.slug
             hostname = [string]$Mapping.hostname
             loopback = [string]$Mapping.loopback
             server_ipv4 = [string]$Mapping.server_ipv4
             rdp_port = [int]$Mapping.rdp_port
             enabled = [bool]$Mapping.enabled
         }
+        $DevicesForState += [ordered]@{
+            device_id = [string]$Mapping.device_id
+            slug = [string]$Mapping.slug
+            hostname = [string]$Mapping.hostname
+            rdp_port = [int]$Mapping.rdp_port
+            enabled = [bool]$Mapping.enabled
+        }
     }
 
     Write-SecureJsonFile -Path $StatePath -Value ([ordered]@{
-        version = 2
+        version = 3
         connector_id = [string]$Manifest.connector.id
         connector_name = [string]$Manifest.connector.name
         device_domain = [string]$Manifest.server.device_domain
         routing_mode = $RoutingMode
         updated_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        devices = $DevicesForState
         mappings = $MapForState
     })
 }
