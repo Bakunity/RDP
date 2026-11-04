@@ -207,7 +207,8 @@ class NativeTransportTests(unittest.TestCase):
             "ОТКУДА ПОДКЛЮЧАЮСЬ",
             '"ПОДКЛЮЧЕНИЕ"',
             "device_connection_source",
-            "route_device:",
+            "route_pair:",
+            "connection_source:{connector['id']}",
             "get_connector_device_route_policy",
             "set_connector_device_route_policy",
             "BAKUNITY P2P",
@@ -215,6 +216,11 @@ class NativeTransportTests(unittest.TestCase):
         ):
             self.assertIn(marker, bot)
         self.assertNotIn('"ДОБАВИТЬ HOST"', bot)
+        self.assertNotIn(
+            "connection_source:{device['id']}:{connector['id']}",
+            bot,
+        )
+        self.assertNotIn("route_device:", bot)
 
     def test_update_server_versions_native_transport_source(self) -> None:
         update = (
