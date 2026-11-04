@@ -34,6 +34,8 @@ ReadWritePaths=-/var/log/letsencrypt
 ReadWritePaths=-/var/www/hermes-rdp-acme
 ReadWritePaths=-/etc/nginx/conf.d
 ReadWritePaths=-/etc/nginx/sites-enabled
+ReadWritePaths=-/var/lib/headscale
+ReadWritePaths=-/var/run/headscale
 ReadOnlyPaths=/etc/hermes-rdp
 
 [Install]
