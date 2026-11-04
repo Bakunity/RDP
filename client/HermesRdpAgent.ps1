@@ -132,15 +132,17 @@ function Get-AgentState {
         }
         $Changed = $true
     }
-    foreach ($Entry in @(
-        @('pending_maintenance_action', ''),
-        @('pending_maintenance_ref', ''),
-        @('pending_maintenance_requested_at', 0)
-    )) {
-        if (-not $State.PSObject.Properties[$Entry[0]]) {
-            $State | Add-Member -NotePropertyName $Entry[0] -NotePropertyValue $Entry[1]
-            $Changed = $true
-        }
+    if (-not $State.PSObject.Properties['pending_maintenance_action']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_action -NotePropertyValue ''
+        $Changed = $true
+    }
+    if (-not $State.PSObject.Properties['pending_maintenance_ref']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_ref -NotePropertyValue ''
+        $Changed = $true
+    }
+    if (-not $State.PSObject.Properties['pending_maintenance_requested_at']) {
+        $State | Add-Member -NotePropertyName pending_maintenance_requested_at -NotePropertyValue 0
+        $Changed = $true
     }
     if ($Changed) {
         Write-JsonFile -Path $StatePath -Value $State
@@ -252,9 +254,6 @@ function Test-MaintenanceRetryAllowed {
     }
     $Age = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $UpdatedAt
     if ($Age -ge $AutoMaintenanceRetrySeconds) {
-        return $true
-    }
-    if ([string]$Status.state -eq 'completed' -and [bool]$Status.ok) {
         return $true
     }
     return $false
@@ -993,9 +992,11 @@ function Invoke-CommandAction {
                     $State.enabled = $true
                 }
                 'repair' {
+                    Remove-Item -LiteralPath $MaintenanceStatusPath -Force -ErrorAction SilentlyContinue
                     Set-PendingMaintenance -State $State -Action 'repair' -RepositoryRef ([string]$Command.repository_ref)
                 }
                 'update' {
+                    Remove-Item -LiteralPath $MaintenanceStatusPath -Force -ErrorAction SilentlyContinue
                     Set-PendingMaintenance -State $State -Action 'update' -RepositoryRef ([string]$Command.repository_ref)
                 }
                 default {
