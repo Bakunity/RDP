@@ -20,123 +20,51 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
             ),
         )
 
-    def test_theme_starts_with_visible_fallbacks_not_guessed_ids(self) -> None:
-        required = {
-            "computer",
-            "back",
-            "refresh",
-            "repair",
-            "delete",
-            "success",
-            "warning",
-            "watch",
-            "access_on",
-            "access_off",
-            "home",
-            "globe",
-            "add",
+    def test_core_icons_are_pinned_to_verified_pack_ids(self) -> None:
+        expected = {
+            "computer": ("5258423306255604960", "tgmacicons"),
+            "refresh": ("5258420634785947640", "tgmacicons"),
+            "repair": ("5258023599419171861", "vector_icons_by_fStikBot"),
+            "delete": ("5258130763148172425", "tgmacicons"),
+            "success": ("5219899949281453881", "vector_icons_by_fStikBot"),
+            "back": ("5960671702059848143", "tgiosicons"),
+            "access_on": ("6037496202990194718", "tgiosicons"),
+            "access_off": ("6037249452824072506", "tgiosicons"),
+            "watch": ("5253959125838090076", "tgmacicons"),
+            "home": ("6042137469204303531", "tgiosicons"),
+            "globe": ("5776233299424843260", "tgiosicons"),
+            "add": ("5258108352008823107", "tgmacicons"),
         }
-        self.assertTrue(required.issubset(ICONS))
-        for spec in ICONS.values():
-            self.assertTrue(spec.fallback)
-            self.assertTrue(spec.aliases)
-            self.assertIsNone(spec.custom_emoji_id)
-            self.assertIsNone(spec.pack)
+        for name, (custom_id, pack) in expected.items():
+            self.assertEqual(ICONS[name].custom_emoji_id, custom_id)
+            self.assertEqual(ICONS[name].pack, pack)
 
-    def test_unresolved_html_keeps_unicode_visible(self) -> None:
+    def test_html_uses_pinned_native_custom_emoji(self) -> None:
         theme = TelegramEmojiTheme()
-        self.assertEqual(theme.html("computer"), ICONS["computer"].fallback)
-
-    def test_unresolved_button_keeps_unicode_visible_and_style(self) -> None:
-        theme = TelegramEmojiTheme()
-        button = theme.button(
-            "access_on",
-            "ВКЛЮЧИТЬ ДОСТУП",
-            callback_data="cmd:on:dev",
-            style="success",
-        )
-        self.assertTrue(button["text"].startswith(ICONS["access_on"].fallback))
-        self.assertNotIn("icon_custom_emoji_id", button)
-        self.assertEqual(button["style"], "success")
-
-    def test_runtime_pack_scan_resolves_real_custom_id_by_alias(self) -> None:
-        theme = TelegramEmojiTheme()
-        resolved = theme.learn_pack(
-            "tgmacicons",
-            {
-                "stickers": [
-                    {
-                        "emoji": "💻",
-                        "custom_emoji_id": "999999999999999999",
-                    }
-                ]
-            },
-        )
-        self.assertGreaterEqual(resolved, 1)
-        self.assertEqual(
-            theme.icons["computer"].custom_emoji_id,
-            "999999999999999999",
-        )
-        self.assertEqual(theme.icons["computer"].pack, "tgmacicons")
-        self.assertEqual(theme.resolved_count(), 1)
-
-    def test_resolved_html_uses_native_tg_emoji_entity(self) -> None:
-        theme = TelegramEmojiTheme()
-        theme.learn_pack(
-            "tgiosicons",
-            {
-                "stickers": [
-                    {
-                        "emoji": "🔧",
-                        "custom_emoji_id": "111111111111111111",
-                    }
-                ]
-            },
-        )
         rendered = theme.html("repair")
-        self.assertIn('<tg-emoji emoji-id="111111111111111111">', rendered)
+        self.assertIn(
+            f'<tg-emoji emoji-id="{ICONS["repair"].custom_emoji_id}">',
+            rendered,
+        )
         self.assertIn(ICONS["repair"].fallback, rendered)
 
-    def test_resolved_inline_button_uses_native_custom_icon(self) -> None:
+    def test_button_uses_only_native_pack_icon_when_enabled(self) -> None:
         theme = TelegramEmojiTheme()
-        theme.learn_pack(
-            "tgiosicons",
-            {
-                "stickers": [
-                    {
-                        "emoji": "🔓",
-                        "custom_emoji_id": "222222222222222222",
-                    }
-                ]
-            },
-        )
         button = theme.button(
             "access_on",
             "ВКЛЮЧИТЬ ДОСТУП",
             callback_data="cmd:on:dev",
             style="success",
         )
-        self.assertTrue(button["text"].startswith(ICONS["access_on"].fallback))
-        self.assertIn("ВКЛЮЧИТЬ ДОСТУП", button["text"])
+        self.assertEqual(button["text"], "ВКЛЮЧИТЬ ДОСТУП")
         self.assertEqual(
             button["icon_custom_emoji_id"],
-            "222222222222222222",
+            ICONS["access_on"].custom_emoji_id,
         )
         self.assertEqual(button["style"], "success")
 
-    def test_disabled_theme_falls_back_even_after_resolution(self) -> None:
+    def test_disabled_theme_falls_back_to_unicode(self) -> None:
         theme = TelegramEmojiTheme()
-        theme.learn_pack(
-            "tgiosicons",
-            {
-                "stickers": [
-                    {
-                        "emoji": "🛠️",
-                        "custom_emoji_id": "333333333333333333",
-                    }
-                ]
-            },
-        )
         theme.enabled = False
         self.assertEqual(theme.html("repair"), ICONS["repair"].fallback)
         button = theme.button(
@@ -149,35 +77,30 @@ class TelegramCustomEmojiThemeTests(unittest.TestCase):
         self.assertTrue(button["text"].startswith(ICONS["repair"].fallback))
         self.assertEqual(button["style"], "primary")
 
-    def test_higher_priority_pack_wins(self) -> None:
+    def test_runtime_pack_scan_does_not_replace_curated_ids(self) -> None:
         theme = TelegramEmojiTheme()
-        theme.learn_pack(
-            "tgiosicons",
-            {
-                "stickers": [
-                    {
-                        "emoji": "💻",
-                        "custom_emoji_id": "444444444444444444",
-                    }
-                ]
-            },
-        )
-        theme.learn_pack(
+        before = theme.icons["computer"]
+        resolved = theme.learn_pack(
             "tgmacicons",
             {
                 "stickers": [
                     {
                         "emoji": "💻",
-                        "custom_emoji_id": "555555555555555555",
+                        "custom_emoji_id": "999999999999999999",
                     }
                 ]
             },
         )
-        self.assertEqual(
-            theme.icons["computer"].custom_emoji_id,
-            "555555555555555555",
-        )
-        self.assertEqual(theme.icons["computer"].pack, "tgmacicons")
+        self.assertEqual(resolved, 0)
+        self.assertEqual(theme.icons["computer"], before)
+
+    def test_all_pinned_ids_are_numeric_and_from_approved_packs(self) -> None:
+        for spec in ICONS.values():
+            self.assertTrue(spec.fallback)
+            self.assertTrue(spec.aliases)
+            self.assertIsNotNone(spec.custom_emoji_id)
+            self.assertTrue(str(spec.custom_emoji_id).isdigit())
+            self.assertIn(spec.pack, APPROVED_PACKS)
 
 
 if __name__ == "__main__":

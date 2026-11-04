@@ -24,35 +24,35 @@ class IconSpec:
     pack: str | None = None
 
 
-# No custom emoji IDs are hardcoded here. Telegram returns the actual IDs for
-# the user's approved sets via getStickerSet at bot startup. Until an icon is
-# resolved, the fallback remains visible so buttons can never become iconless.
+# Curated IDs verified against the exact packs selected for Bakunity RDP.
+# Keep these deterministic: buttons should use the intended artwork rather than
+# whichever sticker happens to share the same fallback emoji first.
 ICONS: dict[str, IconSpec] = {
-    "computer": IconSpec("🖥️", ("🖥️", "🖥", "💻", "⌨️"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot")),
-    "settings": IconSpec("⚙️", ("⚙️", "⚙", "🛠️", "🔧")),
-    "back": IconSpec("⬅️", ("⬅️", "⬅", "◀️", "↩️", "←")),
-    "refresh": IconSpec("🔄", ("🔄", "🔁", "♻️")),
-    "repeat": IconSpec("🔁", ("🔁", "🔄", "♻️")),
-    "repair": IconSpec("🛠️", ("🛠️", "🛠", "🔧", "⚒️", "🪛"), ("vector_icons_by_fStikBot", "tgiosicons", "tgmacicons")),
-    "delete": IconSpec("🗑️", ("🗑️", "🗑", "❌")),
-    "cancel": IconSpec("❌", ("❌", "✖️", "✖", "🚫")),
-    "success": IconSpec("✅", ("✅", "✔️", "✔", "☑️", "🟢"), ("vector_icons_by_fStikBot", "tgiosicons", "tgmacicons")),
-    "warning": IconSpec("⚠️", ("⚠️", "⚠", "❗️", "❗"), ("vector_icons_by_fStikBot", "tgiosicons", "tgmacicons")),
-    "info": IconSpec("ℹ️", ("ℹ️", "ℹ", "❔", "❓")),
-    "watch": IconSpec("👁️", ("👁️", "👁", "👀", "▶️")),
-    "watch_off": IconSpec("⏸️", ("⏸️", "⏸", "⏹️", "👁️")),
-    "download": IconSpec("⬇️", ("⬇️", "⬇", "📥", "↓")),
-    "upload": IconSpec("⬆️", ("⬆️", "⬆", "📤", "↑")),
-    "access_on": IconSpec("🔓", ("🔓", "🔑", "✅", "🟢")),
-    "access_off": IconSpec("🔒", ("🔒", "⛔", "❌", "🔴")),
-    "shield": IconSpec("🛡️", ("🛡️", "🛡", "✅")),
-    "power": IconSpec("⚡", ("⚡", "🔌", "🔋")),
-    "home": IconSpec("🏠", ("🏠", "🏡")),
-    "globe": IconSpec("🌐", ("🌐", "🌍", "🌎", "🛜")),
-    "add": IconSpec("➕", ("➕", "✚", "＋")),
-    "play": IconSpec("▶️", ("▶️", "▶", "⏵")),
-    "timer": IconSpec("⏳", ("⏳", "⏲️", "⌛")),
-    "list": IconSpec("📋", ("📋", "🗂️", "🗂", "📊")),
+    "computer": IconSpec("💻", ("💻", "🖥️", "🖥"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258423306255604960", "tgmacicons"),
+    "settings": IconSpec("⚙️", ("⚙️", "⚙"), APPROVED_PACKS, "5904258298764334001", "tgiosicons"),
+    "back": IconSpec("⬅️", ("⬅️", "⬅"), APPROVED_PACKS, "5960671702059848143", "tgiosicons"),
+    "refresh": IconSpec("🔄", ("🔄", "🔁"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258420634785947640", "tgmacicons"),
+    "repeat": IconSpec("🔁", ("🔁", "🔄"), APPROVED_PACKS, "6030657343744644592", "tgiosicons"),
+    "repair": IconSpec("🔧", ("🔧", "🛠️", "🛠"), ("vector_icons_by_fStikBot", "tgiosicons", "tgmacicons"), "5258023599419171861", "vector_icons_by_fStikBot"),
+    "delete": IconSpec("🗑️", ("🗑️", "🗑"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258130763148172425", "tgmacicons"),
+    "cancel": IconSpec("❌", ("❌", "✖️", "✖"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258226313285607065", "tgmacicons"),
+    "success": IconSpec("✅", ("✅", "✔️", "✔"), ("vector_icons_by_fStikBot", "tgiosicons", "tgmacicons"), "5219899949281453881", "vector_icons_by_fStikBot"),
+    "warning": IconSpec("❗️", ("❗️", "⚠️", "⚠"), APPROVED_PACKS, "6030563507299160824", "tgiosicons"),
+    "info": IconSpec("ℹ️", ("ℹ️", "ℹ"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258503720928288433", "tgmacicons"),
+    "watch": IconSpec("👁", ("👁", "👁️"), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5253959125838090076", "tgmacicons"),
+    "watch_off": IconSpec("👁", ("👁", "👁️"), APPROVED_PACKS, "6037243349675544634", "tgiosicons"),
+    "download": IconSpec("⬇️", ("⬇️", "⬇"), APPROVED_PACKS, "6039802767931871481", "tgiosicons"),
+    "upload": IconSpec("⬆️", ("⬆️", "⬆"), APPROVED_PACKS, "5963103826075456248", "tgiosicons"),
+    "access_on": IconSpec("🔓", ("🔓",), APPROVED_PACKS, "6037496202990194718", "tgiosicons"),
+    "access_off": IconSpec("🔒", ("🔒",), APPROVED_PACKS, "6037249452824072506", "tgiosicons"),
+    "shield": IconSpec("🛡", ("🛡", "🛡️"), APPROVED_PACKS, "6030445631921721471", "tgiosicons"),
+    "power": IconSpec("🛡", ("🛡", "🛡️"), APPROVED_PACKS, "6030537007350944596", "tgiosicons"),
+    "home": IconSpec("🏠", ("🏠",), APPROVED_PACKS, "6042137469204303531", "tgiosicons"),
+    "globe": IconSpec("🌐", ("🌐",), APPROVED_PACKS, "5776233299424843260", "tgiosicons"),
+    "add": IconSpec("➕", ("➕",), ("tgmacicons", "tgiosicons", "vector_icons_by_fStikBot"), "5258108352008823107", "tgmacicons"),
+    "play": IconSpec("▶️", ("▶️", "▶"), APPROVED_PACKS, "5773626993010546707", "tgiosicons"),
+    "timer": IconSpec("⏲️", ("⏲️", "⏲"), APPROVED_PACKS, "6037268453759389862", "tgiosicons"),
+    "list": IconSpec("🗂", ("🗂", "🗂️"), APPROVED_PACKS, "5766994197705921104", "tgiosicons"),
 }
 
 
@@ -83,6 +83,10 @@ class TelegramEmojiTheme:
         resolved = 0
         for name, spec in tuple(self.icons.items()):
             if pack_name not in spec.preferred_packs:
+                continue
+            if spec.custom_emoji_id and spec.pack:
+                # Curated verified IDs are authoritative. Runtime discovery is
+                # only a fallback for future icons that do not have a pinned ID.
                 continue
 
             current_priority = (
@@ -142,12 +146,8 @@ class TelegramEmojiTheme:
     ) -> dict[str, Any]:
         spec = self.icons[name]
         custom_id = spec.custom_emoji_id if self.enabled else None
-        # Keep a visible Unicode icon in the label even when a native custom
-        # emoji icon is attached. Some Telegram clients render button colors
-        # from Bot API 9.4 but still omit icon_custom_emoji_id. This guarantees
-        # that the action never becomes visually iconless.
         result: dict[str, Any] = {
-            "text": f"{spec.fallback} {text}",
+            "text": text if custom_id else f"{spec.fallback} {text}",
             "callback_data": callback_data,
         }
         if custom_id:
