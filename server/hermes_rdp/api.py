@@ -130,6 +130,9 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _device_auth(self, device_id: str) -> dict[str, Any] | None:
         return self.server.registry.authenticate(device_id, self._bearer())
 
+    def _named_access_auth(self) -> dict[str, Any] | None:
+        return self.server.registry.authenticate_named_access_token(self._bearer())
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/healthz":
@@ -144,6 +147,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "ssh_port": self.server.config.ssh_bind_port,
                 },
             )
+            return
+        if path == "/v1/named-access/manifest":
+            self._named_access_manifest()
             return
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
@@ -182,6 +188,58 @@ class ApiHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"ok": False, "error": "internal server error"},
             )
+
+    def _named_access_manifest(self) -> None:
+        connector = self._named_access_auth()
+        if not connector:
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+
+        domain = self.server.registry.get_device_domain()
+        if not domain:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "device domain is disabled"},
+            )
+            return
+
+        devices = []
+        for device in self.server.registry.list_devices():
+            slug = str(device.get("slug") or "").strip()
+            if not slug:
+                continue
+            devices.append(
+                {
+                    "id": str(device["id"]),
+                    "name": str(device["display_name"]),
+                    "slug": slug,
+                    "hostname": f"{slug}.{domain}",
+                    "rdp_port": int(device["rdp_port"]),
+                    "enabled": bool(device.get("enabled", True)),
+                }
+            )
+
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "manifest_version": 1,
+                "generated_at": int(time.time()),
+                "connector": {
+                    "id": str(connector["id"]),
+                    "name": str(connector["name"]),
+                },
+                "server": {
+                    "public_host": self.server.config.public_host,
+                    "device_domain": domain,
+                    "default_rdp_port": 3389,
+                },
+                "devices": devices,
+            },
+        )
 
     def _pair(self) -> None:
         body = self._read_json()
