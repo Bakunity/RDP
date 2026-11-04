@@ -3,6 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from hermes_rdp.api import parse_helper_json as parse_api_helper_json
+from hermes_rdp.cli import parse_helper_json as parse_cli_helper_json
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,6 +53,34 @@ class DeviceDomainCertificateTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('"$CERTBOT" renew', renew)
         self.assertNotIn('--cert-name "$CERT_NAME"', renew)
+
+    def test_certbot_output_cannot_pollute_machine_json_channel(self) -> None:
+        helper = (
+            ROOT / "server/bin/hermes-rdp-device-cert-package.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--quiet", helper)
+        self.assertIn("1>&2", helper)
+        self.assertIn("stdout is a machine-readable channel", helper)
+
+    def test_cli_and_api_accept_trailing_json_after_tool_noise(self) -> None:
+        text = (
+            "Saving debug log to /var/log/letsencrypt/letsencrypt.log\n"
+            "Certificate not yet due for renewal\n"
+            '{"cert_name":"mipc.tima.biz","thumbprint":"ABC"}\n'
+        )
+        self.assertEqual(
+            parse_cli_helper_json(text)["cert_name"],
+            "mipc.tima.biz",
+        )
+        self.assertEqual(
+            parse_api_helper_json(text)["thumbprint"],
+            "ABC",
+        )
+
+    def test_cli_and_api_reject_output_without_json_object(self) -> None:
+        for parser in (parse_cli_helper_json, parse_api_helper_json):
+            with self.assertRaises(ValueError):
+                parser("certbot output only\n")
 
     def test_sudo_helper_is_bounded_by_device_id_validation(self) -> None:
         helper = (
