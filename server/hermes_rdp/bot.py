@@ -339,6 +339,75 @@ class TelegramBot:
         else:
             self.registry.set_setting("live_until", "0")
 
+    def _send_emoji_probe(self) -> None:
+        theme = self._emoji_theme()
+        spec = theme.icons["computer"]
+        custom_id = str(spec.custom_emoji_id or "")
+        custom_text = (
+            f'<tg-emoji emoji-id="{custom_id}">{spec.fallback}</tg-emoji>'
+            if custom_id
+            else spec.fallback
+        )
+        text = (
+            "EMOJI TEST\n\n"
+            f"Custom в тексте: {custom_text}\n"
+            f"Обычный Unicode: {spec.fallback}\n\n"
+            f"Пак: {escape(spec.pack or 'не разрешён')}\n"
+            f"Custom ID: {escape(custom_id or 'нет')}\n"
+            f"Text custom: {'ON' if theme.text_enabled else 'OFF'}\n"
+            f"Button custom: {'ON' if theme.buttons_enabled else 'OFF'}"
+        )
+        custom_button: dict[str, Any] = {
+            "text": "CUSTOM ICON",
+            "callback_data": "home",
+        }
+        if custom_id and theme.buttons_enabled:
+            custom_button["icon_custom_emoji_id"] = custom_id
+        keyboard = {
+            "inline_keyboard": [
+                [custom_button],
+                [
+                    {
+                        "text": f"{spec.fallback} UNICODE",
+                        "callback_data": "home",
+                    }
+                ],
+            ]
+        }
+        try:
+            self.api_call(
+                "sendMessage",
+                {
+                    "chat_id": self.config.telegram_chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "reply_markup": keyboard,
+                },
+            )
+        except Exception as exc:
+            LOG.warning("emoji probe with custom emoji failed: %s", exc)
+            self.api_call(
+                "sendMessage",
+                {
+                    "chat_id": self.config.telegram_chat_id,
+                    "text": (
+                        "EMOJI TEST\n\n"
+                        f"Custom test rejected by Telegram: {escape(exc)}\n"
+                        f"Unicode fallback: {spec.fallback}"
+                    ),
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": f"{spec.fallback} UNICODE",
+                                    "callback_data": "home",
+                                }
+                            ]
+                        ]
+                    },
+                },
+            )
+
     def _handle_update(self, update: dict[str, Any]) -> None:
         if not self._authorized(update):
             callback = update.get("callback_query")
@@ -352,6 +421,8 @@ class TelegramBot:
                 self.registry.set_setting("screen", "home")
                 self.registry.set_setting("selected_device", "")
                 self.render(force_new=True)
+            elif text == "/emoji":
+                self._send_emoji_probe()
             return
         callback = update.get("callback_query")
         if callback:

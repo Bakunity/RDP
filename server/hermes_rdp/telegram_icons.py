@@ -196,7 +196,10 @@ class TelegramEmojiTheme:
             else None
         )
         result: dict[str, Any] = {
-            "text": text if custom_id else f"{spec.fallback} {text}",
+            # Keep the Unicode semantic icon in the label even when Telegram
+            # accepts icon_custom_emoji_id. Some clients accept the payload and
+            # render button styles but silently omit the native custom icon.
+            "text": f"{spec.fallback} {text}",
             "callback_data": callback_data,
         }
         if custom_id:
