@@ -378,6 +378,8 @@ def main() -> None:
     if args.command == "doctor":
         errors = 0
         print(f"config: OK ({config.public_host})")
+        print(f"server-ref: {config.repository_ref}")
+        print(f"client-ref: {config.client_ref}")
         print(f"database: OK ({config.db_path})")
         device_domain = registry.get_device_domain()
         print(f"device-domain: {device_domain or 'disabled'}")
