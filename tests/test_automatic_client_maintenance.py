@@ -33,6 +33,16 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertNotIn(" MANAGED", bot)
         self.assertNotIn(" SELF-HEAL ", bot)
 
+    def test_telegram_hides_terminal_update_noise_for_current_compatible_client(self) -> None:
+        bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
+        self.assertIn('maintenance_action == "update"', bot)
+        self.assertIn('maintenance_state in {"failed", "completed"}', bot)
+        self.assertIn("self._client_ref_is_compatible(client_ref)", bot)
+        self.assertIn("maintenance_relevant = False", bot)
+        self.assertIn("Keep running updates visible", bot)
+        self.assertIn("do not", bot)
+        self.assertIn("suppress repair failures", bot)
+
     def test_registry_maintenance_commands_do_not_redefine_access(self) -> None:
         db = (ROOT / "server/hermes_rdp/db.py").read_text(encoding="utf-8")
         self.assertIn('{"on", "off", "restart", "repair", "update"}', db)
