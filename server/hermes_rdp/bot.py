@@ -427,10 +427,11 @@ class TelegramBot:
                         "success" if self._online(device) else "cancel",
                         f"{device['display_name']} · :{device['rdp_port']}",
                         f"device:{device['id']}",
+                        style="success" if self._online(device) else "danger",
                     )
                 ]
             )
-        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
+        rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="success")])
         rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh", style="primary")])
         return text, {"inline_keyboard": rows}
 
@@ -671,7 +672,7 @@ class TelegramBot:
 
         if pending_action:
             control_rows = [
-                [self.button("timer", "КОМАНДА ВЫПОЛНЯЕТСЯ", "refresh")]
+                [self.button("timer", "КОМАНДА ВЫПОЛНЯЕТСЯ", "refresh", style="primary")]
             ]
         elif desired_access:
             control_rows = [
@@ -688,6 +689,7 @@ class TelegramBot:
                         "repeat",
                         "ПЕРЕЗАПУСК",
                         f"cmd:restart:{device['id']}",
+                        style="primary",
                     )
                 ],
             ]
@@ -714,6 +716,7 @@ class TelegramBot:
                         "watch_off" if live_active else "watch",
                         live_text,
                         "live",
+                        style=None if live_active else "primary",
                     ),
                 ],
                 [
