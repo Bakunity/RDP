@@ -75,9 +75,9 @@ sudo cat /etc/hermes-rdp/trusted-rdp-cert-state.json
 5. Введите понятное название компьютера.
 6. Дождитесь `=== ГОТОВО ===`.
 
-Установщик создаёт локальный Ed25519-ключ, проверяет API certificate fingerprint и SSH host key, включает RDP и регистрирует `Bakunity RDP Agent`.
+Установщик создаёт локальный Ed25519-ключ, проверяет API certificate fingerprint и SSH host key, включает RDP и регистрирует `Hermes RDP Agent`.
 
-Если trusted certificate lifecycle включён на сервере, Fresh Install автоматически создаёт `Bakunity RDP Certificate Rotation` и применяет текущий trusted CUSTOM certificate. Отдельная ручная certificate setup-команда не нужна.
+Если trusted certificate lifecycle включён на сервере, Fresh Install автоматически создаёт `Hermes RDP Certificate Rotation` и применяет текущий trusted CUSTOM certificate. Отдельная ручная certificate setup-команда не нужна.
 
 ## 5. Подключение
 
@@ -97,8 +97,8 @@ mstsc.exe /v:SERVER_IP_OR_DOMAIN:53389
 - `ssh.exe` работает на Windows;
 - назначенный порт слушается на сервере;
 - внешний RDP работает из другой сети;
-- `Bakunity RDP Agent` находится в Running;
-- при trusted lifecycle `Bakunity RDP Certificate Rotation` работает от LocalSystem, а RDP listener имеет CUSTOM certificate binding;
+- `Hermes RDP Agent` находится в Running;
+- при trusted lifecycle `Hermes RDP Certificate Rotation` работает от LocalSystem, а RDP listener имеет CUSTOM certificate binding;
 - Microsoft Defender остаётся включён и Bakunity не требует exclusions;
 - после перезагрузки Windows туннель восстанавливается автоматически;
 - второй ПК получает отдельный порт и отдельный ключ.
