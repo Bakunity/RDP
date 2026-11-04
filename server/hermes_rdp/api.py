@@ -236,6 +236,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             telemetry["endpoint_source"] = "server_listener"
 
         command = self.server.registry.update_telemetry(device_id, telemetry)
+        if command and command.get("action") in {"repair", "update"}:
+            command = dict(command)
+            command["repository_ref"] = self.server.config.repository_ref
         current = self.server.registry.get_device(device_id)
 
         # Heavy telemetry is leased only for the currently opened device view.
