@@ -9,6 +9,7 @@ from typing import Any
 MESH_KEY_HELPER = "/usr/local/sbin/bakunity-rdp-mesh-key"
 MESH_KEY_TIMEOUT_SECONDS = 15
 HOST_STATE_PREFIX = "smart_route_host:"
+MESH_IPV4_NETWORK = ipaddress.IPv4Network((0x64400000, 10))
 
 
 def mesh_enabled(registry: Any) -> bool:
@@ -52,7 +53,7 @@ def _valid_mesh_ipv4(value: Any) -> str:
         address = ipaddress.ip_address(str(value or "").strip())
     except ValueError:
         return ""
-    if address.version != 4 or address not in ipaddress.ip_network("100.64.0.0/10"):
+    if address.version != 4 or address not in MESH_IPV4_NETWORK:
         return ""
     return str(address)
 
