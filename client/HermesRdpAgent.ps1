@@ -16,6 +16,7 @@ $PollSeconds = 3
 $SlowTelemetrySeconds = 15
 $TopProcessesSeconds = 6
 $SshDiscoverySeconds = 15
+$CertificateHealthSeconds = 60
 $script:Http = $null
 $script:LiveTelemetry = $false
 $script:SlowTelemetry = $null
@@ -24,6 +25,8 @@ $script:TopProcesses = @()
 $script:TopProcessesCapturedAt = 0
 $script:HermesSshPids = @()
 $script:SshDiscoveryCapturedAt = 0
+$script:CertificateHealth = $null
+$script:CertificateHealthCapturedAt = 0
 
 $PinnedHttpClientSource = @'
 using System;
@@ -739,7 +742,7 @@ function Get-TopProcesses {
 }
 
 
-function Get-CertificateLifecycleHealth {
+function Read-CertificateLifecycleHealth {
     $Result = [ordered]@{ ok = $false; task_state = 'ABSENT'; hash_type = 0 }
     try {
         $Task = Get-ScheduledTask -TaskName 'Hermes RDP Certificate Rotation' -ErrorAction SilentlyContinue
@@ -772,6 +775,18 @@ function Get-CertificateLifecycleHealth {
         $Result.ok = $false
     }
     return [pscustomobject]$Result
+}
+
+function Get-CertificateLifecycleHealth {
+    $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if (
+        -not $script:CertificateHealth -or
+        ($Now - [int64]$script:CertificateHealthCapturedAt) -ge $CertificateHealthSeconds
+    ) {
+        $script:CertificateHealth = Read-CertificateLifecycleHealth
+        $script:CertificateHealthCapturedAt = $Now
+    }
+    return $script:CertificateHealth
 }
 
 function Get-SlowTelemetry {
