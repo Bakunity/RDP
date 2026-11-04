@@ -64,7 +64,8 @@ jobs:
             foreach ($ParseError in @($Errors)) {
               $Failed = $true
               $Extent = $ParseError.Extent
-              Write-Host "::error file=$($_.FullName),line=$($Extent.StartLineNumber),col=$($Extent.StartColumnNumber)::$($ParseError.Message) | token: $($Extent.Text)"
+              Write-Host "PS_PARSE_ERROR file=$($_.FullName) line=$($Extent.StartLineNumber) col=$($Extent.StartColumnNumber) message=$($ParseError.Message) token=$($Extent.Text)"
+          Write-Host "::error file=$($_.FullName),line=$($Extent.StartLineNumber),col=$($Extent.StartColumnNumber)::$($ParseError.Message) | token: $($Extent.Text)"
             }
           }
           if ($Failed) { exit 1 }
