@@ -48,6 +48,10 @@ BACKUP="/var/backups/hermes-rdp/update-$STAMP"
 WORK="$(mktemp -d)"
 ROLLBACK_ARMED=0
 RESOLVED_SHA=""
+DEFAULT_RDP_WAS_ACTIVE=0
+if systemctl is-active --quiet bakunity-rdp-default.service 2>/dev/null; then
+  DEFAULT_RDP_WAS_ACTIVE=1
+fi
 
 cleanup() {
   rm -rf "$WORK"
@@ -127,6 +131,7 @@ rollback_update() {
 
   echo "Update failed at line $line; restoring $BACKUP" >&2
   systemctl stop hermes-rdp.service hermes-rdp-sshd.service >/dev/null 2>&1 || true
+  systemctl stop bakunity-rdp-default.service >/dev/null 2>&1 || true
 
   rm -rf /opt/hermes-rdp
   cp -a "$BACKUP/opt/hermes-rdp" /opt/ || rollback_ok=0
@@ -137,6 +142,7 @@ rollback_update() {
   cp -a "$BACKUP/etc/systemd/system/hermes-rdp-sshd.service" \
     /etc/systemd/system/hermes-rdp-sshd.service || rollback_ok=0
 
+  restore_optional_file /etc/systemd/system/bakunity-rdp-default.service || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-device-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
@@ -164,6 +170,9 @@ rollback_update() {
     visudo -cf /etc/sudoers.d/hermes-rdp-cert-package >/dev/null || rollback_ok=0
   fi
   systemctl restart hermes-rdp-sshd.service hermes-rdp.service || rollback_ok=0
+  if ((DEFAULT_RDP_WAS_ACTIVE == 1)); then
+    systemctl restart bakunity-rdp-default.service || rollback_ok=0
+  fi
   systemctl is-active --quiet hermes-rdp-sshd.service || rollback_ok=0
   systemctl is-active --quiet hermes-rdp.service || rollback_ok=0
   wait_health || rollback_ok=0
@@ -204,6 +213,7 @@ ROOT="$(find "$WORK" -maxdepth 1 -mindepth 1 -type d -name 'RDP-*' | head -n1)"
 test -f "$ROOT/server/pyproject.toml"
 test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
+test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
 if ((TRUSTED_CERT_ENABLED == 1)); then
   test -f "$ROOT/server/bin/hermes-rdp-cert-package.sh"
   test -f "$ROOT/server/bin/hermes-rdp-device-cert-package.sh"
@@ -348,6 +358,7 @@ for path in \
   /etc/hermes-rdp/sshd_config \
   /etc/systemd/system/hermes-rdp.service \
   /etc/systemd/system/hermes-rdp-sshd.service \
+  /etc/systemd/system/bakunity-rdp-default.service \
   /usr/local/sbin/hermes-rdp-cert-package \
   /usr/local/sbin/hermes-rdp-device-cert-package \
   /usr/local/sbin/hermes-rdp-cert-renew \
@@ -459,6 +470,9 @@ install -m 0644 \
 install -m 0644 \
   "$ROOT/server/systemd/hermes-rdp-sshd.service" \
   /etc/systemd/system/hermes-rdp-sshd.service
+install -m 0644 \
+  "$ROOT/server/systemd/bakunity-rdp-default.service" \
+  /etc/systemd/system/bakunity-rdp-default.service
 
 if ((TRUSTED_CERT_ENABLED == 1)); then
   install -m 0755 \
@@ -507,12 +521,18 @@ PY
 chmod 0640 /etc/hermes-rdp/config.json
 chown root:hermes-rdp /etc/hermes-rdp/config.json
 
+ufw allow "3389/tcp" comment 'Bakunity RDP default device' >/dev/null || true
+
 PYTHONPATH=/opt/hermes-rdp/app \
   python3 -m compileall -q /opt/hermes-rdp/app/hermes_rdp
 /usr/sbin/sshd -t -f /etc/hermes-rdp/sshd_config
 
 systemctl daemon-reload
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
+if ((DEFAULT_RDP_WAS_ACTIVE == 1)); then
+  systemctl restart bakunity-rdp-default.service
+  systemctl is-active --quiet bakunity-rdp-default.service
+fi
 systemctl is-active --quiet hermes-rdp-sshd.service
 systemctl is-active --quiet hermes-rdp.service
 wait_health
