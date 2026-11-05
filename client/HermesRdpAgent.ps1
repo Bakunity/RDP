@@ -618,6 +618,21 @@ function Get-Sessions {
     return $Names
 }
 
+function Get-RdpUserSessionCount {
+    $Count = 0
+    try {
+        foreach ($Line in @(quser.exe 2>$null | Select-Object -Skip 1)) {
+            $Text = [string]$Line
+            if ($Text -match '(?i)\brdp-tcp#\d+\b') {
+                $Count += 1
+            }
+        }
+    }
+    catch {
+    }
+    return [int]$Count
+}
+
 function Get-InteractiveUser {
     param([object[]]$Sessions = @())
     try {
@@ -1008,6 +1023,7 @@ function Get-Telemetry {
         rdp_other_local_connections = [int]$Rdp.other_local
         rdp_remote_addresses = @($Rdp.remote_addresses)
         rdp_direct_remote_addresses = @($Rdp.direct_remote_addresses)
+        rdp_user_sessions = [int](Get-RdpUserSessionCount)
         uptime_seconds = [int]$Slow.uptime_seconds
         client_repository_ref = [string]$Slow.client_repository_ref
         maintenance_capable = [bool]$Slow.maintenance_capable
