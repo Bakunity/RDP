@@ -67,6 +67,10 @@ type forwardRuntime struct {
     listener          net.Listener
     stop              chan struct{}
     stopOnce          sync.Once
+    stateMu           sync.RWMutex
+    activeSessions    int
+    lastStreamPath    string
+    lastStreamAt      time.Time
     lastDirectError   string
     lastDirectAttempt time.Time
 }
@@ -710,6 +714,14 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
         if path == "direct" {
             directDialError = ""
         }
+        runtime.stateMu.RLock()
+        activeSessions := runtime.activeSessions
+        lastStreamPath := runtime.lastStreamPath
+        lastStreamAt := int64(0)
+        if !runtime.lastStreamAt.IsZero() {
+            lastStreamAt = runtime.lastStreamAt.Unix()
+        }
+        runtime.stateMu.RUnlock()
         hpEvent := n.holePunch.get(pid)
         forwards = append(forwards, map[string]any{
             "key": runtime.spec.Key,
@@ -722,6 +734,9 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             "peer_addrs": peerAddrs,
             "direct_dial_error": directDialError,
             "direct_dial_attempt_at": directAttemptAt,
+            "active_sessions": activeSessions,
+            "last_stream_path": lastStreamPath,
+            "last_stream_at": lastStreamAt,
             "hole_punch": hpEvent,
         })
     }
@@ -936,12 +951,13 @@ func (n *nodeRuntime) serveForward(runtime *forwardRuntime) {
         if err != nil {
             return
         }
-        go n.handleForwardConn(runtime.spec, conn)
+        go n.handleForwardConn(runtime, conn)
     }
 }
 
-func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
+func (n *nodeRuntime) handleForwardConn(runtime *forwardRuntime, local net.Conn) {
     defer local.Close()
+    spec := runtime.spec
     pid, err := peer.Decode(spec.PeerID)
     if err != nil {
         return
@@ -990,6 +1006,24 @@ func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
         log.Printf("open RDP stream %s: %v", pid, err)
         return
     }
+
+    streamPath := "direct"
+    if stream.Conn().Stat().Limited {
+        streamPath = "relay"
+    }
+    runtime.stateMu.Lock()
+    runtime.activeSessions++
+    runtime.lastStreamPath = streamPath
+    runtime.lastStreamAt = time.Now()
+    runtime.stateMu.Unlock()
+    defer func() {
+        runtime.stateMu.Lock()
+        if runtime.activeSessions > 0 {
+            runtime.activeSessions--
+        }
+        runtime.stateMu.Unlock()
+    }()
+
     if err := writeStreamAuth(stream, spec.SharedSecret, n.host.ID()); err != nil {
         _ = stream.Reset()
         return
