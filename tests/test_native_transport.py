@@ -257,7 +257,7 @@ class NativeTransportTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for marker in (
             "ДОБАВИТЬ КОМПЬЮТЕР",
-            "УСТРОЙСТВА ПОДКЛЮЧЕНИЯ",
+            "ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
             '"ПОДКЛЮЧЕНИЕ"',
             "device_connection_source",
             "route_pair:",
