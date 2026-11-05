@@ -61,8 +61,10 @@ type forwardSpec struct {
 }
 
 type forwardRuntime struct {
-    spec     forwardSpec
-    listener net.Listener
+    spec              forwardSpec
+    listener          net.Listener
+    lastDirectError   string
+    lastDirectAttempt time.Time
 }
 
 type nodeRuntime struct {
@@ -610,6 +612,8 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             "direct_connections": directConns,
             "relay_connections": relayConns,
             "peer_addrs": peerAddrs,
+            "direct_dial_error": runtime.lastDirectError,
+            "direct_dial_attempt_at": runtime.lastDirectAttempt.Unix(),
         })
     }
     n.mu.RUnlock()
@@ -733,6 +737,28 @@ func (n *nodeRuntime) probeForward(spec forwardSpec) (string, error) {
         return "unavailable", fmt.Errorf("native path unavailable: %w", err)
     }
 
+    if n.pathForPeer(pid) != "direct" {
+        directTimeout := 2500 * time.Millisecond
+        if spec.Mode == "direct" {
+            directTimeout = 5 * time.Second
+        }
+        directCtx, stopDirect := context.WithTimeout(
+            context.Background(),
+            directTimeout,
+        )
+        directErr := n.tryDirectPeer(directCtx, pid)
+        stopDirect()
+        n.recordDirectAttempt(spec.Key, directErr)
+        if directErr != nil {
+            log.Printf(
+                "direct dial peer %s key=%s: %v",
+                pid,
+                spec.Key,
+                directErr,
+            )
+        }
+    }
+
     grace := 2500 * time.Millisecond
     if spec.Mode == "direct" {
         grace = 8 * time.Second
@@ -774,6 +800,24 @@ func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
         return
     }
 
+    if n.pathForPeer(pid) != "direct" {
+        directCtx, stopDirect := context.WithTimeout(
+            context.Background(),
+            2500*time.Millisecond,
+        )
+        directErr := n.tryDirectPeer(directCtx, pid)
+        stopDirect()
+        n.recordDirectAttempt(spec.Key, directErr)
+        if directErr != nil {
+            log.Printf(
+                "direct dial peer %s key=%s: %v",
+                pid,
+                spec.Key,
+                directErr,
+            )
+        }
+    }
+
     punchDeadline := time.Now().Add(2500 * time.Millisecond)
     for time.Now().Before(punchDeadline) {
         if n.pathForPeer(pid) == "direct" {
@@ -797,6 +841,66 @@ func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
         return
     }
     bridge(local, stream)
+}
+
+func (n *nodeRuntime) recordDirectAttempt(key string, err error) {
+    message := ""
+    if err != nil {
+        message = err.Error()
+        if len(message) > 500 {
+            message = message[:500]
+        }
+    }
+    n.mu.Lock()
+    defer n.mu.Unlock()
+    if runtime := n.forwards[key]; runtime != nil {
+        runtime.lastDirectAttempt = time.Now()
+        runtime.lastDirectError = message
+    }
+}
+
+func (n *nodeRuntime) tryDirectPeer(
+    ctx context.Context,
+    pid peer.ID,
+) error {
+    if n.pathForPeer(pid) == "direct" {
+        return nil
+    }
+
+    known := n.host.Peerstore().Addrs(pid)
+    directAddrs := make([]ma.Multiaddr, 0, len(known))
+    for _, addr := range known {
+        if strings.Contains(addr.String(), "/p2p-circuit") {
+            continue
+        }
+        directAddrs = append(directAddrs, addr)
+    }
+    if len(directAddrs) == 0 {
+        return errors.New("no direct peer addresses known")
+    }
+
+    directCtx := network.WithForceDirectDial(
+        ctx,
+        "bakunity-direct-upgrade",
+    )
+    directCtx = network.WithDialPeerTimeout(
+        directCtx,
+        2500*time.Millisecond,
+    )
+    err := n.host.Connect(
+        directCtx,
+        peer.AddrInfo{
+            ID:    pid,
+            Addrs: directAddrs,
+        },
+    )
+    if err != nil {
+        return fmt.Errorf("force direct dial: %w", err)
+    }
+    if n.pathForPeer(pid) != "direct" {
+        return errors.New("force direct dial completed without direct connection")
+    }
+    return nil
 }
 
 func (n *nodeRuntime) connectPeer(ctx context.Context, pid peer.ID) error {
