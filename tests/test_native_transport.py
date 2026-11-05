@@ -117,6 +117,8 @@ class NativeTransportTests(unittest.TestCase):
             "direct Bakunity path unavailable after hole-punch grace period",
             "WithForceDirectDial",
             "bakunity-direct-upgrade",
+            "holepunch.WithTracer",
+            "holepunch.DirectDialTimeout",
             '"direct_connections"',
             '"relay_connections"',
             '"peer_addrs"',
@@ -448,6 +450,22 @@ class NativeTransportTests(unittest.TestCase):
         self.assertIn("recordDirectAttempt", source)
         self.assertIn('"direct_dial_error"', source)
         self.assertIn('"direct_dial_attempt_at"', source)
+
+
+    def test_native_transport_exposes_dcutr_hole_punch_events(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "type holePunchTracer struct",
+            "func (t *holePunchTracer) Trace",
+            "holepunch.WithTracer(hpTracer)",
+            "holepunch.DirectDialTimeout(5*time.Second)",
+            '"hole_punch"',
+            '"remote_addrs"',
+            '"rtt_ms"',
+        ):
+            self.assertIn(marker, source)
 
 
 
