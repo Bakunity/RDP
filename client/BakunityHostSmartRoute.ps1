@@ -218,7 +218,21 @@ function Sync-HostNativeTransport {
                 if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
                     throw 'Host Smart Route client ref is unavailable for native transport.'
                 }
-                Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef
+                $Artifact = $Bootstrap.windows_amd64
+                if (-not $Artifact) {
+                    throw 'Windows native transport artifact is unavailable.'
+                }
+                if (
+                    ([string]$Artifact.repository_ref).ToLowerInvariant() -ne
+                    $RepositoryRef.ToLowerInvariant()
+                ) {
+                    throw 'Windows native transport artifact ref mismatch.'
+                }
+                $DownloadUrl = (
+                    ([string]$Config.api_base_url).TrimEnd('/') +
+                    [string]$Artifact.download_path
+                )
+                Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef -DownloadUrl $DownloadUrl -ExpectedSha256 ([string]$Artifact.sha256) -ApiFingerprint ([string]$Config.api_fingerprint) -BearerToken ([string]$Config.device_token)
                 Set-BakunityNativeTransportConfig -Role both -RelayAddr ([string]$Bootstrap.relay_addr) -SharedSecret ([string]$Bootstrap.shared_secret)
                 $Status = Start-BakunityNativeTransport
                 Write-HostRouteLog "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"

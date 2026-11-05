@@ -21,6 +21,7 @@ from .native_transport import (
     native_transport_enabled,
     native_transport_host_manifest,
     native_transport_relay_addr,
+    native_transport_windows_artifact,
     set_native_transport_host,
 )
 from .smart_route import (
@@ -127,6 +128,28 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _binary(self, artifact: dict[str, Any]) -> None:
+        path = Path(artifact["file_path"])
+        size = int(artifact["size"])
+        sha256 = str(artifact["sha256"])
+        self.send_response(HTTPStatus.OK)
+        self.send_header(
+            "Content-Type",
+            "application/vnd.microsoft.portable-executable",
+        )
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Bakunity-SHA256", sha256)
+        self.send_header("Connection", "close")
+        self.end_headers()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0 or length > MAX_BODY:
@@ -166,6 +189,17 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         if path == "/v1/named-access/manifest":
             self._named_access_manifest()
+            return
+        if path == "/v1/named-access/native-transport/windows-amd64":
+            self._named_access_native_transport_binary()
+            return
+        parts = [part for part in path.split("/") if part]
+        if (
+            len(parts) == 5
+            and parts[:2] == ["v1", "devices"]
+            and parts[3:] == ["native-transport", "windows-amd64"]
+        ):
+            self._device_native_transport_binary(parts[2])
             return
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
@@ -365,6 +399,58 @@ class ApiHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _native_transport_artifact_payload(
+        self,
+        download_path: str,
+    ) -> dict[str, Any] | None:
+        artifact = native_transport_windows_artifact(
+            self.server.config.client_ref
+        )
+        if not artifact:
+            return None
+        return {
+            "repository_ref": str(artifact["repository_ref"]),
+            "sha256": str(artifact["sha256"]),
+            "size": int(artifact["size"]),
+            "download_path": download_path,
+        }
+
+    def _named_access_native_transport_binary(self) -> None:
+        if not self._named_access_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        artifact = native_transport_windows_artifact(
+            self.server.config.client_ref
+        )
+        if not artifact:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "native transport artifact unavailable"},
+            )
+            return
+        self._binary(artifact)
+
+    def _device_native_transport_binary(self, device_id: str) -> None:
+        if not self._device_auth(device_id):
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        artifact = native_transport_windows_artifact(
+            self.server.config.client_ref
+        )
+        if not artifact:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "native transport artifact unavailable"},
+            )
+            return
+        self._binary(artifact)
+
     def _named_access_native_transport_bootstrap(self) -> None:
         connector = self._named_access_auth()
         if not connector:
@@ -374,6 +460,22 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
         enabled = native_transport_enabled(self.server.registry)
+        artifact = (
+            self._native_transport_artifact_payload(
+                "/v1/named-access/native-transport/windows-amd64"
+            )
+            if enabled
+            else None
+        )
+        if enabled and not artifact:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": False,
+                    "error": "native transport artifact unavailable",
+                },
+            )
+            return
         self._json(
             HTTPStatus.OK,
             {
@@ -385,9 +487,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     else ""
                 ),
                 "connector_id": str(connector["id"]),
+                "windows_amd64": artifact,
             },
         )
-
     def _named_access_mesh_bootstrap(self) -> None:
         connector = self._named_access_auth()
         if not connector:
@@ -467,6 +569,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                 {"ok": True, "enabled": False},
             )
             return
+        artifact = self._native_transport_artifact_payload(
+            f"/v1/devices/{device_id}/native-transport/windows-amd64"
+        )
+        if not artifact:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "ok": False,
+                    "error": "native transport artifact unavailable",
+                },
+            )
+            return
         self._json(
             HTTPStatus.OK,
             {
@@ -475,9 +589,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "relay_addr": bootstrap["relay_addr"],
                 "shared_secret": bootstrap["shared_secret"],
                 "device_id": device_id,
+                "windows_amd64": artifact,
             },
         )
-
     def _smart_route_telemetry(self, device_id: str) -> None:
         if not self._device_auth(device_id):
             self._json(

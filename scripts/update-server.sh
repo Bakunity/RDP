@@ -236,6 +236,7 @@ test -f "$ROOT/client/BakunityHostSmartRoute.ps1"
 test -f "$ROOT/native-transport/go.mod"
 test -f "$ROOT/native-transport/cmd/bakunity-transport/main.go"
 test -f "$ROOT/scripts/setup-native-transport.sh"
+test -f "$ROOT/scripts/build-native-transport-windows.sh"
 test -f "$ROOT/server/systemd/bakunity-transport.service"
 test -f "$ROOT/client/BakunitySmartRoute.ps1"
 test -f "$ROOT/client/BakunitySmartRouteLaunch.ps1"
@@ -377,6 +378,8 @@ COMPATIBLE_CLIENT_CSV="$(IFS=,; echo "${COMPATIBLE_CLIENT_REFS[*]}")"
 echo "SERVER_REF=$RESOLVED_SHA"
 echo "CLIENT_REF=$NEW_CLIENT_REF"
 echo "CLIENT_COMPATIBLE_REFS=$COMPATIBLE_CLIENT_CSV"
+
+BAKUNITY_TRANSPORT_CLIENT_REF="$NEW_CLIENT_REF"   bash "$ROOT/scripts/build-native-transport-windows.sh"
 
 install -d -m 0700 "$BACKUP"
 for path in \
