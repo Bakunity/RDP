@@ -483,6 +483,25 @@ class NativeTransportTests(unittest.TestCase):
             self.assertIn(marker, source)
 
 
+    def test_native_forward_reprobes_relay_path_without_breaking_fallback(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "forwardReprobeInterval = 15 * time.Second",
+            "func (n *nodeRuntime) maintainForwardPath",
+            "go n.maintainForwardPath(runtime)",
+            "case <-runtime.stop:",
+            "n.connectPeer(ctx, pid)",
+            "n.tryDirectPeer(directCtx, pid)",
+            "n.recordDirectAttempt(runtime.spec.Key, attemptErr)",
+            "stopOnce.Do",
+        ):
+            self.assertIn(marker, source)
+        self.assertIn("if n.pathForPeer(pid) == \"direct\"", source)
+        self.assertIn("continue", source)
+
+
 
 if __name__ == "__main__":
     unittest.main()
