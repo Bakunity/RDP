@@ -267,12 +267,19 @@ function Sync-HostSmartRoute {
         if ($NeedsEnrollment) {
             $Bootstrap = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-bootstrap" -Body @{}
             if ($Bootstrap -and [bool]$Bootstrap.enabled) {
-                $Result = Ensure-BakunityMeshRole -Role host -Bootstrap $Bootstrap
-                if ($Result.conflict) {
-                    Write-HostRouteLog 'MESH=CONFLICT foreign Tailscale detected'
+                try {
+                    $Result = Ensure-BakunityMeshRole -Role host -Bootstrap $Bootstrap
+                    if ($Result.conflict) {
+                        Write-HostRouteLog 'MESH=CONFLICT foreign Tailscale detected'
+                    }
+                    else {
+                        Write-HostRouteLog 'MESH=ONLINE role=host'
+                    }
                 }
-                else {
-                    Write-HostRouteLog 'MESH=ONLINE role=host'
+                catch {
+                    # Legacy mesh is optional. Keep native transport telemetry
+                    # and the independent OpenSSH RDP fallback available.
+                    Write-HostRouteLog "MESH=DEFERRED $($_.Exception.Message)"
                 }
             }
         }
