@@ -8,16 +8,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WindowsMaintenanceRecoveryTests(unittest.TestCase):
-    def test_agent_checks_real_task_and_process_before_honoring_lock(self) -> None:
+    def test_agent_requires_real_process_not_task_state_alone(self) -> None:
         text = (
             ROOT / "client/HermesRdpAgent.ps1"
         ).read_text(encoding="utf-8-sig")
         for marker in (
             "Get-ScheduledTask -TaskName $MaintenanceTaskName",
-            "[string]$Task.State -eq 'Running'",
-            "Get-CimInstance Win32_Process",
-            '$CommandLine.Contains($MaintenanceRunnerPath)',
-            "$CommandLine.Contains('HermesRdpMaintenance')",
+            "function Get-MaintenanceProcesses",
+            "Get-CimInstance",
+            "Win32_Process",
+            '$Line.Contains($MaintenanceRunnerPath)',
+            "$Line.Contains('HermesRdpMaintenance.ps1')",
+            "Stop-GhostMaintenanceTask",
+            "Stopped ghost maintenance scheduled task with no live PowerShell process",
         ):
             self.assertIn(marker, text)
 
@@ -33,6 +36,23 @@ class WindowsMaintenanceRecoveryTests(unittest.TestCase):
             "Remove-Item -LiteralPath $MaintenanceActivePath",
         ):
             self.assertIn(marker, text)
+
+    def test_start_task_recovers_ghost_scheduler_state(self) -> None:
+        text = (
+            ROOT / "client/HermesRdpAgent.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn(
+            "$LiveMaintenance = @(Get-MaintenanceProcesses)",
+            text,
+        )
+        self.assertIn(
+            "Stop-GhostMaintenanceTask -Task $ExistingTask",
+            text,
+        )
+        self.assertIn(
+            "return 'maintenance task already running'",
+            text,
+        )
 
     def test_agent_no_longer_trusts_lock_age_alone(self) -> None:
         text = (
