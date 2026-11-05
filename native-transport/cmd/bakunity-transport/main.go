@@ -30,6 +30,7 @@ import (
     "github.com/libp2p/go-libp2p/core/peer"
     "github.com/libp2p/go-libp2p/core/protocol"
     "github.com/libp2p/go-libp2p/p2p/host/autorelay"
+    "github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
     circuitclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
     circuitrelay "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
     ma "github.com/multiformats/go-multiaddr"
@@ -68,13 +69,82 @@ type forwardRuntime struct {
 }
 
 type nodeRuntime struct {
-    host      host.Host
-    relayInfo *peer.AddrInfo
-    cfg       nodeConfig
+    host       host.Host
+    relayInfo  *peer.AddrInfo
+    cfg        nodeConfig
+    holePunch  *holePunchTracer
     mu                 sync.RWMutex
     forwards           map[string]*forwardRuntime
     reservationReady   bool
     reservationUpdated time.Time
+}
+
+type holePunchEventState struct {
+    Timestamp   int64    `json:"timestamp"`
+    Type        string   `json:"type"`
+    Success     *bool    `json:"success,omitempty"`
+    Error       string   `json:"error,omitempty"`
+    Attempt     int      `json:"attempt,omitempty"`
+    RemoteAddrs []string `json:"remote_addrs,omitempty"`
+    RTTMillis   int64    `json:"rtt_ms,omitempty"`
+}
+
+type holePunchTracer struct {
+    mu     sync.RWMutex
+    latest map[peer.ID]holePunchEventState
+}
+
+func newHolePunchTracer() *holePunchTracer {
+    return &holePunchTracer{
+        latest: make(map[peer.ID]holePunchEventState),
+    }
+}
+
+func boolPtr(value bool) *bool {
+    return &value
+}
+
+func (t *holePunchTracer) Trace(evt *holepunch.Event) {
+    if evt == nil || evt.Remote == "" {
+        return
+    }
+    state := holePunchEventState{
+        Timestamp: evt.Timestamp,
+        Type:      evt.Type,
+    }
+    switch detail := evt.Evt.(type) {
+    case *holepunch.DirectDialEvt:
+        state.Success = boolPtr(detail.Success)
+        state.Error = detail.Error
+    case *holepunch.StartHolePunchEvt:
+        state.RemoteAddrs = append(
+            []string(nil),
+            detail.RemoteAddrs...,
+        )
+        state.RTTMillis = detail.RTT.Milliseconds()
+    case *holepunch.EndHolePunchEvt:
+        state.Success = boolPtr(detail.Success)
+        state.Error = detail.Error
+    case *holepunch.HolePunchAttemptEvt:
+        state.Attempt = detail.Attempt
+    case *holepunch.ProtocolErrorEvt:
+        state.Error = detail.Error
+    }
+    if len(state.Error) > 500 {
+        state.Error = state.Error[:500]
+    }
+    if len(state.RemoteAddrs) > 16 {
+        state.RemoteAddrs = state.RemoteAddrs[:16]
+    }
+    t.mu.Lock()
+    t.latest[evt.Remote] = state
+    t.mu.Unlock()
+}
+
+func (t *holePunchTracer) get(pid peer.ID) holePunchEventState {
+    t.mu.RLock()
+    defer t.mu.RUnlock()
+    return t.latest[pid]
 }
 
 type relayACL struct {
@@ -368,6 +438,7 @@ func runNode(args []string) {
         fatalf("relay peer: %v", err)
     }
 
+    hpTracer := newHolePunchTracer()
     h, err := libp2p.New(
         libp2p.Identity(key),
         libp2p.ListenAddrStrings(
@@ -381,7 +452,10 @@ func runNode(args []string) {
             autorelay.WithMinCandidates(1),
             autorelay.WithNumRelays(1),
         ),
-        libp2p.EnableHolePunching(),
+        libp2p.EnableHolePunching(
+            holepunch.WithTracer(hpTracer),
+            holepunch.DirectDialTimeout(5*time.Second),
+        ),
         libp2p.NATPortMap(),
         libp2p.ForceReachabilityPrivate(),
     )
@@ -394,6 +468,7 @@ func runNode(args []string) {
         host:      h,
         relayInfo: relayInfo,
         cfg:       cfg,
+        holePunch: hpTracer,
         forwards:  map[string]*forwardRuntime{},
     }
 
@@ -607,6 +682,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
         if !runtime.lastDirectAttempt.IsZero() {
             directAttemptAt = runtime.lastDirectAttempt.Unix()
         }
+        hpEvent := n.holePunch.get(pid)
         forwards = append(forwards, map[string]any{
             "key": runtime.spec.Key,
             "peer_id": runtime.spec.PeerID,
@@ -618,6 +694,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             "peer_addrs": peerAddrs,
             "direct_dial_error": runtime.lastDirectError,
             "direct_dial_attempt_at": directAttemptAt,
+            "hole_punch": hpEvent,
         })
     }
     n.mu.RUnlock()
