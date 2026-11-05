@@ -452,7 +452,7 @@ class TelegramBot:
                 ]
             )
         rows.append([self.button("add", "ДОБАВИТЬ ПК", "add", style="primary")])
-        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
+        rows.append([self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh")])
         return text, {"inline_keyboard": rows}
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
@@ -660,7 +660,7 @@ class TelegramBot:
             elif client_ref and desired_ref:
                 if maintenance_state == "running" and maintenance_action == "update":
                     client_status = (
-                        f"{self.icon('timer')} ОБНОВЛЯЕТСЯ · "
+                        f"{self.icon('timer')} ОБНОВЛЯЕТСЯ АВТОМАТИЧЕСКИ · "
                         f"{client_ref[:7]} → {desired_ref[:7]}"
                     )
                 elif maintenance_state == "failed" and maintenance_action == "update":
@@ -670,7 +670,7 @@ class TelegramBot:
                     )
                 else:
                     client_status = (
-                        f"{self.icon('upload')} ОЖИДАЕТ ОБНОВЛЕНИЯ · "
+                        f"{self.icon('upload')} ОБНОВИТСЯ АВТОМАТИЧЕСКИ · "
                         f"{client_ref[:7]} → {desired_ref[:7]}"
                     )
             else:
@@ -804,7 +804,7 @@ class TelegramBot:
         keyboard = {
             "inline_keyboard": control_rows + [
                 [
-                    self.button("refresh", "ОБНОВИТЬ", "refresh", style="primary"),
+                    self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh", style="primary"),
                     self.button(
                         "watch_off" if live_active else "watch",
                         live_text,
