@@ -502,6 +502,20 @@ class NativeTransportTests(unittest.TestCase):
         self.assertIn("continue", source)
 
 
+    def test_native_direct_status_clears_stale_direct_dial_error(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            'if path == "direct"',
+            'directDialError = ""',
+            "func (n *nodeRuntime) clearDirectError",
+            "n.clearDirectError(spec.Key)",
+            "n.clearDirectError(runtime.spec.Key)",
+        ):
+            self.assertIn(marker, source)
+
+
 
 if __name__ == "__main__":
     unittest.main()

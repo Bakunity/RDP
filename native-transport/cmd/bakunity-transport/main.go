@@ -705,17 +705,22 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
         if !runtime.lastDirectAttempt.IsZero() {
             directAttemptAt = runtime.lastDirectAttempt.Unix()
         }
+        path := n.pathForPeer(pid)
+        directDialError := runtime.lastDirectError
+        if path == "direct" {
+            directDialError = ""
+        }
         hpEvent := n.holePunch.get(pid)
         forwards = append(forwards, map[string]any{
             "key": runtime.spec.Key,
             "peer_id": runtime.spec.PeerID,
             "listen": runtime.spec.Listen,
             "mode": runtime.spec.Mode,
-            "path": n.pathForPeer(pid),
+            "path": path,
             "direct_connections": directConns,
             "relay_connections": relayConns,
             "peer_addrs": peerAddrs,
-            "direct_dial_error": runtime.lastDirectError,
+            "direct_dial_error": directDialError,
             "direct_dial_attempt_at": directAttemptAt,
             "hole_punch": hpEvent,
         })
@@ -876,6 +881,7 @@ func (n *nodeRuntime) probeForward(spec forwardSpec) (string, error) {
     deadline := time.Now().Add(grace)
     for time.Now().Before(deadline) {
         if n.pathForPeer(pid) == "direct" {
+            n.clearDirectError(spec.Key)
             return "direct", nil
         }
         time.Sleep(100 * time.Millisecond)
@@ -901,6 +907,7 @@ func (n *nodeRuntime) maintainForwardPath(runtime *forwardRuntime) {
             return
         case <-ticker.C:
             if n.pathForPeer(pid) == "direct" {
+                n.clearDirectError(runtime.spec.Key)
                 continue
             }
 
@@ -988,6 +995,14 @@ func (n *nodeRuntime) handleForwardConn(spec forwardSpec, local net.Conn) {
         return
     }
     bridge(local, stream)
+}
+
+func (n *nodeRuntime) clearDirectError(key string) {
+    n.mu.Lock()
+    defer n.mu.Unlock()
+    if runtime := n.forwards[key]; runtime != nil {
+        runtime.lastDirectError = ""
+    }
 }
 
 func (n *nodeRuntime) recordDirectAttempt(key string, err error) {
