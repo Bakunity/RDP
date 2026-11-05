@@ -397,6 +397,23 @@ class Registry:
             raise KeyError(connector_id)
         return self._connector_row(row)
 
+    def rename_named_access_connector(
+        self,
+        connector_id: str,
+        name: str,
+    ) -> None:
+        clean = str(name or "").strip()[:64]
+        if not clean:
+            raise ValueError("name is empty")
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE named_access_tokens SET name=?,updated_at=? "
+                "WHERE id=? AND revoked_at IS NULL",
+                (clean, now(), connector_id),
+            )
+        if cursor.rowcount != 1:
+            raise KeyError(connector_id)
+
     def set_named_access_route_policy(
         self,
         connector_id: str,

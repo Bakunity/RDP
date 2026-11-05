@@ -49,16 +49,40 @@ class TelegramUxBot(TelegramBot):
             device_id = str(
                 self.registry.get_setting("selected_device", "") or ""
             )
+            connector_id = str(
+                self.registry.get_setting("selected_connector", "") or ""
+            )
 
-            if input_mode in {"device_name", "device_slug"} and not raw_text.startswith("/"):
+            if input_mode == "connector_name" and not raw_text.startswith("/"):
+                try:
+                    self.registry.rename_named_access_connector(
+                        connector_id,
+                        raw_text,
+                    )
+                    self.registry.set_setting("input_mode", "")
+                    self.registry.set_setting("input_error", "")
+                    self.registry.set_setting(
+                        "screen",
+                        "device_connection_source",
+                    )
+                    self._delete_input_message(message)
+                    self.render()
+                except Exception as exc:
+                    self.registry.set_setting("input_error", str(exc)[:180])
+                    self.render()
+                return
+
+            if (
+                input_mode in {"device_name", "device_slug"}
+                and not raw_text.startswith("/")
+            ):
                 try:
                     self.registry.get_device(device_id)
                     if input_mode == "device_name":
                         self.registry.rename_device(device_id, raw_text)
                         self.registry.set_setting("input_mode", "")
                         self.registry.set_setting("input_error", "")
-                        self.registry.set_setting("screen", "device")
-                        # Accepted edit input is transient UI, not chat history.
+                        self.registry.set_setting("screen", "device_settings")
                         self._delete_input_message(message)
                         self.render()
                         return
@@ -85,8 +109,6 @@ class TelegramUxBot(TelegramBot):
                         "screen",
                         "device_address_progress",
                     )
-                    # Keep fast certificate telemetry flowing throughout the
-                    # whole convergence window, not only the first 60 seconds.
                     self.registry.set_setting(
                         "live_until",
                         str(int(time.time()) + 180),
@@ -122,8 +144,6 @@ class TelegramUxBot(TelegramBot):
                             "address_change_target_thumbprint",
                             str(target.get("thumbprint") or ""),
                         )
-                    # The user's input is accepted only after the server has a
-                    # valid certificate for the new hostname.
                     self._delete_input_message(message)
                     self.render()
                 except Exception as exc:
@@ -131,7 +151,11 @@ class TelegramUxBot(TelegramBot):
                     self.render()
                 return
 
-            if raw_text.split("@", 1)[0].lower() in {"/start", "/menu", "/status"}:
+            if raw_text.split("@", 1)[0].lower() in {
+                "/start",
+                "/menu",
+                "/status",
+            }:
                 self.registry.set_setting("input_mode", "")
                 self.registry.set_setting("input_error", "")
 
@@ -144,6 +168,7 @@ class TelegramUxBot(TelegramBot):
         if not (
             data.startswith("edit_name:")
             or data.startswith("edit_slug:")
+            or data.startswith("edit_connector:")
         ):
             self.registry.set_setting("input_mode", "")
             self.registry.set_setting("input_error", "")
@@ -178,7 +203,7 @@ class TelegramUxBot(TelegramBot):
             self.registry.set_setting("selected_device", device_id)
             self.registry.set_setting("input_mode", "")
             self.registry.set_setting("input_error", "")
-            self.registry.set_setting("screen", "device")
+            self.registry.set_setting("screen", "device_settings")
             self._answer(callback_id, "Изменение отменено")
             self.render()
             return
@@ -191,6 +216,50 @@ class TelegramUxBot(TelegramBot):
             self.registry.set_setting("pair_code", code)
             self.registry.set_setting("screen", "pair")
             self._answer(callback_id, "Новый код создан")
+            self.render()
+            return
+
+        if data.startswith("settings:"):
+            device_id = data.split(":", 1)[1]
+            try:
+                self.registry.get_device(device_id)
+            except KeyError:
+                self._answer(callback_id, "Компьютер не найден")
+                self.render()
+                return
+            self._set_live(False)
+            self.registry.set_setting("selected_device", device_id)
+            self.registry.set_setting("screen", "device_settings")
+            self._answer(callback_id)
+            self.render()
+            return
+
+        if data.startswith("edit_connector:"):
+            connector_id = data.split(":", 1)[1]
+            try:
+                self.registry.get_named_access_connector(connector_id)
+            except KeyError:
+                self._answer(callback_id, "Устройство не найдено")
+                self.render()
+                return
+            self.registry.set_setting("selected_connector", connector_id)
+            self.registry.set_setting("input_mode", "connector_name")
+            self.registry.set_setting("input_error", "")
+            self.registry.set_setting("screen", "connector_edit")
+            self._answer(callback_id, "Отправь новое имя")
+            self.render()
+            return
+
+        if data.startswith("connector_edit_cancel:"):
+            connector_id = data.split(":", 1)[1]
+            self.registry.set_setting("selected_connector", connector_id)
+            self.registry.set_setting("input_mode", "")
+            self.registry.set_setting("input_error", "")
+            self.registry.set_setting(
+                "screen",
+                "device_connection_source",
+            )
+            self._answer(callback_id, "Изменение отменено")
             self.render()
             return
 
@@ -219,7 +288,7 @@ class TelegramUxBot(TelegramBot):
                 return
             self._set_live(False)
             self.registry.set_setting("selected_device", device_id)
-            self.registry.set_setting("screen", "device_technical")
+            self.registry.set_setting("screen", "device_details")
             self._answer(callback_id)
             self.render()
             return
@@ -368,7 +437,12 @@ class TelegramUxBot(TelegramBot):
         if data == "connector_add_done":
             self._pending_connector_install_command = ""
             self.registry.set_setting("pending_connector_add_id", "")
-            self.registry.set_setting("screen", "connectors")
+            target_screen = (
+                "device_connection"
+                if self.registry.get_setting("selected_device", "")
+                else "home"
+            )
+            self.registry.set_setting("screen", target_screen)
             self._answer(callback_id)
             self.render()
             return
@@ -392,7 +466,12 @@ class TelegramUxBot(TelegramBot):
                     pass
             self._pending_connector_install_command = ""
             self.registry.set_setting("pending_connector_add_id", "")
-            self.registry.set_setting("screen", "connectors")
+            target_screen = (
+                "device_connection"
+                if self.registry.get_setting("selected_device", "")
+                else "home"
+            )
+            self.registry.set_setting("screen", target_screen)
             self._answer(callback_id, "Добавление отменено")
             self.render()
             return
@@ -435,7 +514,12 @@ class TelegramUxBot(TelegramBot):
                 self._answer(callback_id, "Устройство не найдено")
                 return
             self.registry.set_setting("selected_connector", "")
-            self.registry.set_setting("screen", "connectors")
+            target_screen = (
+                "device_connection"
+                if self.registry.get_setting("selected_device", "")
+                else "home"
+            )
+            self.registry.set_setting("screen", target_screen)
             self._answer(callback_id, "Устройство удалено")
             self.render()
             return
@@ -477,24 +561,11 @@ class TelegramUxBot(TelegramBot):
 
     def _home(self) -> tuple[str, dict[str, Any]]:
         devices = self.registry.list_devices()
-        online = sum(1 for device in devices if self._online(device))
-        connectors = self.registry.list_named_access_tokens()
-        connector_online = sum(
-            1
-            for connector in connectors
-            if connector.get("last_seen")
-            and int(time.time()) - int(connector["last_seen"]) <= 45
-        )
         text = (
             f"{self.icon('computer')} BAKUNITY RDP\n\n"
-            f"Компьютеры: {len(devices)} · в сети {online}\n"
-            "К ним подключаемся удалённо.\n\n"
-            f"Устройства подключения: {len(connectors)} · "
-            f"в сети {connector_online}\n"
-            "С них подключаемся к компьютерам.\n\n"
-            "Выбери компьютер или добавь новое устройство."
+            "МОИ КОМПЬЮТЕРЫ"
         )
-        rows = []
+        rows: list[list[dict[str, Any]]] = []
         for device in devices:
             rows.append(
                 [
@@ -506,31 +577,27 @@ class TelegramUxBot(TelegramBot):
                     )
                 ]
             )
-        rows.append([
-            self.button(
-                "computer",
-                "⊞ ДОБАВИТЬ КОМПЬЮТЕР",
-                "add",
-                style="primary",
-            )
-        ])
-        rows.append([
-            self.button(
-                "globe",
-                "УСТРОЙСТВА ПОДКЛЮЧЕНИЯ",
-                "connectors",
-                style="primary",
-            )
-        ])
-        rows.append([
-            self.button(
-                "globe",
-                "⊞ ДОБАВИТЬ УСТРОЙСТВО",
-                "connector_add",
-                style="primary",
-            )
-        ])
-        rows.append([self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh")])
+        if not devices:
+            text += "\n\nКомпьютеров пока нет."
+        rows.append(
+            [
+                self.button(
+                    "add",
+                    "ДОБАВИТЬ КОМПЬЮТЕР",
+                    "add",
+                    style="primary",
+                )
+            ]
+        )
+        rows.append(
+            [
+                self.button(
+                    "refresh",
+                    "ОБНОВИТЬ СТАТУС",
+                    "refresh",
+                )
+            ]
+        )
         return text, {"inline_keyboard": rows}
 
     def _product_notice(self, device: dict[str, Any]) -> str:
@@ -543,46 +610,69 @@ class TelegramUxBot(TelegramBot):
         if "access_enabled" in telemetry:
             applied_access = bool(telemetry.get("access_enabled"))
             if applied_access != desired_access:
-                return f"{self.icon('warning')} Изменение доступа ещё применяется"
+                return (
+                    f"{self.icon('warning')} Изменение доступа ещё применяется"
+                )
 
         if (
-            bool(getattr(self.config, "trusted_rdp_certificate_enabled", False))
+            bool(
+                getattr(
+                    self.config,
+                    "trusted_rdp_certificate_enabled",
+                    False,
+                )
+            )
             and "certificate_lifecycle_ok" in telemetry
             and not bool(telemetry.get("certificate_lifecycle_ok"))
         ):
-            return f"{self.icon('warning')} Защищённое подключение требует восстановления"
+            return (
+                f"{self.icon('warning')} "
+                "Защищённое подключение требует восстановления"
+            )
 
         if (
             "maintenance_capable" in telemetry
             and not bool(telemetry.get("maintenance_capable"))
         ):
-            return f"{self.icon('warning')} Bakunity RDP требует восстановления"
-
-        client_ref = str(telemetry.get("client_repository_ref") or "").lower()
-        if client_ref and not self._client_ref_is_compatible(client_ref):
-            desired_ref = self._client_ref().lower()
-            maintenance = telemetry.get("maintenance_status") or {}
-            state = str(maintenance.get("state") or "").lower()
-            action = str(maintenance.get("action") or "").lower()
-            target = str(maintenance.get("repository_ref") or "").lower()
-            current_update = bool(
-                action == "update"
-                and desired_ref
-                and target == desired_ref
-            )
-            if current_update and state == "running":
-                return (
-                    f"{self.icon('timer')} Bakunity RDP обновляется "
-                    "автоматически"
-                )
-            if current_update and state == "failed":
-                return (
-                    f"{self.icon('warning')} Автообновление не завершилось · "
-                    "система повторит попытку автоматически"
-                )
             return (
-                f"{self.icon('upload')} Доступно обновление Bakunity RDP · "
-                "установится автоматически"
+                f"{self.icon('warning')} "
+                "Bakunity RDP требует восстановления"
+            )
+
+        client_ref = str(
+            telemetry.get("client_repository_ref") or ""
+        ).lower()
+        desired_ref = self._client_ref().lower()
+        maintenance = telemetry.get("maintenance_status") or {}
+        state = str(maintenance.get("state") or "").lower()
+        action = str(maintenance.get("action") or "").lower()
+        target = str(maintenance.get("repository_ref") or "").lower()
+        current_update = bool(
+            action == "update"
+            and desired_ref
+            and target == desired_ref
+        )
+
+        if current_update and state == "running":
+            return (
+                f"{self.icon('refresh')} "
+                "ОБНОВЛЕНИЕ BAKUNITY RDP · В ПРОЦЕССЕ"
+            )
+        if (
+            client_ref
+            and not self._client_ref_is_compatible(client_ref)
+            and current_update
+            and state == "failed"
+        ):
+            return (
+                f"{self.icon('warning')} "
+                "Обновление Bakunity RDP не завершено · "
+                "система повторит попытку"
+            )
+        if client_ref and not self._client_ref_is_compatible(client_ref):
+            return (
+                f"{self.icon('refresh')} "
+                "ОБНОВЛЕНИЕ BAKUNITY RDP · ОЖИДАЕТ ЗАПУСКА"
             )
         return ""
 
@@ -594,47 +684,225 @@ class TelegramUxBot(TelegramBot):
             return self._device_host(device)
         return self._rdp_endpoint(device)
 
-    def _connectors(self) -> tuple[str, dict[str, Any]]:
-        connectors = self.registry.list_named_access_tokens()
-        rows: list[list[dict[str, Any]]] = []
-        now = int(time.time())
+    def _visible_connectors(self) -> list[dict[str, Any]]:
+        connectors = [
+            connector
+            for connector in self.registry.list_named_access_tokens()
+            if int(connector.get("last_seen") or 0) > 0
+        ]
+        connectors.sort(
+            key=lambda item: (
+                int(item.get("last_seen") or 0),
+                int(item.get("updated_at") or 0),
+                int(item.get("created_at") or 0),
+            ),
+            reverse=True,
+        )
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for connector in connectors:
-            last_seen = int(connector.get("last_seen") or 0)
-            online = last_seen > 0 and now - last_seen <= 45
             machine = str(connector.get("machine_name") or "").strip()
-            label = str(connector.get("name") or "Connector")
-            if machine:
-                label = f"{label} · {machine}"
-            rows.append(
-                [
-                    self.button(
-                        "online" if online else "offline",
-                        label,
-                        f"connector:{connector['id']}",
-                        style="success" if online else None,
-                    )
-                ]
+            key = machine.casefold() if machine else str(connector.get("id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(connector)
+        return result
+
+    @staticmethod
+    def _connector_display_name(connector: dict[str, Any]) -> str:
+        machine = str(connector.get("machine_name") or "").strip()
+        name = str(connector.get("name") or "").strip()
+        generic = {
+            "",
+            "Windows connector",
+            "Windows Connector",
+            "Windows устройство",
+            "Windows device",
+        }
+        if name not in generic:
+            return name
+        return machine or "Windows"
+
+    @staticmethod
+    def _policy_label(value: str) -> str:
+        return {
+            "auto": "АВТО",
+            "p2p": "ТОЛЬКО P2P",
+            "lan": "ТОЛЬКО LAN",
+            "relay": "ТОЛЬКО RELAY",
+        }.get(str(value or "").lower(), "АВТО")
+
+    def _active_connection_state(
+        self,
+        device: dict[str, Any],
+    ) -> dict[str, Any]:
+        device_id = str(device.get("id") or "")
+        for connector in self._visible_connectors():
+            telemetry = connector.get("telemetry") or {}
+            route = (telemetry.get("routes") or {}).get(device_id) or {}
+            try:
+                active_sessions = int(route.get("active_sessions") or 0)
+            except (TypeError, ValueError):
+                active_sessions = 0
+            if active_sessions <= 0:
+                continue
+            try:
+                latency = int(route.get("latency_ms") or 0)
+            except (TypeError, ValueError):
+                latency = 0
+            try:
+                received = int(route.get("bytes_received") or 0)
+            except (TypeError, ValueError):
+                received = 0
+            try:
+                sent = int(route.get("bytes_sent") or 0)
+            except (TypeError, ValueError):
+                sent = 0
+            return {
+                "active": True,
+                "route": str(route.get("route") or "unavailable"),
+                "label": self._route_label(
+                    str(route.get("route") or "unavailable")
+                ),
+                "latency_ms": latency,
+                "bytes_received": received,
+                "bytes_sent": sent,
+                "sessions": active_sessions,
+                "source": self._connector_display_name(connector),
+                "exact": True,
+            }
+
+        telemetry = device.get("telemetry") or {}
+        try:
+            through_bakunity = int(
+                telemetry.get("rdp_hermes_connections") or 0
             )
-        rows.append(
-            [
-                self.button(
-                    "add",
-                    "⊞ ДОБАВИТЬ УСТРОЙСТВО",
-                    "connector_add",
-                    style="primary",
-                )
-            ]
+        except (TypeError, ValueError):
+            through_bakunity = 0
+        if through_bakunity > 0:
+            return {
+                "active": True,
+                "route": "server",
+                "label": "☁️ ЧЕРЕЗ СЕРВЕР BAKUNITY",
+                "latency_ms": 0,
+                "bytes_received": 0,
+                "bytes_sent": 0,
+                "sessions": through_bakunity,
+                "source": "",
+                "exact": False,
+            }
+
+        try:
+            direct = int(telemetry.get("rdp_direct_connections") or 0)
+        except (TypeError, ValueError):
+            direct = 0
+        if direct > 0:
+            return {
+                "active": True,
+                "route": "direct",
+                "label": "🏠 ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
+                "latency_ms": 0,
+                "bytes_received": 0,
+                "bytes_sent": 0,
+                "sessions": direct,
+                "source": "",
+                "exact": False,
+            }
+
+        try:
+            total = int(telemetry.get("rdp_connections") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if total > 0:
+            return {
+                "active": True,
+                "route": "rdp",
+                "label": "🟢 RDP ПОДКЛЮЧЕНО",
+                "latency_ms": 0,
+                "bytes_received": 0,
+                "bytes_sent": 0,
+                "sessions": total,
+                "source": "",
+                "exact": False,
+            }
+
+        return {
+            "active": False,
+            "route": "inactive",
+            "label": "⚪ Подключение сейчас не активно",
+            "latency_ms": 0,
+            "bytes_received": 0,
+            "bytes_sent": 0,
+            "sessions": 0,
+            "source": "",
+            "exact": False,
+        }
+
+    def _update_status_text(self, device: dict[str, Any]) -> str:
+        telemetry = device.get("telemetry") or {}
+        client_ref = str(
+            telemetry.get("client_repository_ref") or ""
+        ).lower()
+        desired_ref = self._client_ref().lower()
+        maintenance = telemetry.get("maintenance_status") or {}
+        state = str(maintenance.get("state") or "").lower()
+        action = str(maintenance.get("action") or "").lower()
+        target = str(maintenance.get("repository_ref") or "").lower()
+        current_update = bool(
+            action == "update"
+            and desired_ref
+            and target == desired_ref
         )
-        rows.append([self.button("back", "НАЗАД", "home")])
+        version = client_ref[:7] if client_ref else "—"
+        target_version = desired_ref[:7] if desired_ref else "—"
+
+        if current_update and state == "running":
+            return (
+                f"{self.icon('refresh')} Обновление Bakunity RDP · в процессе\n"
+                f"Версия: {version} → {target_version}"
+            )
+        if current_update and state == "failed":
+            return (
+                f"{self.icon('warning')} "
+                "Обновление Bakunity RDP не завершено\n"
+                "Повторная попытка будет выполнена системой"
+            )
+        if client_ref and self._client_ref_is_compatible(client_ref):
+            return (
+                f"{self.icon('success')} Актуальная версия · {version}"
+            )
+        if client_ref:
+            return (
+                f"{self.icon('refresh')} "
+                "Обновление Bakunity RDP · ожидает запуска\n"
+                f"Версия: {version} → {target_version}"
+            )
+        return f"{self.icon('info')} Версия Bakunity RDP: —"
+
+    def _connectors(self) -> tuple[str, dict[str, Any]]:
         text = (
-            f"{self.icon('globe')} УСТРОЙСТВА ПОДКЛЮЧЕНИЯ\n\n"
-            "Это Windows-ПК и ноутбуки, с которых ты подключаешься "
-            "к своим компьютерам через Bakunity.\n\n"
-            f"Всего: {len(connectors)}"
+            f"{self.icon('info')} ПРЯМОЕ ПОДКЛЮЧЕНИЕ\n\n"
+            "Теперь оно настраивается внутри конкретного компьютера. "
+            "Открой компьютер → Настройки → Прямое подключение."
         )
-        return text, {"inline_keyboard": rows}
+        return text, {
+            "inline_keyboard": [
+                [self.button("back", "К КОМПЬЮТЕРАМ", "home")]
+            ]
+        }
 
     def _connector_add_screen(self) -> tuple[str, dict[str, Any]]:
+        device_id = str(
+            self.registry.get_setting("selected_device", "") or ""
+        )
+        device = None
+        if device_id:
+            try:
+                device = self.registry.get_device(device_id)
+            except KeyError:
+                device = None
+
         connector_id = str(
             self.registry.get_setting(
                 "pending_connector_add_id",
@@ -658,25 +926,27 @@ class TelegramUxBot(TelegramBot):
 
         if connector and int(connector.get("last_seen") or 0):
             self._pending_connector_install_command = ""
+            name = self._connector_display_name(connector)
             text = (
-                f"{self.icon('success')} УСТРОЙСТВО ДОБАВЛЕНО\n\n"
-                "Bakunity уже получил первое подключение от Windows.\n"
-                "Устройство появилось в списке и готово к настройке маршрутов."
+                f"{self.icon('success')} УСТРОЙСТВО ГОТОВО\n\n"
+                f"{escape(name)} подключено к Bakunity.\n"
+                "Теперь Bakunity сможет пробовать прямой P2P, LAN и relay "
+                "и выбирать маршрут автоматически."
             )
             keyboard = {
                 "inline_keyboard": [
                     [
                         self.button(
-                            "globe",
-                            "ОТКРЫТЬ УСТРОЙСТВО",
-                            f"connector:{connector_id}",
+                            "settings",
+                            "НАСТРОИТЬ УСТРОЙСТВО",
+                            f"connection_source:{connector_id}",
                             style="success",
                         )
                     ],
                     [
                         self.button(
                             "back",
-                            "К УСТРОЙСТВАМ",
+                            "НАЗАД",
                             "connector_add_done",
                         )
                     ],
@@ -688,14 +958,13 @@ class TelegramUxBot(TelegramBot):
             text = (
                 f"{self.icon('warning')} КОМАНДА БОЛЬШЕ НЕ ПОКАЗЫВАЕТСЯ\n\n"
                 "Одноразовый секрет не хранится в базе Bakunity. "
-                "Если бот был перезапущен или экран уже закрывался, "
-                "создай новую команду."
+                "Создай новую команду."
             )
             keyboard = {
                 "inline_keyboard": [
                     [
                         self.button(
-                            "globe",
+                            "add",
                             "СОЗДАТЬ НОВУЮ КОМАНДУ",
                             "connector_add",
                             style="primary",
@@ -704,7 +973,7 @@ class TelegramUxBot(TelegramBot):
                     [
                         self.button(
                             "back",
-                            "К УСТРОЙСТВАМ",
+                            "НАЗАД",
                             "connector_add_cancel",
                         )
                     ],
@@ -712,34 +981,32 @@ class TelegramUxBot(TelegramBot):
             }
             return text, keyboard
 
+        target = (
+            f" к {escape(device['display_name'])}"
+            if device
+            else ""
+        )
         text = (
-            f"{self.icon('add')} ДОБАВИТЬ УСТРОЙСТВО ПОДКЛЮЧЕНИЯ\n\n"
-            "Это Windows-ПК или ноутбук, с которого ты будешь "
-            "подключаться к своим компьютерам.\n\n"
-            "1. Открой PowerShell от администратора на этом устройстве.\n"
+            f"{self.icon('power')} ПРЯМОЕ ПОДКЛЮЧЕНИЕ{target}\n\n"
+            "Установи Bakunity на Windows-ПК или ноутбук, "
+            "с которого ты обычно подключаешься.\n\n"
+            "Это необязательно: без этого RDP продолжит работать "
+            "через сервер Bakunity.\n\n"
+            "1. Открой PowerShell от администратора.\n"
             "2. Вставь команду целиком.\n"
-            "3. Bakunity добавит устройство автоматически.\n\n"
+            "3. Устройство появится здесь автоматически.\n\n"
             f"<pre><code>{html.escape(command)}</code></pre>\n\n"
-            "Команда содержит одноразовый секрет. Не пересылай её. "
-            "После выхода с этого экрана команда исчезнет из сообщения."
+            "Команда содержит одноразовый секрет. Не пересылай её."
         )
         keyboard = {
             "inline_keyboard": [
                 [
                     self.button(
-                        "success",
-                        "ГОТОВО",
-                        "connector_add_done",
-                        style="success",
-                    )
-                ],
-                [
-                    self.button(
                         "cancel",
-                        "ОТМЕНИТЬ ДОБАВЛЕНИЕ",
+                        "ОТМЕНИТЬ",
                         "connector_add_cancel",
                     )
-                ],
+                ]
             ]
         }
         return text, keyboard
@@ -829,67 +1096,74 @@ class TelegramUxBot(TelegramBot):
     @staticmethod
     def _route_label(value: str) -> str:
         return {
-            "lan": "🏠 LAN DIRECT",
-            "p2p": "⚡ P2P DIRECT",
+            "lan": "🏠 LAN",
+            "p2p": "⚡ P2P",
             "native_p2p": "⚡ BAKUNITY P2P",
-            "native_auto": "⚡ BAKUNITY AUTO",
-            "native_relay": "🔁 BAKUNITY RELAY",
-            "relay": "☁️ VPS RELAY",
-            "unavailable": "○ НЕТ МАРШРУТА",
+            "native_auto": "⚡ BAKUNITY",
+            "native_relay": "☁️ BAKUNITY RELAY",
+            "relay": "☁️ ЧЕРЕЗ СЕРВЕР BAKUNITY",
+            "unavailable": "⚪ МАРШРУТ ПОКА НЕДОСТУПЕН",
         }.get(str(value or "").lower(), str(value or "—").upper())
 
     def _device_connection(
         self,
         device: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
-        connectors = self.registry.list_named_access_tokens()
-        now = int(time.time())
+        connectors = self._visible_connectors()
         rows: list[list[dict[str, Any]]] = []
         lines = [
-            f"{self.icon('globe')} {escape(device['display_name']).upper()} · ПОДКЛЮЧЕНИЕ",
+            f"{self.icon('power')} ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
             "",
-            f"Адрес: {escape(self._product_rdp_endpoint(device))}",
+            f"Компьютер: {escape(device['display_name'])}",
             "",
-            "УСТРОЙСТВО ПОДКЛЮЧЕНИЯ",
+            "Bakunity может подключаться к этому компьютеру напрямую "
+            "с другого Windows-устройства.",
+            "Это необязательно. Без настройки RDP продолжит работать "
+            "через сервер Bakunity.",
+            "",
+            "МОИ УСТРОЙСТВА",
         ]
+
         for connector in connectors:
             telemetry = connector.get("telemetry") or {}
-            route = (telemetry.get("routes") or {}).get(str(device["id"])) or {}
+            route = (telemetry.get("routes") or {}).get(
+                str(device["id"])
+            ) or {}
             raw_route = str(route.get("route") or "unavailable")
-            latency = int(route.get("latency_ms") or 0)
+            try:
+                latency = int(route.get("latency_ms") or 0)
+            except (TypeError, ValueError):
+                latency = 0
+            name = self._connector_display_name(connector)
             last_seen = int(connector.get("last_seen") or 0)
-            online = last_seen > 0 and now - last_seen <= 45
-            source_name = str(
-                connector.get("machine_name")
-                or connector.get("name")
-                or "Windows"
-            )
-            policy = self.registry.get_connector_device_route_policy(
-                str(connector["id"]),
-                str(device["id"]),
-            ).upper()
+            online = last_seen > 0 and int(time.time()) - last_seen <= 45
+            route_text = self._route_label(raw_route)
             suffix = f" · {latency} мс" if latency > 0 else ""
             lines.append(
-                f"{'🟢' if online else '⚪'} {escape(source_name)}: "
-                f"{escape(self._route_label(raw_route))}{suffix} · {policy}"
+                f"{'🟢' if online else '⚪'} {escape(name)} · "
+                f"{escape(route_text)}{suffix}"
             )
             rows.append(
                 [
                     self.button(
                         "online" if online else "offline",
-                        source_name,
+                        name,
                         f"connection_source:{connector['id']}",
                         style="success" if online else None,
                     )
                 ]
             )
+
         if not connectors:
             lines.extend(
                 [
-                    "Устройств подключения пока нет.",
-                    "Добавь Windows-ПК или ноутбук, с которого будешь подключаться.",
+                    "Пока не настроено.",
+                    "",
+                    "Добавь устройство только если хочешь прямой P2P/LAN "
+                    "и автоматический выбор лучшего маршрута.",
                 ]
             )
+
         rows.append(
             [
                 self.button(
@@ -904,8 +1178,8 @@ class TelegramUxBot(TelegramBot):
             [
                 self.button(
                     "back",
-                    "К КОМПЬЮТЕРУ",
-                    f"device:{device['id']}",
+                    "К НАСТРОЙКАМ",
+                    f"settings:{device['id']}",
                 )
             ]
         )
@@ -917,57 +1191,93 @@ class TelegramUxBot(TelegramBot):
         connector: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
         telemetry = connector.get("telemetry") or {}
-        route = (telemetry.get("routes") or {}).get(str(device["id"])) or {}
+        route = (telemetry.get("routes") or {}).get(
+            str(device["id"])
+        ) or {}
         raw_route = str(route.get("route") or "unavailable")
-        latency = int(route.get("latency_ms") or 0)
-        reason = str(route.get("reason") or "")
+        try:
+            latency = int(route.get("latency_ms") or 0)
+        except (TypeError, ValueError):
+            latency = 0
+        try:
+            active_sessions = int(route.get("active_sessions") or 0)
+        except (TypeError, ValueError):
+            active_sessions = 0
         policy = self.registry.get_connector_device_route_policy(
             str(connector["id"]),
             str(device["id"]),
         )
-        source_name = str(
-            connector.get("machine_name")
-            or connector.get("name")
-            or "Windows"
-        )
+        source_name = self._connector_display_name(connector)
+        machine = str(connector.get("machine_name") or "").strip()
         latency_text = f" · {latency} мс" if latency > 0 else ""
-        reason_text = f"\nПричина: {escape(reason)}" if reason else ""
-        text = (
-            f"{self.icon('globe')} МАРШРУТ\n\n"
-            f"Откуда: {escape(source_name)}\n"
-            f"Куда: {escape(device['display_name'])}\n"
-            f"Сейчас: {escape(self._route_label(raw_route))}"
-            f"{latency_text}\n"
-            f"Режим: {escape(policy.upper())}"
-            f"{reason_text}\n\n"
-            "АВТО сначала пробует локальную сеть и прямой Bakunity P2P, "
-            "а при невозможности использует relay."
-        )
-        buttons = []
-        for left, right in (("auto", "p2p"), ("lan", "relay")):
-            buttons.append(
-                [
-                    self.button(
-                        "success" if policy == left else "info",
-                        left.upper(),
-                        f"route_pair:{left}",
-                    ),
-                    self.button(
-                        "success" if policy == right else "info",
-                        right.upper(),
-                        f"route_pair:{right}",
-                    ),
-                ]
+        if active_sessions > 0:
+            current = (
+                f"Сейчас: {escape(self._route_label(raw_route))}"
+                f"{latency_text}"
             )
-        buttons.append(
+        else:
+            current = "Сейчас: ⚪ подключение не активно"
+
+        text = (
+            f"{self.icon('settings')} {escape(source_name).upper()}\n\n"
+            f"Windows: {escape(machine or '—')}\n"
+            f"Куда: {escape(device['display_name'])}\n\n"
+            f"{current}\n"
+            f"Доступный маршрут: {escape(self._route_label(raw_route))}"
+            f"{latency_text}\n"
+            f"Режим: {escape(self._policy_label(policy))}\n\n"
+            "АВТО — рекомендуемый режим: Bakunity сначала пробует LAN "
+            "и прямой P2P, а при необходимости использует relay."
+        )
+
+        buttons = [
+            [
+                self.button(
+                    "success" if policy == "auto" else "info",
+                    "АВТО",
+                    "route_pair:auto",
+                ),
+                self.button(
+                    "success" if policy == "p2p" else "info",
+                    "P2P",
+                    "route_pair:p2p",
+                ),
+            ],
+            [
+                self.button(
+                    "success" if policy == "lan" else "info",
+                    "LAN",
+                    "route_pair:lan",
+                ),
+                self.button(
+                    "success" if policy == "relay" else "info",
+                    "RELAY",
+                    "route_pair:relay",
+                ),
+            ],
+            [
+                self.button(
+                    "edit",
+                    "ИЗМЕНИТЬ ИМЯ",
+                    f"edit_connector:{connector['id']}",
+                )
+            ],
+            [
+                self.button(
+                    "delete",
+                    "УДАЛИТЬ УСТРОЙСТВО",
+                    f"connector_revoke:{connector['id']}",
+                    style="danger",
+                )
+            ],
             [
                 self.button(
                     "back",
                     "НАЗАД",
                     f"connection:{device['id']}",
                 )
-            ]
-        )
+            ],
+        ]
         return text, {"inline_keyboard": buttons}
 
     def _pair(self) -> tuple[str, dict[str, Any]]:
@@ -986,23 +1296,149 @@ class TelegramUxBot(TelegramBot):
         }
         return text, keyboard
 
+    def _device_settings(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        connectors = self._visible_connectors()
+        count = len(connectors)
+        direct_status = (
+            f"настроено устройств: {count}"
+            if count
+            else "не настроено"
+        )
+        text = (
+            f"{self.icon('settings')} "
+            f"{escape(device['display_name']).upper()} · НАСТРОЙКИ\n\n"
+            f"Имя: {escape(device['display_name'])}\n"
+            f"RDP-адрес: {escape(self._product_rdp_endpoint(device))}\n"
+            f"Прямое подключение: {direct_status}\n\n"
+            "Маршрут для каждого устройства по умолчанию — АВТО. "
+            "Его можно изменить внутри прямого подключения."
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    self.button(
+                        "edit",
+                        "ИЗМЕНИТЬ ИМЯ",
+                        f"edit_name:{device['id']}",
+                    )
+                ],
+                [
+                    self.button(
+                        "globe",
+                        "ИЗМЕНИТЬ RDP-АДРЕС",
+                        f"edit_slug:{device['id']}",
+                    )
+                ],
+                [
+                    self.button(
+                        "power",
+                        "ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
+                        f"connection:{device['id']}",
+                        style="primary",
+                    )
+                ],
+                [
+                    self.button(
+                        "back",
+                        "К КОМПЬЮТЕРУ",
+                        f"device:{device['id']}",
+                    )
+                ],
+            ]
+        }
+        return text, keyboard
+
+    def _connector_edit(
+        self,
+        connector: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        error = str(self.registry.get_setting("input_error", "") or "")
+        current = self._connector_display_name(connector)
+        error_text = (
+            f"\n\n{self.icon('warning')} Ошибка: {escape(error)}"
+            if error
+            else ""
+        )
+        text = (
+            f"{self.icon('edit')} ИЗМЕНИТЬ ИМЯ УСТРОЙСТВА\n\n"
+            f"Сейчас: {escape(current)}\n\n"
+            "Отправь новое имя одним сообщением. "
+            "Например: Рабочий ноутбук.\n\n"
+            "После сохранения сообщение будет удалено из чата."
+            f"{error_text}"
+        )
+        return text, {
+            "inline_keyboard": [
+                [
+                    self.button(
+                        "cancel",
+                        "ОТМЕНА",
+                        f"connector_edit_cancel:{connector['id']}",
+                    )
+                ]
+            ]
+        }
+
     def _device(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         online = self._online(device)
         telemetry = device.get("telemetry") or {}
         desired_access = bool(device.get("enabled", True))
         pending_action = str(device.get("pending_command") or "")
         notice = self._product_notice(device)
-        notice_text = f"\n\n{notice}" if notice else ""
+        connection = self._active_connection_state(device)
 
+        connection_lines = [
+            "ПОДКЛЮЧЕНИЕ",
+            (
+                f"{self.icon('online')} Доступ включён"
+                if desired_access
+                else f"{self.icon('offline')} Доступ выключен"
+            ),
+            str(connection["label"]),
+        ]
+        if connection["active"] and int(connection["latency_ms"] or 0) > 0:
+            connection_lines[-1] += (
+                f" · {int(connection['latency_ms'])} мс"
+            )
+        if connection["active"] and connection["source"]:
+            connection_lines.append(
+                f"Откуда: {escape(connection['source'])}"
+            )
+        if (
+            connection["active"]
+            and connection["exact"]
+            and (
+                int(connection["bytes_received"] or 0) > 0
+                or int(connection["bytes_sent"] or 0) > 0
+            )
+        ):
+            connection_lines.extend(
+                [
+                    "",
+                    "Трафик сессии:",
+                    (
+                        f"↓ {format_bytes(connection['bytes_received'])}   "
+                        f"↑ {format_bytes(connection['bytes_sent'])}"
+                    ),
+                ]
+            )
+        if connection["active"]:
+            connection_lines.append(
+                f"RDP-сессий: {int(connection['sessions'])}"
+            )
+
+        notice_text = f"\n\n{notice}" if notice else ""
         text = (
             f"{self.icon('online' if online else 'offline')} "
             f"{escape(device['display_name']).upper()} · "
             f"{'В СЕТИ' if online else 'НЕ В СЕТИ'}\n\n"
-            f"{escape(device['machine_name'])} · "
             f"{escape(telemetry.get('os', '—'))}\n"
-            f"Пользователь: {escape(telemetry.get('interactive_user') or '—')}\n"
-            f"RDP: {self._product_rdp_endpoint(device)}"
-            f"{notice_text}"
+            f"Адрес: {escape(self._product_rdp_endpoint(device))}\n\n"
+            + "\n".join(connection_lines)
+            + notice_text
         )
 
         if pending_action:
@@ -1025,15 +1461,7 @@ class TelegramUxBot(TelegramBot):
                         f"cmd:off:{device['id']}",
                         style="danger",
                     )
-                ],
-                [
-                    self.button(
-                        "repeat",
-                        "ПЕРЕЗАПУСТИТЬ ПОДКЛЮЧЕНИЕ",
-                        f"cmd:restart:{device['id']}",
-                        style="primary",
-                    )
-                ],
+                ]
             ]
         else:
             control_rows = [
@@ -1052,17 +1480,9 @@ class TelegramUxBot(TelegramBot):
             + [
                 [
                     self.button(
-                        "repair",
-                        "ВОССТАНОВИТЬ",
-                        f"repair:{device['id']}",
-                        style="primary",
-                    )
-                ],
-                [
-                    self.button(
-                        "globe",
-                        "ПОДКЛЮЧЕНИЕ",
-                        f"connection:{device['id']}",
+                        "settings",
+                        "НАСТРОЙКИ",
+                        f"settings:{device['id']}",
                         style="primary",
                     )
                 ],
@@ -1075,21 +1495,10 @@ class TelegramUxBot(TelegramBot):
                 ],
                 [
                     self.button(
-                        "edit",
-                        "ИЗМЕНИТЬ ИМЯ",
-                        f"edit_name:{device['id']}",
+                        "back",
+                        "К КОМПЬЮТЕРАМ",
+                        "home",
                     )
-                ],
-                [
-                    self.button(
-                        "globe",
-                        "ИЗМЕНИТЬ RDP-АДРЕС",
-                        f"edit_slug:{device['id']}",
-                    )
-                ],
-                [
-                    self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh"),
-                    self.button("back", "К СПИСКУ", "home"),
                 ],
             ]
         }
@@ -1315,112 +1724,120 @@ class TelegramUxBot(TelegramBot):
         device: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
         telemetry = device.get("telemetry") or {}
-        notice = self._product_notice(device)
-        notice_text = f"{notice}\n\n" if notice else ""
+        connection = self._active_connection_state(device)
         cpu = float(telemetry.get("cpu_percent", 0) or 0)
         ram = float(telemetry.get("ram_percent", 0) or 0)
         disk = float(telemetry.get("disk_percent", 0) or 0)
-
-        if self._online(device) and "rdp_hermes_connections" in telemetry:
-            through_bakunity = str(int(telemetry.get("rdp_hermes_connections", 0) or 0))
-        else:
-            through_bakunity = "—"
-        if self._online(device) and "rdp_direct_connections" in telemetry:
-            direct = str(int(telemetry.get("rdp_direct_connections", 0) or 0))
-        else:
-            direct = "—"
-
         sessions = telemetry.get("sessions") or []
         session_text = escape(", ".join(sessions) or "нет")
+
+        route_line = str(connection["label"])
+        if connection["active"] and int(connection["latency_ms"] or 0) > 0:
+            route_line += f" · {int(connection['latency_ms'])} мс"
+
+        traffic = ""
+        if (
+            connection["active"]
+            and connection["exact"]
+            and (
+                int(connection["bytes_received"] or 0) > 0
+                or int(connection["bytes_sent"] or 0) > 0
+            )
+        ):
+            traffic = (
+                f"\nТрафик сессии: "
+                f"↓ {format_bytes(connection['bytes_received'])} · "
+                f"↑ {format_bytes(connection['bytes_sent'])}"
+            )
+
+        certificate_ok = telemetry.get("certificate_lifecycle_ok")
+        if certificate_ok is True:
+            certificate = f"{self.icon('success')} готов"
+        elif certificate_ok is False:
+            certificate = f"{self.icon('warning')} требует восстановления"
+        else:
+            certificate = "—"
+
+        ssh_running = bool(telemetry.get("ssh_tunnel_running"))
+        try:
+            ssh_count = int(telemetry.get("ssh_process_count") or 0)
+        except (TypeError, ValueError):
+            ssh_count = 0
+        fallback = (
+            f"{self.icon('success')} готов"
+            if ssh_running and ssh_count == 1
+            else f"{self.icon('info')} —"
+        )
+
+        update_status = self._update_status_text(device)
         text = (
             f"{self.icon('info')} "
             f"{escape(device['display_name']).upper()} · ПОДРОБНЕЕ\n\n"
-            f"{notice_text}"
-            "АКТИВНОСТЬ\n"
-            f"Подключений через Bakunity: {through_bakunity}\n"
-            f"Прямых подключений: {direct}\n"
+            "ПОДКЛЮЧЕНИЕ\n"
+            f"{route_line}\n"
+            f"RDP-сессий: {int(connection['sessions'])}"
+            f"{traffic}\n\n"
+            "СИСТЕМА\n"
+            f"Пользователь: {escape(telemetry.get('interactive_user') or session_text)}\n"
             f"Сессии Windows: {session_text}\n"
             f"Аптайм: {format_duration(telemetry.get('uptime_seconds'))}\n\n"
-            "РЕСУРСЫ\n"
             f"CPU: {cpu:.1f}%\n{bar(cpu)}\n\n"
             f"RAM: {ram:.1f}%\n{bar(ram)}\n"
             f"{format_bytes(telemetry.get('ram_used_bytes'))} / "
             f"{format_bytes(telemetry.get('ram_total_bytes'))}\n\n"
             f"Диск C: {disk:.1f}%\n{bar(disk)}\n"
             f"{format_bytes(telemetry.get('disk_used_bytes'))} / "
-            f"{format_bytes(telemetry.get('disk_total_bytes'))}"
+            f"{format_bytes(telemetry.get('disk_total_bytes'))}\n\n"
+            "BAKUNITY RDP\n"
+            f"Агент: {self.icon('online' if self._online(device) else 'offline')} "
+            f"{'работает' if self._online(device) else 'не в сети'}\n"
+            f"Сертификат: {certificate}\n"
+            f"Резервное подключение: {fallback}\n"
+            f"{update_status}"
         )
         keyboard = {
             "inline_keyboard": [
                 [
                     self.button(
-                        "info",
-                        "ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ",
-                        f"technical:{device['id']}",
+                        "repeat",
+                        "ПЕРЕЗАПУСТИТЬ ПОДКЛЮЧЕНИЕ",
+                        f"cmd:restart:{device['id']}",
+                        style="primary",
+                    )
+                ],
+                [
+                    self.button(
+                        "repair",
+                        "ВОССТАНОВИТЬ",
+                        f"repair:{device['id']}",
+                    )
+                ],
+                [
+                    self.button(
+                        "delete",
+                        "УДАЛИТЬ КОМПЬЮТЕР",
+                        f"delete:{device['id']}",
+                        style="danger",
                     )
                 ],
                 [
                     self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh"),
                     self.button(
                         "back",
-                        "К КОМПЬЮТЕРУ",
+                        "НАЗАД",
                         f"device:{device['id']}",
                     ),
                 ],
             ]
         }
-        return text, keyboard
+        return text[:4000], keyboard
 
     def _device_technical(
         self,
         device: dict[str, Any],
     ) -> tuple[str, dict[str, Any]]:
-        text, keyboard = super()._device(device)
-        text = (
-            f"{self.icon('info')} ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ\n\n"
-            + text
-        )[:4000]
-
-        rows = list(keyboard.get("inline_keyboard", []))
-        automatic = self._online(device) and bool(
-            (device.get("telemetry") or {}).get("maintenance_capable")
-        )
-        repair_row = [
-            self.button(
-                "repair",
-                "ВОССТАНОВИТЬ АВТО" if automatic else "ВОССТАНОВИТЬ КЛИЕНТ",
-                f"repair:{device['id']}",
-                style="primary",
-            )
-        ]
-        if rows:
-            rows.insert(max(0, len(rows) - 1), repair_row)
-            last = list(rows[-1])
-            replaced = []
-            for button in last:
-                if button.get("callback_data") == "home":
-                    replaced.append(
-                        self.button(
-                            "back",
-                            "К ПОДРОБНОСТЯМ",
-                            f"details:{device['id']}",
-                        )
-                    )
-                else:
-                    replaced.append(button)
-            rows[-1] = replaced
-        else:
-            rows = [
-                repair_row,
-                [
-                    self.button(
-                        "back",
-                        "К ПОДРОБНОСТЯМ",
-                        f"details:{device['id']}",
-                    )
-                ],
-            ]
-        return text, {"inline_keyboard": rows}
+        # Legacy callback compatibility: V2 has one unified Details screen.
+        return self._device_details(device)
 
     def _repair(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         repository_ref = self._client_ref()
@@ -1470,7 +1887,10 @@ class TelegramUxBot(TelegramBot):
     def _render_content(self) -> tuple[str, dict[str, Any]]:
         screen = self.registry.get_setting("screen", "home") or "home"
         if screen == "device_connection":
-            device_id = self.registry.get_setting("selected_device", "") or ""
+            device_id = self.registry.get_setting(
+                "selected_device",
+                "",
+            ) or ""
             try:
                 return self._device_connection(
                     self.registry.get_device(device_id)
@@ -1479,7 +1899,10 @@ class TelegramUxBot(TelegramBot):
                 self.registry.set_setting("screen", "home")
                 return self._home()
         if screen == "device_connection_source":
-            device_id = self.registry.get_setting("selected_device", "") or ""
+            device_id = self.registry.get_setting(
+                "selected_device",
+                "",
+            ) or ""
             connector_id = self.registry.get_setting(
                 "selected_connector",
                 "",
@@ -1491,6 +1914,24 @@ class TelegramUxBot(TelegramBot):
                 )
             except KeyError:
                 self.registry.set_setting("screen", "device_connection")
+                return self._device_connection(
+                    self.registry.get_device(device_id)
+                )
+        if screen == "connector_edit":
+            connector_id = self.registry.get_setting(
+                "selected_connector",
+                "",
+            ) or ""
+            try:
+                return self._connector_edit(
+                    self.registry.get_named_access_connector(connector_id)
+                )
+            except KeyError:
+                self.registry.set_setting("screen", "device_connection")
+                device_id = self.registry.get_setting(
+                    "selected_device",
+                    "",
+                ) or ""
                 return self._device_connection(
                     self.registry.get_device(device_id)
                 )
@@ -1508,17 +1949,21 @@ class TelegramUxBot(TelegramBot):
                     connector_id
                 )
             except KeyError:
-                self.registry.set_setting("screen", "connectors")
-                return self._connectors()
+                self.registry.set_setting("screen", "home")
+                return self._home()
             return self._connector(connector)
         if screen in {
             "repair",
             "device_details",
             "device_technical",
+            "device_settings",
             "device_edit",
             "device_address_progress",
         }:
-            device_id = self.registry.get_setting("selected_device", "") or ""
+            device_id = self.registry.get_setting(
+                "selected_device",
+                "",
+            ) or ""
             try:
                 device = self.registry.get_device(device_id)
             except KeyError:
@@ -1529,9 +1974,12 @@ class TelegramUxBot(TelegramBot):
                 return self._repair(device)
             if screen == "device_edit":
                 return self._device_edit(device)
+            if screen == "device_settings":
+                return self._device_settings(device)
             if screen == "device_technical":
-                return self._device_technical(device)
+                return self._device_details(device)
             if screen == "device_address_progress":
                 return self._device_address_progress(device)
             return self._device_details(device)
         return super()._render_content()
+

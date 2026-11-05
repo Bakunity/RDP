@@ -117,30 +117,28 @@ class TelegramRepairUxTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_repair_is_kept_in_technical_diagnostics(self) -> None:
-        _, product_keyboard = self.bot._device(self.registry.get_device("dev123"))
+    def test_repair_is_kept_in_unified_details(self) -> None:
+        _, product_keyboard = self.bot._device(
+            self.registry.get_device("dev123")
+        )
         product_callbacks = {
             button["callback_data"]
             for row in product_keyboard["inline_keyboard"]
             for button in row
         }
-        self.assertIn("repair:dev123", product_callbacks)
+        self.assertNotIn("repair:dev123", product_callbacks)
 
-        _, technical_keyboard = self.bot._device_technical(
+        _, details_keyboard = self.bot._device_details(
             self.registry.get_device("dev123")
         )
-        buttons = [
-            button
-            for row in technical_keyboard["inline_keyboard"]
+        callbacks = {
+            button["callback_data"]
+            for row in details_keyboard["inline_keyboard"]
             for button in row
-        ]
-        repair = [
-            button
-            for button in buttons
-            if button["callback_data"] == "repair:dev123"
-        ]
-        self.assertEqual(len(repair), 1)
-        self.assertIn("ВОССТАНОВИТЬ", repair[0]["text"])
+        }
+        self.assertIn("repair:dev123", callbacks)
+        self.assertIn("cmd:restart:dev123", callbacks)
+        self.assertIn("delete:dev123", callbacks)
 
     def test_repair_screen_targets_existing_device(self) -> None:
         text, keyboard = self.bot._repair(self.registry.get_device("dev123"))
@@ -165,22 +163,27 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertEqual(self.registry.queued_commands, [("dev123", "repair")])
         self.assertEqual(self.registry.get_setting("screen"), "device")
 
-    def test_technical_screen_marks_automatic_repair_for_new_agent(self) -> None:
-        self.registry.devices["dev123"]["telemetry"] = {"maintenance_capable": True}
+    def test_legacy_technical_screen_reuses_unified_details(self) -> None:
+        self.registry.devices["dev123"]["telemetry"] = {
+            "maintenance_capable": True
+        }
         self.bot._online = lambda device: True
-        _, keyboard = self.bot._device_technical(
+        details_text, details_keyboard = self.bot._device_details(
             self.registry.get_device("dev123")
         )
+        technical_text, technical_keyboard = self.bot._device_technical(
+            self.registry.get_device("dev123")
+        )
+        self.assertEqual(technical_text, details_text)
+        self.assertEqual(technical_keyboard, details_keyboard)
         repair = next(
             button
-            for row in keyboard["inline_keyboard"]
+            for row in technical_keyboard["inline_keyboard"]
             for button in row
             if button["callback_data"] == "repair:dev123"
         )
         self.assertTrue(repair["text"].startswith("🔧"))
-        self.assertIn("ВОССТАНОВИТЬ АВТО", repair["text"])
-        self.assertNotIn("icon_custom_emoji_id", repair)
-        self.assertEqual(repair.get("style"), "primary")
+        self.assertIn("ВОССТАНОВИТЬ", repair["text"])
 
     def test_semantic_button_colors_are_consistent(self) -> None:
         home_text, home_keyboard = self.bot._home()
@@ -190,13 +193,16 @@ class TelegramRepairUxTests(unittest.TestCase):
             for row in home_keyboard["inline_keyboard"]
             for button in row
         ]
-        add = next(button for button in home_buttons if button["callback_data"] == "add")
+        add = next(
+            button for button in home_buttons
+            if button["callback_data"] == "add"
+        )
         refresh = next(
-            button for button in home_buttons if button["callback_data"] == "refresh"
+            button for button in home_buttons
+            if button["callback_data"] == "refresh"
         )
         device = next(
-            button
-            for button in home_buttons
+            button for button in home_buttons
             if button["callback_data"] == "device:dev123"
         )
         self.assertEqual(add.get("style"), "primary")
@@ -213,52 +219,48 @@ class TelegramRepairUxTests(unittest.TestCase):
             if button["callback_data"] == "device:dev123"
         )
         self.assertEqual(online_device.get("style"), "success")
-        self.assertTrue(online_device["text"].startswith("🟢"))
 
-        _, device_keyboard = self.bot._device(self.registry.get_device("dev123"))
-        device_buttons = [
-            button
+        _, device_keyboard = self.bot._device(
+            self.registry.get_device("dev123")
+        )
+        by_callback = {
+            button["callback_data"]: button
             for row in device_keyboard["inline_keyboard"]
             for button in row
-        ]
-        by_callback = {button["callback_data"]: button for button in device_buttons}
-        self.assertEqual(by_callback["cmd:off:dev123"].get("style"), "danger")
-        self.assertEqual(by_callback["cmd:restart:dev123"].get("style"), "primary")
-        self.assertIsNone(by_callback["refresh"].get("style"))
+        }
+        self.assertEqual(
+            by_callback["cmd:off:dev123"].get("style"),
+            "danger",
+        )
+        self.assertEqual(
+            by_callback["settings:dev123"].get("style"),
+            "primary",
+        )
         self.assertIsNone(by_callback["details:dev123"].get("style"))
         self.assertIsNone(by_callback["home"].get("style"))
-        self.assertNotIn("live", by_callback)
+        self.assertNotIn("cmd:restart:dev123", by_callback)
+        self.assertNotIn("repair:dev123", by_callback)
         self.assertNotIn("delete:dev123", by_callback)
-        self.assertEqual(by_callback["repair:dev123"].get("style"), "primary")
 
         _, details_keyboard = self.bot._device_details(
             self.registry.get_device("dev123")
         )
-        detail_callbacks = {
+        details = {
             button["callback_data"]: button
             for row in details_keyboard["inline_keyboard"]
             for button in row
         }
-        self.assertIn("technical:dev123", detail_callbacks)
-        self.assertIn("device:dev123", detail_callbacks)
-        self.assertNotIn("live", detail_callbacks)
-        self.assertNotIn("delete:dev123", detail_callbacks)
-
-        _, technical_keyboard = self.bot._device_technical(
-            self.registry.get_device("dev123")
-        )
-        technical_callbacks = {
-            button["callback_data"]: button
-            for row in technical_keyboard["inline_keyboard"]
-            for button in row
-        }
         self.assertEqual(
-            technical_callbacks["delete:dev123"].get("style"),
+            details["cmd:restart:dev123"].get("style"),
+            "primary",
+        )
+        self.assertEqual(
+            details["delete:dev123"].get("style"),
             "danger",
         )
-        self.assertIn("live", technical_callbacks)
-        self.assertIn("repair:dev123", technical_callbacks)
-        self.assertIn("details:dev123", technical_callbacks)
+        self.assertIn("repair:dev123", details)
+        self.assertIn("device:dev123", details)
+        self.assertIn("refresh", details)
 
     def test_device_summary_and_details_are_product_facing(self) -> None:
         device = self.registry.get_device("dev123")
@@ -277,74 +279,63 @@ class TelegramRepairUxTests(unittest.TestCase):
             "endpoint_available": True,
             "access_enabled": True,
             "sessions": ["Tima"],
+            "rdp_connections": 1,
             "rdp_hermes_connections": 1,
             "rdp_direct_connections": 0,
             "uptime_seconds": 3600,
             "maintenance_capable": True,
-            "client_repository_ref": "0123456789abcdef0123456789abcdef01234567",
+            "certificate_lifecycle_ok": True,
+            "client_repository_ref": (
+                "0123456789abcdef0123456789abcdef01234567"
+            ),
         }
         self.bot._online = lambda value: True
 
         summary_text, summary_keyboard = self.bot._device(device)
         self.assertIn("TEST PC", summary_text)
         self.assertIn("Windows 11 Pro", summary_text)
-        self.assertIn("RDP: server.example:53391", summary_text)
-        self.assertNotIn("СОСТОЯНИЕ", summary_text)
-        self.assertNotIn("Подключение работает", summary_text)
-        self.assertNotIn("Удалённый доступ включён", summary_text)
-        self.assertNotIn("Система работает нормально", summary_text)
-        self.assertIn("Пользователь: Tima", summary_text)
-        self.assertNotIn("Данные:", summary_text)
-        self.assertNotIn("SSH-туннель:", summary_text)
-        self.assertNotIn("Клиент:", summary_text)
-        self.assertNotIn("Обслуживание:", summary_text)
+        self.assertIn("Адрес: server.example:53391", summary_text)
+        self.assertIn("ПОДКЛЮЧЕНИЕ", summary_text)
+        self.assertIn("Доступ включён", summary_text)
+        self.assertIn("ЧЕРЕЗ СЕРВЕР BAKUNITY", summary_text)
+        self.assertIn("RDP-сессий: 1", summary_text)
         self.assertNotIn("CPU:", summary_text)
         self.assertNotIn("RAM:", summary_text)
-        self.assertNotIn("Диск C:", summary_text)
-        self.assertNotIn("Процессы", summary_text)
+        self.assertNotIn("Восстановить", summary_text)
         summary_callbacks = {
             button["callback_data"]
             for row in summary_keyboard["inline_keyboard"]
             for button in row
         }
+        self.assertIn("settings:dev123", summary_callbacks)
         self.assertIn("details:dev123", summary_callbacks)
-        self.assertIn("repair:dev123", summary_callbacks)
-        self.assertNotIn("delete:dev123", summary_callbacks)
-        self.assertNotIn("live", summary_callbacks)
+        self.assertNotIn("repair:dev123", summary_callbacks)
 
         details_text, details_keyboard = self.bot._device_details(device)
-        self.assertNotIn("СОСТОЯНИЕ", details_text)
-        self.assertNotIn("Подключение работает", details_text)
-        self.assertIn("АКТИВНОСТЬ", details_text)
-        self.assertIn("Подключений через Bakunity: 1", details_text)
+        self.assertIn("ПОДКЛЮЧЕНИЕ", details_text)
+        self.assertIn("ЧЕРЕЗ СЕРВЕР BAKUNITY", details_text)
+        self.assertIn("СИСТЕМА", details_text)
+        self.assertIn("BAKUNITY RDP", details_text)
+        self.assertIn("Пользователь: Tima", details_text)
         self.assertIn("CPU:", details_text)
         self.assertIn("RAM:", details_text)
         self.assertIn("Диск C:", details_text)
-        self.assertNotIn("SSH-туннель:", details_text)
-        self.assertNotIn("Процессы", details_text)
+        self.assertIn("Актуальная версия", details_text)
         details_callbacks = {
             button["callback_data"]
             for row in details_keyboard["inline_keyboard"]
             for button in row
         }
-        self.assertIn("technical:dev123", details_callbacks)
+        self.assertIn("cmd:restart:dev123", details_callbacks)
+        self.assertIn("repair:dev123", details_callbacks)
+        self.assertIn("delete:dev123", details_callbacks)
         self.assertIn("device:dev123", details_callbacks)
-        self.assertNotIn("delete:dev123", details_callbacks)
-        self.assertNotIn("live", details_callbacks)
 
-        technical_text, technical_keyboard = self.bot._device_technical(device)
-        self.assertIn("ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ", technical_text)
-        self.assertIn("SSH-туннель:", technical_text)
-        self.assertIn("Клиент:", technical_text)
-        self.assertIn("Процессы", technical_text)
-        technical_callbacks = {
-            button["callback_data"]
-            for row in technical_keyboard["inline_keyboard"]
-            for button in row
-        }
-        self.assertIn("delete:dev123", technical_callbacks)
-        self.assertIn("live", technical_callbacks)
-        self.assertIn("repair:dev123", technical_callbacks)
+        technical_text, technical_keyboard = self.bot._device_technical(
+            device
+        )
+        self.assertEqual(technical_text, details_text)
+        self.assertEqual(technical_keyboard, details_keyboard)
 
     def test_details_callback_opens_detailed_device_screen(self) -> None:
         self.bot._handle_callback({"id": "cb-details", "data": "details:dev123"})
@@ -366,8 +357,10 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][1].get("force_new"))
 
-    def test_device_card_exposes_name_and_address_edit_actions(self) -> None:
-        _, keyboard = self.bot._device(self.registry.get_device("dev123"))
+    def test_settings_screen_exposes_name_and_address_edit_actions(self) -> None:
+        _, keyboard = self.bot._device_settings(
+            self.registry.get_device("dev123")
+        )
         callbacks = {
             button["callback_data"]
             for row in keyboard["inline_keyboard"]
@@ -375,20 +368,33 @@ class TelegramRepairUxTests(unittest.TestCase):
         }
         self.assertIn("edit_name:dev123", callbacks)
         self.assertIn("edit_slug:dev123", callbacks)
+        self.assertIn("connection:dev123", callbacks)
         labels = {
             button["callback_data"]: button["text"]
             for row in keyboard["inline_keyboard"]
             for button in row
         }
         self.assertIn("ИЗМЕНИТЬ ИМЯ", labels["edit_name:dev123"])
-        self.assertIn("ИЗМЕНИТЬ RDP-АДРЕС", labels["edit_slug:dev123"])
+        self.assertIn(
+            "ИЗМЕНИТЬ RDP-АДРЕС",
+            labels["edit_slug:dev123"],
+        )
+        self.assertIn(
+            "ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
+            labels["connection:dev123"],
+        )
 
     def test_default_rdp_device_hides_internal_port_in_product_card(self) -> None:
         self.registry.set_setting("device_domain", "tima.biz")
-        self.registry.set_setting("default_rdp_device_id", "dev123")
-        text, _ = self.bot._device(self.registry.get_device("dev123"))
-        self.assertIn("RDP: test-pc.tima.biz", text)
-        self.assertNotIn("RDP: test-pc.tima.biz:53391", text)
+        self.registry.set_setting(
+            "default_rdp_device_id",
+            "dev123",
+        )
+        text, _ = self.bot._device(
+            self.registry.get_device("dev123")
+        )
+        self.assertIn("Адрес: test-pc.tima.biz", text)
+        self.assertNotIn("test-pc.tima.biz:53391", text)
 
     def test_edit_name_flow_updates_device_from_plain_message(self) -> None:
         self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})
@@ -408,7 +414,10 @@ class TelegramRepairUxTests(unittest.TestCase):
             self.registry.get_device("dev123")["display_name"],
             "Рабочий ПК",
         )
-        self.assertEqual(self.registry.get_setting("screen"), "device")
+        self.assertEqual(
+            self.registry.get_setting("screen"),
+            "device_settings",
+        )
         self.assertEqual(self.registry.get_setting("input_mode"), "")
 
     def test_edit_slug_flow_stays_on_progress_until_client_confirms(self) -> None:
