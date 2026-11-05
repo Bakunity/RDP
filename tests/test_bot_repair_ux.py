@@ -282,6 +282,7 @@ class TelegramRepairUxTests(unittest.TestCase):
             "rdp_connections": 1,
             "rdp_hermes_connections": 1,
             "rdp_direct_connections": 0,
+            "rdp_user_sessions": 1,
             "uptime_seconds": 3600,
             "maintenance_capable": True,
             "certificate_lifecycle_ok": True,
@@ -294,11 +295,12 @@ class TelegramRepairUxTests(unittest.TestCase):
         summary_text, summary_keyboard = self.bot._device(device)
         self.assertIn("TEST PC", summary_text)
         self.assertIn("Windows 11 Pro", summary_text)
-        self.assertIn("Адрес: server.example:53391", summary_text)
+        self.assertIn("Адрес: server.example", summary_text)
+        self.assertNotIn("Адрес: server.example:53391", summary_text)
         self.assertIn("ПОДКЛЮЧЕНИЕ", summary_text)
         self.assertIn("Доступ включён", summary_text)
         self.assertIn("RDP ПОДКЛЮЧЕНО", summary_text)
-        self.assertNotIn("RDP-сессий:", summary_text)
+        self.assertIn("RDP-сессий: 1", summary_text)
         self.assertNotIn("CPU:", summary_text)
         self.assertNotIn("RAM:", summary_text)
         self.assertNotIn("Восстановить", summary_text)
@@ -320,6 +322,8 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertIn("CPU:", details_text)
         self.assertIn("RAM:", details_text)
         self.assertIn("Диск C:", details_text)
+        self.assertIn("RDP-сессий: 1", details_text)
+        self.assertIn("Резервный адрес: server.example:53391", details_text)
         self.assertIn("Актуальная версия", details_text)
         details_callbacks = {
             button["callback_data"]
@@ -336,6 +340,23 @@ class TelegramRepairUxTests(unittest.TestCase):
         )
         self.assertEqual(technical_text, details_text)
         self.assertEqual(technical_keyboard, details_keyboard)
+
+    def test_tcp_socket_counts_do_not_claim_an_rdp_session(self) -> None:
+        device = self.registry.get_device("dev123")
+        device["telemetry"] = {
+            "os": "Windows 11 Pro",
+            "rdp_connections": 5,
+            "rdp_hermes_connections": 3,
+            "rdp_direct_connections": 2,
+            "rdp_user_sessions": 0,
+        }
+        self.bot._online = lambda value: True
+
+        summary_text, _ = self.bot._device(device)
+        self.assertIn("Подключение сейчас не активно", summary_text)
+        self.assertNotIn("RDP-сессий:", summary_text)
+        self.assertNotIn("ЧЕРЕЗ СЕРВЕР BAKUNITY", summary_text)
+        self.assertNotIn("ПРЯМОЕ ПОДКЛЮЧЕНИЕ", summary_text)
 
     def test_details_callback_opens_detailed_device_screen(self) -> None:
         self.bot._handle_callback({"id": "cb-details", "data": "details:dev123"})

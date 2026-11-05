@@ -678,12 +678,9 @@ class TelegramUxBot(TelegramBot):
         return ""
 
     def _product_rdp_endpoint(self, device: dict[str, Any]) -> str:
-        default_device_id = str(
-            self.registry.get_setting("default_rdp_device_id", "") or ""
-        ).strip()
-        if default_device_id == str(device.get("id") or ""):
-            return self._device_host(device)
-        return self._rdp_endpoint(device)
+        # Product identity is stable and portless. Smart Route uses a
+        # connector-local port while the public OpenSSH port is fallback-only.
+        return self._device_host(device)
 
     def _visible_connectors(self) -> list[dict[str, Any]]:
         connectors = [
@@ -739,15 +736,43 @@ class TelegramUxBot(TelegramBot):
         device: dict[str, Any],
     ) -> dict[str, Any]:
         device_id = str(device.get("id") or "")
+        telemetry = device.get("telemetry") or {}
+        try:
+            windows_sessions = int(
+                telemetry.get("rdp_user_sessions") or 0
+            )
+        except (TypeError, ValueError):
+            windows_sessions = 0
+
+        # A transport stream or TCP socket is not proof that a user actually
+        # established an RDP session. Windows host session state is the gate.
+        if windows_sessions <= 0:
+            return {
+                "active": False,
+                "route": "inactive",
+                "label": "⚪ Подключение сейчас не активно",
+                "latency_ms": 0,
+                "bytes_received": 0,
+                "bytes_sent": 0,
+                "sessions": 0,
+                "source": "",
+                "exact": True,
+            }
+
         for connector in self._visible_connectors():
-            telemetry = connector.get("telemetry") or {}
-            route = (telemetry.get("routes") or {}).get(device_id) or {}
+            connector_telemetry = connector.get("telemetry") or {}
+            route = (
+                connector_telemetry.get("routes") or {}
+            ).get(device_id) or {}
             try:
-                active_sessions = int(route.get("active_sessions") or 0)
+                transport_sessions = int(
+                    route.get("active_sessions") or 0
+                )
             except (TypeError, ValueError):
-                active_sessions = 0
-            if active_sessions <= 0:
+                transport_sessions = 0
+            if transport_sessions <= 0:
                 continue
+            route_name = str(route.get("route") or "unavailable")
             try:
                 latency = int(route.get("latency_ms") or 0)
             except (TypeError, ValueError):
@@ -762,14 +787,12 @@ class TelegramUxBot(TelegramBot):
                 sent = 0
             return {
                 "active": True,
-                "route": str(route.get("route") or "unavailable"),
-                "label": self._route_label(
-                    str(route.get("route") or "unavailable")
-                ),
+                "route": route_name,
+                "label": self._route_label(route_name),
                 "latency_ms": latency,
                 "bytes_received": received,
                 "bytes_sent": sent,
-                "sessions": active_sessions,
+                "sessions": windows_sessions,
                 "source": self._connector_display_name(connector),
                 "exact": True,
             }
@@ -796,62 +819,23 @@ class TelegramUxBot(TelegramBot):
                 "latency_ms": 0,
                 "bytes_received": 0,
                 "bytes_sent": 0,
-                "sessions": native_sessions,
+                "sessions": windows_sessions,
                 "source": "",
                 "exact": True,
             }
 
-        telemetry = device.get("telemetry") or {}
-        try:
-            direct = int(telemetry.get("rdp_direct_connections") or 0)
-        except (TypeError, ValueError):
-            direct = 0
-        if direct > 0:
-            return {
-                "active": True,
-                "route": "direct",
-                "label": "🏠 ПРЯМОЕ ПОДКЛЮЧЕНИЕ",
-                "latency_ms": 0,
-                "bytes_received": 0,
-                "bytes_sent": 0,
-                "sessions": 0,
-                "source": "",
-                "exact": False,
-            }
-
-        try:
-            through_bakunity = int(
-                telemetry.get("rdp_hermes_connections") or 0
-            )
-        except (TypeError, ValueError):
-            through_bakunity = 0
-        try:
-            total = int(telemetry.get("rdp_connections") or 0)
-        except (TypeError, ValueError):
-            total = 0
-        if through_bakunity > 0 or total > 0:
-            return {
-                "active": True,
-                "route": "rdp",
-                "label": "🟢 RDP ПОДКЛЮЧЕНО",
-                "latency_ms": 0,
-                "bytes_received": 0,
-                "bytes_sent": 0,
-                "sessions": 0,
-                "source": "",
-                "exact": False,
-            }
-
+        # Windows confirms a real RDP user session, but the exact transport
+        # route is not known. Never guess server/direct from TCP socket counts.
         return {
-            "active": False,
-            "route": "inactive",
-            "label": "⚪ Подключение сейчас не активно",
+            "active": True,
+            "route": "rdp",
+            "label": "🟢 RDP ПОДКЛЮЧЕНО",
             "latency_ms": 0,
             "bytes_received": 0,
             "bytes_sent": 0,
-            "sessions": 0,
+            "sessions": windows_sessions,
             "source": "",
-            "exact": False,
+            "exact": True,
         }
 
     def _update_status_text(self, device: dict[str, Any]) -> str:
@@ -1769,6 +1753,12 @@ class TelegramUxBot(TelegramBot):
                 f"↑ {format_bytes(connection['bytes_sent'])}"
             )
 
+        session_line = (
+            f"\nRDP-сессий: {int(connection['sessions'])}"
+            if connection["active"]
+            else ""
+        )
+
         certificate_ok = telemetry.get("certificate_lifecycle_ok")
         if certificate_ok is True:
             certificate = f"{self.icon('success')} готов"
@@ -1793,8 +1783,8 @@ class TelegramUxBot(TelegramBot):
             f"{self.icon('info')} "
             f"{escape(device['display_name']).upper()} · ПОДРОБНЕЕ\n\n"
             "ПОДКЛЮЧЕНИЕ\n"
-            f"{route_line}\n"
-            f"RDP-сессий: {int(connection['sessions'])}"
+            f"{route_line}"
+            f"{session_line}"
             f"{traffic}\n\n"
             "СИСТЕМА\n"
             f"Пользователь: {escape(telemetry.get('interactive_user') or session_text)}\n"
@@ -1812,6 +1802,7 @@ class TelegramUxBot(TelegramBot):
             f"{'работает' if self._online(device) else 'не в сети'}\n"
             f"Сертификат: {certificate}\n"
             f"Резервное подключение: {fallback}\n"
+            f"Резервный адрес: {escape(self._rdp_endpoint(device))}\n"
             f"{update_status}"
         )
         keyboard = {

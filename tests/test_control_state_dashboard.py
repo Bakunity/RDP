@@ -42,6 +42,16 @@ class ControlStateDashboardTests(unittest.TestCase):
         self.assertNotIn("function Test-TcpPort", text)
         self.assertNotIn("$EndpointAvailable", text)
 
+    def test_agent_reports_real_rdp_user_sessions_separately_from_tcp(self) -> None:
+        text = (ROOT / "client/HermesRdpAgent.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("function Get-RdpUserSessionCount", text)
+        self.assertIn("quser.exe", text)
+        self.assertIn(r"rdp-tcp#\d+", text)
+        self.assertIn("rdp_user_sessions", text)
+        self.assertIn("Get-RdpUserSessionCount", text)
+
     def test_agent_splits_fast_and_slow_telemetry(self) -> None:
         text = (ROOT / "client/HermesRdpAgent.ps1").read_text(encoding="utf-8-sig")
         for value in (
