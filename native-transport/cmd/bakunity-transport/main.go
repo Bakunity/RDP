@@ -41,6 +41,8 @@ const (
     authMagic        = "BKT1"
 )
 
+var transportBuildRef = "dev"
+
 type nodeConfig struct {
     Role         string `json:"role"`
     IdentityPath string `json:"identity_path"`
@@ -247,6 +249,7 @@ func runRelay(args []string) {
         writeJSON(w, http.StatusOK, map[string]any{
             "status": "pass",
             "version": transportVersion,
+            "build_ref": transportBuildRef,
         })
     })
     mux.HandleFunc("/allow", func(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +284,7 @@ func runRelay(args []string) {
         writeJSON(w, http.StatusOK, map[string]any{
             "ok": true,
             "version": transportVersion,
+            "build_ref": transportBuildRef,
             "peer_id": h.ID().String(),
             "addrs": addrs,
             "allowed_peers": acl.count(),
@@ -567,6 +571,7 @@ func (n *nodeRuntime) controlServer() *http.Server {
         writeJSON(w, http.StatusOK, map[string]any{
             "status": "pass",
             "version": transportVersion,
+            "build_ref": transportBuildRef,
         })
     })
     mux.HandleFunc("/status", n.handleStatus)
@@ -621,6 +626,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
     writeJSON(w, http.StatusOK, map[string]any{
         "ok": true,
         "version": transportVersion,
+            "build_ref": transportBuildRef,
         "role": n.cfg.Role,
         "peer_id": n.host.ID().String(),
         "relay_peer_id": n.relayInfo.ID.String(),
