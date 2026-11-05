@@ -256,7 +256,11 @@ function Sync-HostSmartRoute {
 
     if ($Response -and [bool]$Response.mesh_enabled) {
         $Mesh = Get-BakunityTailscaleStatus
+        if (-not $Mesh.installed) {
+            Write-HostRouteLog 'MESH=SKIPPED Tailscale is not installed; native transport and OpenSSH fallback remain available'
+        }
         $NeedsEnrollment = [bool](
+            $Mesh.installed -and
             -not $Mesh.conflict -and (
                 -not $Mesh.online -or
                 -not (Test-HasMeshRole -Mesh $Mesh -Role 'host') -or
