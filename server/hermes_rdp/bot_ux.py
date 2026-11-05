@@ -1802,7 +1802,6 @@ class TelegramUxBot(TelegramBot):
             f"{'работает' if self._online(device) else 'не в сети'}\n"
             f"Сертификат: {certificate}\n"
             f"Резервное подключение: {fallback}\n"
-            f"Резервный адрес: {escape(self._rdp_endpoint(device))}\n"
             f"{update_status}"
         )
         keyboard = {
