@@ -323,7 +323,7 @@ class TelegramRepairUxTests(unittest.TestCase):
         self.assertIn("RAM:", details_text)
         self.assertIn("Диск C:", details_text)
         self.assertIn("RDP-сессий: 1", details_text)
-        self.assertIn("Резервный адрес: server.example:53391", details_text)
+        self.assertNotIn("Резервный адрес:", details_text)
         self.assertIn("Актуальная версия", details_text)
         details_callbacks = {
             button["callback_data"]
