@@ -357,6 +357,20 @@ class SoakStabilizationTests(unittest.TestCase):
         self.assertIn("if signature != self.last_device_signature:", source)
         self.assertIn("self._remember_device_signature()", source)
 
+    def test_dashboard_signature_tracks_rdp_session_and_connector_route(self) -> None:
+        bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
+        for marker in (
+            'telemetry.get("rdp_connections")',
+            'telemetry.get("rdp_hermes_connections")',
+            'telemetry.get("rdp_direct_connections")',
+            'route.get("route")',
+            'route.get("active_sessions")',
+            'route.get("bytes_received")',
+            '"device_connection"',
+            '"device_connection_source"',
+        ):
+            self.assertIn(marker, bot)
+
 
 if __name__ == "__main__":
     unittest.main()
