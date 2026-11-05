@@ -103,6 +103,10 @@ class NativeTransportTests(unittest.TestCase):
         for marker in (
             '"/bakunity/rdp/1.0.0"',
             "EnableHolePunching",
+            "EnableAutoRelayWithStaticRelays",
+            "autorelay.WithBootDelay(0)",
+            "autorelay.WithMinCandidates(1)",
+            "autorelay.WithNumRelays(1)",
             "NATPortMap",
             "circuitrelay.WithACL",
             "AllowReserve",
@@ -110,7 +114,10 @@ class NativeTransportTests(unittest.TestCase):
             "shared secret is too short",
             "invalid transport authorization",
             "127.0.0.1:3389",
-            "direct Bakunity path unavailable",
+            "direct Bakunity path unavailable after hole-punch grace period",
+            '"direct_connections"',
+            '"relay_connections"',
+            '"peer_addrs"',
         ):
             self.assertIn(marker, source)
         self.assertNotIn("tailscale", source.lower())
@@ -376,6 +383,16 @@ class NativeTransportTests(unittest.TestCase):
         self.assertLess(first_sync, success)
         rollback = installer.index("Restore-LegacyNamedAccess")
         self.assertGreater(rollback, installer.index("catch {"))
+
+
+    def test_native_auto_route_gives_hole_punch_a_bounded_grace_period(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        self.assertIn("grace := 2500 * time.Millisecond", source)
+        self.assertIn("grace = 8 * time.Second", source)
+        self.assertIn("connectionCounts", source)
+        self.assertIn('"addrs": localAddrs', source)
 
 
 

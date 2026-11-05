@@ -29,6 +29,7 @@ import (
     "github.com/libp2p/go-libp2p/core/network"
     "github.com/libp2p/go-libp2p/core/peer"
     "github.com/libp2p/go-libp2p/core/protocol"
+    "github.com/libp2p/go-libp2p/p2p/host/autorelay"
     circuitclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
     circuitrelay "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
     ma "github.com/multiformats/go-multiaddr"
@@ -368,6 +369,12 @@ func runNode(args []string) {
             "/ip4/0.0.0.0/udp/0/quic-v1",
         ),
         libp2p.EnableRelay(),
+        libp2p.EnableAutoRelayWithStaticRelays(
+            []peer.AddrInfo{*relayInfo},
+            autorelay.WithBootDelay(0),
+            autorelay.WithMinCandidates(1),
+            autorelay.WithNumRelays(1),
+        ),
         libp2p.EnableHolePunching(),
         libp2p.NATPortMap(),
         libp2p.ForceReachabilityPrivate(),
@@ -581,18 +588,35 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
     forwards := make([]map[string]any, 0, len(n.forwards))
     for _, runtime := range n.forwards {
         pid, _ := peer.Decode(runtime.spec.PeerID)
+        directConns, relayConns := n.connectionCounts(pid)
+        peerAddrs := make([]string, 0)
+        if pid != "" {
+            for _, addr := range n.host.Peerstore().Addrs(pid) {
+                peerAddrs = append(peerAddrs, addr.String())
+            }
+            sort.Strings(peerAddrs)
+        }
         forwards = append(forwards, map[string]any{
             "key": runtime.spec.Key,
             "peer_id": runtime.spec.PeerID,
             "listen": runtime.spec.Listen,
             "mode": runtime.spec.Mode,
             "path": n.pathForPeer(pid),
+            "direct_connections": directConns,
+            "relay_connections": relayConns,
+            "peer_addrs": peerAddrs,
         })
     }
     n.mu.RUnlock()
     sort.Slice(forwards, func(i, j int) bool {
         return fmt.Sprint(forwards[i]["key"]) < fmt.Sprint(forwards[j]["key"])
     })
+
+    localAddrs := make([]string, 0, len(n.host.Addrs()))
+    for _, addr := range n.host.Addrs() {
+        localAddrs = append(localAddrs, addr.String())
+    }
+    sort.Strings(localAddrs)
 
     writeJSON(w, http.StatusOK, map[string]any{
         "ok": true,
@@ -601,6 +625,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
         "peer_id": n.host.ID().String(),
         "relay_peer_id": n.relayInfo.ID.String(),
         "relay_connected": n.host.Network().Connectedness(n.relayInfo.ID) == network.Connected,
+        "addrs": localAddrs,
         "forwards": forwards,
     })
 }
@@ -702,15 +727,19 @@ func (n *nodeRuntime) probeForward(spec forwardSpec) (string, error) {
         return "unavailable", fmt.Errorf("native path unavailable: %w", err)
     }
 
+    grace := 2500 * time.Millisecond
     if spec.Mode == "direct" {
-        deadline := time.Now().Add(3 * time.Second)
-        for time.Now().Before(deadline) {
-            if n.pathForPeer(pid) == "direct" {
-                return "direct", nil
-            }
-            time.Sleep(100 * time.Millisecond)
+        grace = 8 * time.Second
+    }
+    deadline := time.Now().Add(grace)
+    for time.Now().Before(deadline) {
+        if n.pathForPeer(pid) == "direct" {
+            return "direct", nil
         }
-        return n.pathForPeer(pid), errors.New("direct Bakunity path unavailable")
+        time.Sleep(100 * time.Millisecond)
+    }
+    if spec.Mode == "direct" {
+        return n.pathForPeer(pid), errors.New("direct Bakunity path unavailable after hole-punch grace period")
     }
     return n.pathForPeer(pid), nil
 }
@@ -785,6 +814,22 @@ func (n *nodeRuntime) connectPeer(ctx context.Context, pid peer.ID) error {
             Addrs: []ma.Multiaddr{relayCircuit},
         },
     )
+}
+
+func (n *nodeRuntime) connectionCounts(pid peer.ID) (int, int) {
+    if pid == "" {
+        return 0, 0
+    }
+    direct := 0
+    relay := 0
+    for _, conn := range n.host.Network().ConnsToPeer(pid) {
+        if conn.Stat().Limited {
+            relay++
+        } else {
+            direct++
+        }
+    }
+    return direct, relay
 }
 
 func (n *nodeRuntime) pathForPeer(pid peer.ID) string {
