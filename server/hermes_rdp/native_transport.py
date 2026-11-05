@@ -1,16 +1,60 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 
 HOST_STATE_PREFIX = "native_transport_host:"
 HOST_SECRET_PREFIX = "native_transport_secret:"
 PEER_ID_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{20,96}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+NATIVE_TRANSPORT_ARTIFACT_ROOT = Path(
+    "/var/lib/hermes-rdp/native-transport-artifacts"
+)
+
+
+
+def native_transport_windows_artifact(
+    repository_ref: Any,
+    *,
+    root: Path = NATIVE_TRANSPORT_ARTIFACT_ROOT,
+) -> dict[str, Any]:
+    ref = str(repository_ref or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", ref):
+        return {}
+
+    directory = root / ref / "windows-amd64"
+    binary = directory / "BakunityTransport.exe"
+    checksum_file = directory / "BakunityTransport.exe.sha256"
+    if not binary.is_file() or not checksum_file.is_file():
+        return {}
+
+    expected = checksum_file.read_text(
+        encoding="ascii",
+        errors="strict",
+    ).strip().lower()
+    if not SHA256_RE.fullmatch(expected):
+        return {}
+
+    digest = hashlib.sha256()
+    with binary.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != expected:
+        return {}
+
+    return {
+        "repository_ref": ref,
+        "sha256": expected,
+        "size": int(binary.stat().st_size),
+        "file_path": binary,
+    }
 
 
 def native_transport_enabled(registry: Any) -> bool:
