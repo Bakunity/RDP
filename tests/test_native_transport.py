@@ -350,6 +350,34 @@ class NativeTransportTests(unittest.TestCase):
         ):
             self.assertIn(marker, update)
 
+    def test_smart_route_installer_migrates_legacy_named_access_safely(self) -> None:
+        installer = (
+            ROOT / "scripts/install-smart-route-connector.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "Bakunity RDP Named Access",
+            "Suspend-LegacyNamedAccess",
+            "Remove-LegacyNamedAccessPortProxy",
+            "Remove-LegacyNamedAccessHostsBlock",
+            "Remove-NewSmartRouteRuntime",
+            "Restore-LegacyNamedAccess",
+            "NAMED_ACCESS_MIGRATION=PASS",
+            "# BEGIN BAKUNITY RDP NAMED ACCESS",
+            "# BEGIN BAKUNITY RDP SMART ROUTE",
+        ):
+            self.assertIn(marker, installer)
+        suspend = installer.index("Suspend-LegacyNamedAccess")
+        first_sync = installer.index(
+            "-File $WorkerPath -Once",
+            suspend,
+        )
+        success = installer.index("NAMED_ACCESS_MIGRATION=PASS")
+        self.assertLess(suspend, first_sync)
+        self.assertLess(first_sync, success)
+        rollback = installer.index("Restore-LegacyNamedAccess")
+        self.assertGreater(rollback, installer.index("catch {"))
+
+
 
 if __name__ == "__main__":
     unittest.main()
