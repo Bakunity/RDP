@@ -602,6 +602,9 @@ function Sync-SmartRoute {
             route=[string]$Mapping.route_type
             latency_ms=[int]$Mapping.latency_ms
             reason=[string]$Mapping.reason
+            active_sessions=0
+            last_stream_path=''
+            last_stream_at=0
         }
     }
 
@@ -613,11 +616,25 @@ function Sync-SmartRoute {
                 continue
             }
             $Path = [string]$Forward.path
-            if ($Path -eq 'direct') {
+            $ActiveSessions = 0
+            try { $ActiveSessions = [int]$Forward.active_sessions } catch { $ActiveSessions = 0 }
+            $LastStreamPath = [string]$Forward.last_stream_path
+            $LastStreamAt = 0
+            try { $LastStreamAt = [int64]$Forward.last_stream_at } catch { $LastStreamAt = 0 }
+
+            $RouteTelemetry[$Key].active_sessions = [int]$ActiveSessions
+            $RouteTelemetry[$Key].last_stream_path = $LastStreamPath
+            $RouteTelemetry[$Key].last_stream_at = [int64]$LastStreamAt
+
+            $EffectivePath = $Path
+            if ($ActiveSessions -gt 0 -and $LastStreamPath -in @('direct','relay')) {
+                $EffectivePath = $LastStreamPath
+            }
+            if ($EffectivePath -eq 'direct') {
                 $RouteTelemetry[$Key].route = 'native_p2p'
                 $RouteTelemetry[$Key].reason = 'bakunity_p2p_direct'
             }
-            elseif ($Path -eq 'relay') {
+            elseif ($EffectivePath -eq 'relay') {
                 $RouteTelemetry[$Key].route = 'native_relay'
                 $RouteTelemetry[$Key].reason = 'bakunity_relay'
             }
