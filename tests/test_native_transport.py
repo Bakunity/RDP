@@ -462,8 +462,8 @@ class NativeTransportTests(unittest.TestCase):
             "holepunch.WithTracer(hpTracer)",
             "holepunch.DirectDialTimeout(5*time.Second)",
             '"hole_punch"',
-            '"remote_addrs"',
-            '"rtt_ms"',
+            'json:"remote_addrs,omitempty"',
+            'json:"rtt_ms,omitempty"',
         ):
             self.assertIn(marker, source)
 
