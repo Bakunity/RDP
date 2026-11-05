@@ -116,7 +116,7 @@ CANDIDATE="$WORK/BakunityTransport.exe"
   export GOCACHE="$WORK/gocache"
   export GOFLAGS="-p=1"
   "$GO" mod tidy
-  CGO_ENABLED=0 GOOS=windows GOARCH=amd64     "$GO" build -trimpath -ldflags='-s -w'     -o "$CANDIDATE" ./cmd/bakunity-transport
+  CGO_ENABLED=0 GOOS=windows GOARCH=amd64     "$GO" build -trimpath -ldflags="-s -w -X main.transportBuildRef=$CLIENT_REF"     -o "$CANDIDATE" ./cmd/bakunity-transport
 )
 
 [[ -s "$CANDIDATE" ]] || {
