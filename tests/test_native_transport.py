@@ -516,6 +516,23 @@ class NativeTransportTests(unittest.TestCase):
             self.assertIn(marker, source)
 
 
+    def test_native_transport_reports_actual_rdp_stream_path(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            '"active_sessions"',
+            '"last_stream_path"',
+            '"last_stream_at"',
+            "stream.Conn().Stat().Limited",
+            'streamPath := "direct"',
+            'streamPath = "relay"',
+            "runtime.activeSessions++",
+            "runtime.activeSessions--",
+        ):
+            self.assertIn(marker, source)
+
+
 
 if __name__ == "__main__":
     unittest.main()
