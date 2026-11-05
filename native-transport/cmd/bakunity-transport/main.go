@@ -84,6 +84,10 @@ type nodeRuntime struct {
     forwards           map[string]*forwardRuntime
     reservationReady   bool
     reservationUpdated time.Time
+    inboundMu           sync.RWMutex
+    inboundActive       int
+    inboundLastPath     string
+    inboundLastAt       time.Time
 }
 
 type holePunchEventState struct {
@@ -594,6 +598,24 @@ func (n *nodeRuntime) handleRDPStream(stream network.Stream) {
         return
     }
     defer target.Close()
+
+    streamPath := "direct"
+    if stream.Conn().Stat().Limited {
+        streamPath = "relay"
+    }
+    n.inboundMu.Lock()
+    n.inboundActive++
+    n.inboundLastPath = streamPath
+    n.inboundLastAt = time.Now()
+    n.inboundMu.Unlock()
+    defer func() {
+        n.inboundMu.Lock()
+        if n.inboundActive > 0 {
+            n.inboundActive--
+        }
+        n.inboundMu.Unlock()
+    }()
+
     bridge(stream, target)
 }
 
@@ -751,6 +773,15 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
     }
     sort.Strings(localAddrs)
 
+    n.inboundMu.RLock()
+    inboundActive := n.inboundActive
+    inboundLastPath := n.inboundLastPath
+    inboundLastAt := int64(0)
+    if !n.inboundLastAt.IsZero() {
+        inboundLastAt = n.inboundLastAt.Unix()
+    }
+    n.inboundMu.RUnlock()
+
     writeJSON(w, http.StatusOK, map[string]any{
         "ok": true,
         "version": transportVersion,
@@ -759,6 +790,9 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
         "peer_id": n.host.ID().String(),
         "relay_peer_id": n.relayInfo.ID.String(),
         "relay_connected": n.host.Network().Connectedness(n.relayInfo.ID) == network.Connected,
+        "inbound_active_sessions": inboundActive,
+        "inbound_last_stream_path": inboundLastPath,
+        "inbound_last_stream_at": inboundLastAt,
         "addrs": localAddrs,
         "forwards": forwards,
     })
