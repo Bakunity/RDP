@@ -490,6 +490,10 @@ function Sync-ConnectorMesh {
     }
 
     $Mesh = Get-BakunityTailscaleStatus
+    if (-not $Mesh.installed) {
+        Write-Log 'MESH=SKIPPED Tailscale is not installed; native transport and OpenSSH fallback remain available'
+        return $Mesh
+    }
     if ($Mesh.conflict) {
         Write-Log 'MESH=CONFLICT foreign Tailscale detected; Relay remains available'
         return $Mesh
