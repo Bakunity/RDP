@@ -32,7 +32,7 @@ class TelegramProductUxTests(unittest.TestCase):
         self.assertIn("Это необязательно.", text)
         self.assertIn("через сервер Bakunity", text)
         self.assertIn("def _visible_connectors", text)
-        self.assertIn("if int(connector.get("last_seen") or 0) > 0", text)
+        self.assertIn('if int(connector.get("last_seen") or 0) > 0', text)
         self.assertIn("seen: set[str] = set()", text)
 
     def test_device_card_prioritizes_access_and_real_connection_state(self) -> None:
