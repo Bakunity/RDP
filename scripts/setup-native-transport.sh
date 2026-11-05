@@ -169,6 +169,17 @@ PY
 ufw allow 7444/tcp comment 'Bakunity Transport TCP' >/dev/null || true
 ufw allow 7444/udp comment 'Bakunity Transport QUIC' >/dev/null || true
 
+CLIENT_REF="$(
+  python3 - "$CONFIG" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+print(str(data.get("client_repository_ref") or data.get("repository_ref") or ""))
+PY
+)"
+BAKUNITY_TRANSPORT_CLIENT_REF="$CLIENT_REF"   bash "$ROOT/scripts/build-native-transport-windows.sh"
+
 echo "BAKUNITY_TRANSPORT=PASS"
 echo "SERVICE=$(systemctl is-active bakunity-transport.service)"
 echo "RELAY_ADDR=$RELAY_ADDR"
