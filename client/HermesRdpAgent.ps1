@@ -183,7 +183,61 @@ function Get-MaintenanceStatus {
     }
 }
 
+function Get-MaintenanceProcesses {
+    $Matches = @()
+    try {
+        $Matches = @(
+            Get-CimInstance `
+                Win32_Process `
+                -Filter "Name='powershell.exe'" `
+                -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $Line = [string]$_.CommandLine
+                    $Line -and (
+                        $Line.Contains($MaintenanceRunnerPath) -or
+                        $Line.Contains('HermesRdpMaintenance.ps1')
+                    )
+                }
+        )
+    }
+    catch {
+    }
+    return @($Matches)
+}
+
+function Stop-GhostMaintenanceTask {
+    param([object]$Task)
+    if (-not $Task -or [string]$Task.State -ne 'Running') {
+        return
+    }
+    if (@(Get-MaintenanceProcesses).Count -gt 0) {
+        return
+    }
+    try {
+        Stop-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction Stop
+        Write-AgentLog 'Stopped ghost maintenance scheduled task with no live PowerShell process'
+    }
+    catch {
+        Write-AgentLog "Failed to stop ghost maintenance task: $($_.Exception.Message)"
+    }
+}
 function Test-MaintenanceActive {
+    $Task = $null
+    try {
+        $Task = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
+    }
+    catch {
+    }
+
+    $Processes = @(Get-MaintenanceProcesses)
+    if ($Processes.Count -gt 0) {
+        return $true
+    }
+
+    if ($Task -and [string]$Task.State -eq 'Running') {
+        Stop-GhostMaintenanceTask -Task $Task
+    }
+
     if (-not (Test-Path -LiteralPath $MaintenanceActivePath)) {
         return $false
     }
@@ -195,36 +249,11 @@ function Test-MaintenanceActive {
     catch {
     }
 
-    try {
-        $Task = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
-        if ($Task -and [string]$Task.State -eq 'Running') {
-            return $true
-        }
-    }
-    catch {
-    }
-
     $MaintenancePid = 0
     try {
         $MaintenancePid = [int]$Active.pid
     }
     catch {
-    }
-    if ($MaintenancePid -gt 0) {
-        try {
-            $Process = Get-CimInstance Win32_Process -Filter "ProcessId=$MaintenancePid" -ErrorAction Stop
-            $CommandLine = [string]$Process.CommandLine
-            if (
-                $CommandLine -and (
-                    $CommandLine.Contains($MaintenanceRunnerPath) -or
-                    $CommandLine.Contains('HermesRdpMaintenance')
-                )
-            ) {
-                return $true
-            }
-        }
-        catch {
-        }
     }
 
     $StartedAt = 0
@@ -261,7 +290,6 @@ function Test-MaintenanceActive {
     )
     return $false
 }
-
 function Set-SystemScriptAcl {
     param([string]$Path)
     $Acl = Get-Acl -LiteralPath $Path
@@ -342,7 +370,12 @@ function Start-MaintenanceTask {
 
     $ExistingTask = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
     if ($ExistingTask -and [string]$ExistingTask.State -eq 'Running') {
-        return 'maintenance task already running'
+        $LiveMaintenance = @(Get-MaintenanceProcesses)
+        if ($LiveMaintenance.Count -gt 0) {
+            return 'maintenance task already running'
+        }
+        Stop-GhostMaintenanceTask -Task $ExistingTask
+        $ExistingTask = Get-ScheduledTask -TaskName $MaintenanceTaskName -ErrorAction SilentlyContinue
     }
 
     $Candidate = Join-Path ([IO.Path]::GetTempPath()) ("HermesRdpMaintenance-$([Guid]::NewGuid().ToString('N')).ps1")
