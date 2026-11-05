@@ -40,6 +40,7 @@ const (
     transportVersion = "0.1.0"
     rdpProtocol      = protocol.ID("/bakunity/rdp/1.0.0")
     authMagic        = "BKT1"
+    forwardReprobeInterval = 15 * time.Second
 )
 
 var transportBuildRef = "dev"
@@ -64,6 +65,8 @@ type forwardSpec struct {
 type forwardRuntime struct {
     spec              forwardSpec
     listener          net.Listener
+    stop              chan struct{}
+    stopOnce          sync.Once
     lastDirectError   string
     lastDirectAttempt time.Time
 }
@@ -812,6 +815,7 @@ func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
             hmac.Equal([]byte(existing.spec.SharedSecret), []byte(spec.SharedSecret)) {
             return nil
         }
+        existing.stopOnce.Do(func() { close(existing.stop) })
         _ = existing.listener.Close()
         delete(n.forwards, spec.Key)
     }
@@ -820,9 +824,14 @@ func (n *nodeRuntime) ensureForward(spec forwardSpec) error {
     if err != nil {
         return err
     }
-    runtime := &forwardRuntime{spec: spec, listener: listener}
+    runtime := &forwardRuntime{
+        spec:     spec,
+        listener: listener,
+        stop:     make(chan struct{}),
+    }
     n.forwards[spec.Key] = runtime
     go n.serveForward(runtime)
+    go n.maintainForwardPath(runtime)
     return nil
 }
 
@@ -875,6 +884,43 @@ func (n *nodeRuntime) probeForward(spec forwardSpec) (string, error) {
         return n.pathForPeer(pid), errors.New("direct Bakunity path unavailable after hole-punch grace period")
     }
     return n.pathForPeer(pid), nil
+}
+
+func (n *nodeRuntime) maintainForwardPath(runtime *forwardRuntime) {
+    pid, err := peer.Decode(runtime.spec.PeerID)
+    if err != nil {
+        return
+    }
+
+    ticker := time.NewTicker(forwardReprobeInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-runtime.stop:
+            return
+        case <-ticker.C:
+            if n.pathForPeer(pid) == "direct" {
+                continue
+            }
+
+            ctx, cancel := context.WithTimeout(
+                context.Background(),
+                8*time.Second,
+            )
+            attemptErr := n.connectPeer(ctx, pid)
+            if attemptErr == nil && n.pathForPeer(pid) != "direct" {
+                directCtx, stopDirect := context.WithTimeout(
+                    context.Background(),
+                    4*time.Second,
+                )
+                attemptErr = n.tryDirectPeer(directCtx, pid)
+                stopDirect()
+            }
+            cancel()
+            n.recordDirectAttempt(runtime.spec.Key, attemptErr)
+        }
+    }
 }
 
 func (n *nodeRuntime) serveForward(runtime *forwardRuntime) {
@@ -1063,6 +1109,7 @@ func (n *nodeRuntime) closeForwards() {
     n.mu.Lock()
     defer n.mu.Unlock()
     for key, runtime := range n.forwards {
+        runtime.stopOnce.Do(func() { close(runtime.stop) })
         _ = runtime.listener.Close()
         delete(n.forwards, key)
     }
