@@ -127,8 +127,9 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
         self.assertNotIn("Система работает нормально", product)
         self.assertIn("Нет связи с компьютером", ux)
         self.assertIn("Защищённое подключение требует восстановления", ux)
-        self.assertIn("ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ", ux)
-        self.assertIn('self.registry.set_setting("screen", "device_technical")', ux)
+        self.assertIn("def _device_settings", ux)
+        self.assertIn("def _device_details", ux)
+        self.assertIn("Legacy callback compatibility", ux)
         self.assertIn('"device_technical"', bot)
 
     def test_telegram_has_one_click_repair_and_legacy_fallback(self) -> None:
