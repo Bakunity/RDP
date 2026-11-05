@@ -235,6 +235,23 @@ class SmartRouteMeshTests(unittest.TestCase):
         ):
             self.assertIn(marker, mesh)
 
+    def test_legacy_tailscale_enrollment_cannot_block_update_forever(self) -> None:
+        mesh = (ROOT / "client/BakunityMesh.ps1").read_text(encoding="utf-8-sig")
+        host = (ROOT / "client/BakunityHostSmartRoute.ps1").read_text(encoding="utf-8-sig")
+        for marker in (
+            "Start-Process -FilePath $Exe",
+            "$Process.WaitForExit(60000)",
+            "Stop-Process -Id $Process.Id -Force",
+            "TAILSCALE_ENROLLMENT_TIMEOUT",
+            "Remove-Item -LiteralPath $KeyFile",
+            "Remove-Item -LiteralPath $StdOut,$StdErr",
+        ):
+            self.assertIn(marker, mesh)
+        self.assertNotIn("$Output = @(& $Exe @Arguments 2>&1)", mesh)
+        self.assertIn("MESH=DEFERRED", host)
+        self.assertIn("Ensure-BakunityMeshRole -Role host -Bootstrap $Bootstrap", host)
+        self.assertIn("Sync-HostNativeTransport", host)
+
     def test_connector_only_selects_p2p_after_direct_path_probe(self) -> None:
         worker = (
             ROOT / "client/BakunitySmartRoute.ps1"
