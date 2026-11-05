@@ -23,8 +23,8 @@ class AutomaticClientMaintenanceTests(unittest.TestCase):
 
     def test_telegram_status_is_russian_and_distinguishes_update_failure(self) -> None:
         bot = (ROOT / "server/hermes_rdp/bot.py").read_text(encoding="utf-8")
-        self.assertIn("ОЖИДАЕТ ОБНОВЛЕНИЯ", bot)
-        self.assertIn("ОБНОВЛЯЕТСЯ", bot)
+        self.assertIn("ОБНОВИТСЯ АВТОМАТИЧЕСКИ", bot)
+        self.assertIn("ОБНОВЛЯЕТСЯ АВТОМАТИЧЕСКИ", bot)
         self.assertIn("ОШИБКА ОБНОВЛЕНИЯ", bot)
         self.assertIn("Обслуживание:", bot)
         self.assertIn("АКТИВЕН", bot)
