@@ -26,6 +26,12 @@ $StatePath = Join-Path $BaseDir 'state.json'
 $ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $TaskName = 'Bakunity RDP Smart Route'
 $ShortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Bakunity RDP.lnk'
+$LegacyBaseDir = 'C:\ProgramData\BakunityRDP\NamedAccess'
+$LegacyStatePath = Join-Path $LegacyBaseDir 'state.json'
+$LegacyWorkerPath = Join-Path $LegacyBaseDir 'BakunityNamedAccess.ps1'
+$LegacyTaskName = 'Bakunity RDP Named Access'
+$LegacyHostsBegin = '# BEGIN BAKUNITY RDP NAMED ACCESS'
+$LegacyHostsEnd = '# END BAKUNITY RDP NAMED ACCESS'
 $Candidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunitySmartRoute-$([Guid]::NewGuid().ToString('N')).ps1")
 $LauncherCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunitySmartRouteLaunch-$([Guid]::NewGuid().ToString('N')).ps1")
 $MeshCandidate = Join-Path ([IO.Path]::GetTempPath()) ("BakunityMesh-$([Guid]::NewGuid().ToString('N')).ps1")
@@ -82,6 +88,59 @@ function Stop-TaskBounded {
     throw "Scheduled Task did not stop: $Name"
 }
 
+function Remove-LegacyNamedAccessHostsBlock {
+    if (-not (Test-Path -LiteralPath $HostsPath)) { return }
+    $Original = [IO.File]::ReadAllText($HostsPath)
+    $Pattern = '(?ms)^\s*' + [regex]::Escape($LegacyHostsBegin) + '\s*\r?\n.*?^\s*' + [regex]::Escape($LegacyHostsEnd) + '\s*(?:\r?\n)?'
+    $Clean = [regex]::Replace($Original, $Pattern, '')
+    if ($Clean -ne $Original) {
+        [IO.File]::WriteAllText($HostsPath, $Clean.TrimEnd([char]13, [char]10) + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+        & $Ipconfig /flushdns | Out-Null
+    }
+}
+
+function Remove-LegacyNamedAccessPortProxy {
+    if (-not (Test-Path -LiteralPath $LegacyStatePath)) { return }
+    try {
+        $LegacyState = Get-Content -LiteralPath $LegacyStatePath -Raw | ConvertFrom-Json
+        if ($LegacyState -and $LegacyState.mappings) {
+            foreach ($Property in $LegacyState.mappings.PSObject.Properties) {
+                $Address = [string]$Property.Value.loopback
+                if ($Address -match '^127\.77\.\d{1,3}\.\d{1,3}$') {
+                    & $Netsh interface portproxy delete v4tov4 listenaddress=$Address listenport=3389 protocol=tcp *> $null
+                }
+            }
+        }
+    }
+    catch {
+    }
+}
+
+function Suspend-LegacyNamedAccess {
+    $LegacyTask = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+    if (-not $LegacyTask) { return }
+    Stop-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+    for ($i = 0; $i -lt 40; $i++) {
+        $Current = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+        if (-not $Current -or [string]$Current.State -ne 'Running') { break }
+        Start-Sleep -Milliseconds 250
+    }
+    Unregister-ScheduledTask -TaskName $LegacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-LegacyNamedAccessPortProxy
+    Remove-LegacyNamedAccessHostsBlock
+}
+
+function Restore-LegacyNamedAccess {
+    param([string]$TaskXml)
+    if (-not $TaskXml) { return }
+    Register-ScheduledTask -TaskName $LegacyTaskName -Xml $TaskXml -Force | Out-Null
+    if (Test-Path -LiteralPath $LegacyWorkerPath) {
+        $LegacyPowerShell = Get-NativePowerShellPath
+        & $LegacyPowerShell -NoProfile -ExecutionPolicy Bypass -File $LegacyWorkerPath -Once *> $null
+    }
+    Start-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+}
+
 function Install-LauncherShortcut {
     $PowerShell = Get-NativePowerShellPath
     $Shell = New-Object -ComObject WScript.Shell
@@ -107,6 +166,9 @@ $NativeTransportUrl = "https://raw.githubusercontent.com/$Repo/$ResolvedSha/clie
 
 $ExistingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 $ExistingTaskXml = if ($ExistingTask) { Export-ScheduledTask -TaskName $TaskName } else { $null }
+$LegacyTask = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+$LegacyTaskXml = if ($LegacyTask) { Export-ScheduledTask -TaskName $LegacyTaskName } else { $null }
+$LegacyMigration = [bool]$LegacyTask
 $ExistingConfig = if (Test-Path -LiteralPath $ConfigPath) { Get-Content -LiteralPath $ConfigPath -Raw } else { $null }
 $ExistingWorker = if (Test-Path -LiteralPath $WorkerPath) { Get-Content -LiteralPath $WorkerPath -Raw } else { $null }
 $ExistingLauncher = if (Test-Path -LiteralPath $LauncherPath) { Get-Content -LiteralPath $LauncherPath -Raw } else { $null }
@@ -125,6 +187,7 @@ try {
     Assert-PowerShellFile -Path $NativeTransportCandidate
 
     New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
+    if ($LegacyMigration) { Suspend-LegacyNamedAccess }
     Stop-TaskBounded -Name $TaskName
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 
@@ -172,6 +235,7 @@ try {
     Write-Host "TASK=$TaskName"
     Write-Host "CONFIG=$ConfigPath"
     Write-Host "LAUNCHER=$ShortcutPath"
+    if ($LegacyMigration) { Write-Host 'NAMED_ACCESS_MIGRATION=PASS' -ForegroundColor Green }
     Write-Host 'SMART_ROUTE_INSTALL=PASS' -ForegroundColor Green
 }
 catch {
@@ -206,6 +270,9 @@ catch {
         if ($ExistingTaskXml) {
             Register-ScheduledTask -TaskName $TaskName -Xml $ExistingTaskXml -Force | Out-Null
             Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        }
+        if ($LegacyMigration -and $LegacyTaskXml) {
+            Restore-LegacyNamedAccess -TaskXml $LegacyTaskXml
         }
     }
     catch {
