@@ -603,6 +603,10 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             }
             sort.Strings(peerAddrs)
         }
+        directAttemptAt := int64(0)
+        if !runtime.lastDirectAttempt.IsZero() {
+            directAttemptAt = runtime.lastDirectAttempt.Unix()
+        }
         forwards = append(forwards, map[string]any{
             "key": runtime.spec.Key,
             "peer_id": runtime.spec.PeerID,
@@ -613,7 +617,7 @@ func (n *nodeRuntime) handleStatus(w http.ResponseWriter, r *http.Request) {
             "relay_connections": relayConns,
             "peer_addrs": peerAddrs,
             "direct_dial_error": runtime.lastDirectError,
-            "direct_dial_attempt_at": runtime.lastDirectAttempt.Unix(),
+            "direct_dial_attempt_at": directAttemptAt,
         })
     }
     n.mu.RUnlock()
