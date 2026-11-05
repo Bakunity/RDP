@@ -252,6 +252,16 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("Ensure-BakunityMeshRole -Role host -Bootstrap $Bootstrap", host)
         self.assertIn("Sync-HostNativeTransport", host)
 
+    def test_missing_tailscale_is_not_reinstalled_automatically(self) -> None:
+        host = (ROOT / "client/BakunityHostSmartRoute.ps1").read_text(encoding="utf-8-sig")
+        connector = (ROOT / "client/BakunitySmartRoute.ps1").read_text(encoding="utf-8-sig")
+        marker = "MESH=SKIPPED Tailscale is not installed; native transport and OpenSSH fallback remain available"
+        self.assertIn(marker, host)
+        self.assertIn(marker, connector)
+        self.assertIn("$Mesh.installed -and", host)
+        self.assertIn("if (-not $Mesh.installed)", connector)
+        self.assertIn("return $Mesh", connector)
+
     def test_connector_only_selects_p2p_after_direct_path_probe(self) -> None:
         worker = (
             ROOT / "client/BakunitySmartRoute.ps1"
