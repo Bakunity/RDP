@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from hermes_rdp.db import Registry, hash_secret
-from hermes_rdp.native_transport import normalize_native_transport_host
+from hermes_rdp.native_transport import (
+    native_transport_windows_artifact,
+    normalize_native_transport_host,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -157,20 +161,72 @@ class NativeTransportTests(unittest.TestCase):
         self.assertNotIn('cd "$ROOT/native-transport"\n', setup)
         self.assertNotIn('WORK="$(mktemp -d)"', setup)
 
-    def test_windows_native_transport_uses_immutable_source_and_system_identity(self) -> None:
+    def test_windows_native_transport_uses_prebuilt_verified_artifact(self) -> None:
         lib = (
             ROOT / "client/BakunityNativeTransport.ps1"
         ).read_text(encoding="utf-8-sig")
         for marker in (
             "RepositoryRef must be an immutable 40-character SHA",
-            "Pinned Go toolchain checksum mismatch",
-            "https://codeload.github.com/bakunity/RDP/tar.gz/",
+            "Bakunity Transport artifact checksum mismatch",
+            "BakunityNativeTransportDownload.PinnedHttpClientFactory",
+            "ResponseHeadersRead",
             "New-ScheduledTaskPrincipal -UserId 'SYSTEM'",
             "Bakunity Transport TCP",
             "Bakunity Transport UDP",
+            "Text.UTF8Encoding($false)",
             "Set-BakunityNativeForward",
         ):
             self.assertIn(marker, lib)
+        self.assertNotIn("go.dev/dl", lib)
+        self.assertNotIn("codeload.github.com", lib)
+        self.assertNotIn("Expand-Archive", lib)
+
+    def test_server_builds_and_verifies_windows_transport_artifact(self) -> None:
+        builder = (
+            ROOT / "scripts/build-native-transport-windows.sh"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "GOOS=windows GOARCH=amd64",
+            "CGO_ENABLED=0",
+            "BakunityTransport.exe.sha256",
+            "WINDOWS_ARTIFACT_SHA256",
+            '[[ "$(head -c 2 "$CANDIDATE")" != "MZ" ]]',
+        ):
+            self.assertIn(marker, builder)
+
+        setup = (
+            ROOT / "scripts/setup-native-transport.sh"
+        ).read_text(encoding="utf-8")
+        update = (
+            ROOT / "scripts/update-server.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("build-native-transport-windows.sh", setup)
+        self.assertIn("build-native-transport-windows.sh", update)
+        self.assertIn('BAKUNITY_TRANSPORT_CLIENT_REF="$NEW_CLIENT_REF"', update)
+
+    def test_windows_transport_artifact_metadata_is_integrity_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            ref = "a" * 40
+            root = Path(temp)
+            directory = root / ref / "windows-amd64"
+            directory.mkdir(parents=True)
+            binary = directory / "BakunityTransport.exe"
+            binary.write_bytes(b"MZ" + b"bakunity-transport")
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            (directory / "BakunityTransport.exe.sha256").write_text(
+                digest + "\n",
+                encoding="ascii",
+            )
+            artifact = native_transport_windows_artifact(ref, root=root)
+            self.assertEqual(artifact["repository_ref"], ref)
+            self.assertEqual(artifact["sha256"], digest)
+            self.assertEqual(artifact["size"], binary.stat().st_size)
+
+            binary.write_bytes(b"MZtampered")
+            self.assertEqual(
+                native_transport_windows_artifact(ref, root=root),
+                {},
+            )
 
     def test_native_host_errors_are_reported_without_breaking_fallbacks(self) -> None:
         state_module = (
@@ -225,6 +281,10 @@ class NativeTransportTests(unittest.TestCase):
         self.assertIn("Sync-ConnectorNativeTransport", connector_worker)
         self.assertIn("routes.native", connector_worker)
         self.assertIn("Set-BakunityNativeForward", connector_worker)
+        self.assertIn("windows_amd64", host_worker)
+        self.assertIn("windows_amd64", connector_worker)
+        self.assertIn("-BearerToken ([string]$Config.device_token)", host_worker)
+        self.assertIn("-BearerToken ([string]$Config.access_token)", connector_worker)
 
     def test_native_route_is_preferred_before_legacy_mesh_and_vps_relay(self) -> None:
         worker = (
@@ -244,8 +304,11 @@ class NativeTransportTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for marker in (
             'path == "/v1/named-access/native-transport-bootstrap"',
+            '"/v1/named-access/native-transport/windows-amd64"',
+            '["native-transport", "windows-amd64"]',
             'action == "native-transport-telemetry"',
             'action == "native-transport-bootstrap"',
+            '"windows_amd64": artifact',
             '"native_transport": {',
             '"relay": {',
         ):
