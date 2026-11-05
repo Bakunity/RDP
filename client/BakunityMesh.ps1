@@ -190,8 +190,26 @@ function Ensure-BakunityMeshRole {
             '--reset',
             '--force-reauth'
         )
-        $Output = @(& $Exe @Arguments 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw "tailscale up failed: $($Output -join ' ')" }
+        # Tailscale is a legacy compatibility path; a stuck enrollment must not
+        # hold the RDP update, maintenance task, or auth-key file indefinitely.
+        $StdOut = Join-Path ([IO.Path]::GetTempPath()) ("BakunityMeshOut-$([Guid]::NewGuid().ToString('N')).log")
+        $StdErr = Join-Path ([IO.Path]::GetTempPath()) ("BakunityMeshErr-$([Guid]::NewGuid().ToString('N')).log")
+        try {
+            $Process = Start-Process -FilePath $Exe -ArgumentList ($Arguments -join ' ') -NoNewWindow -PassThru -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr
+            if (-not $Process.WaitForExit(60000)) {
+                Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+                [void]$Process.WaitForExit(5000)
+                throw 'TAILSCALE_ENROLLMENT_TIMEOUT: tailscale up exceeded 60 seconds'
+            }
+            if ($Process.ExitCode -ne 0) {
+                # Do not include command-line arguments or bootstrap credentials
+                # in the reported error.
+                throw "tailscale up failed with exit code $($Process.ExitCode)"
+            }
+        }
+        finally {
+            Remove-Item -LiteralPath $StdOut,$StdErr -Force -ErrorAction SilentlyContinue
+        }
     }
     finally {
         Remove-Item -LiteralPath $KeyFile -Force -ErrorAction SilentlyContinue
