@@ -91,6 +91,20 @@ function Get-BakunityNativePowerShell {
     return Join-Path $System32 'WindowsPowerShell\v1.0\powershell.exe'
 }
 
+function Get-BakunityNativeTransportBuildRef {
+    if (-not (Test-Path -LiteralPath $script:BakunityNativeTransportRef)) {
+        return ''
+    }
+    try {
+        return (
+            Get-Content -LiteralPath $script:BakunityNativeTransportRef -Raw
+        ).Trim().ToLowerInvariant()
+    }
+    catch {
+        return ''
+    }
+}
+
 function Get-BakunityNativeTransportStatus {
     try {
         return Invoke-RestMethod -UseBasicParsing -Method Get -Uri (
