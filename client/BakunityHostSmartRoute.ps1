@@ -187,7 +187,13 @@ function Sync-HostNativeTransport {
     )
 
     $Telemetry = Get-HostNativeTransportTelemetry
-    $Response = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry }
+    try {
+        $Response = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry }
+    }
+    catch {
+        Write-HostRouteLog "NATIVE_TELEMETRY=DEFERRED $($_.Exception.Message)"
+        return $Telemetry
+    }
     if (-not $Response -or -not [bool]$Response.enabled) {
         return $Telemetry
     }
@@ -225,14 +231,26 @@ function Sync-HostNativeTransport {
                 $ErrorText = $ErrorText.Substring(0, 500)
             }
             $Telemetry.last_error = $ErrorText
-            [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+            # Persist the original local failure before any best-effort
+            # telemetry call can fail and mask it.
             Write-HostRouteLog "NATIVE_TRANSPORT=ERROR $ErrorText"
+            try {
+                [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+            }
+            catch {
+                Write-HostRouteLog "NATIVE_TELEMETRY=DEFERRED $($_.Exception.Message)"
+            }
             return $Telemetry
         }
     }
 
     $Telemetry = Get-HostNativeTransportTelemetry
-    [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+    try {
+        [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry" -Body @{ native_transport = $Telemetry })
+    }
+    catch {
+        Write-HostRouteLog "NATIVE_TELEMETRY=DEFERRED $($_.Exception.Message)"
+    }
     return $Telemetry
 }
 
@@ -252,7 +270,13 @@ function Sync-HostSmartRoute {
 
     $NativeTelemetry = Sync-HostNativeTransport -Config $Config -DeviceId $DeviceId
     $Telemetry = New-SmartRouteTelemetry
-    $Response = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry }
+    $Response = $null
+    try {
+        $Response = Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry }
+    }
+    catch {
+        Write-HostRouteLog "SMART_ROUTE_TELEMETRY=DEFERRED $($_.Exception.Message)"
+    }
 
     if ($Response -and [bool]$Response.mesh_enabled) {
         $Mesh = Get-BakunityTailscaleStatus
@@ -289,7 +313,12 @@ function Sync-HostSmartRoute {
         }
 
         $Telemetry = New-SmartRouteTelemetry
-        [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry })
+        try {
+            [void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/smart-route-telemetry" -Body @{ smart_route = $Telemetry })
+        }
+        catch {
+            Write-HostRouteLog "SMART_ROUTE_TELEMETRY=DEFERRED $($_.Exception.Message)"
+        }
     }
 
     $Final = Get-BakunityTailscaleStatus

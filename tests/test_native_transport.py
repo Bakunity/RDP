@@ -191,6 +191,20 @@ class NativeTransportTests(unittest.TestCase):
         ):
             self.assertIn(marker, host_worker)
 
+    def test_host_native_failure_is_logged_before_best_effort_telemetry(self) -> None:
+        host = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+
+        error_log = 'Write-HostRouteLog "NATIVE_TRANSPORT=ERROR $ErrorText"'
+        report = '[void](Invoke-PinnedPost -Config $Config -Path "/v1/devices/$DeviceId/native-transport-telemetry"'
+        self.assertIn(error_log, host)
+        self.assertIn("NATIVE_TELEMETRY=DEFERRED", host)
+        self.assertIn("SMART_ROUTE_TELEMETRY=DEFERRED", host)
+        self.assertLess(host.index(error_log), host.index(report, host.index(error_log)))
+        self.assertIn("return $Telemetry", host)
+        self.assertIn("SYNC=PASS", host)
+
     def test_host_and_connector_both_receive_native_transport_library(self) -> None:
         host_setup = (
             ROOT / "scripts/setup-smart-route-host.ps1"
