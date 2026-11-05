@@ -181,6 +181,7 @@ class NativeTransportTests(unittest.TestCase):
             "Bakunity Transport TCP",
             "Bakunity Transport UDP",
             "Text.UTF8Encoding($false)",
+            "Get-BakunityNativeTransportBuildRef",
             "Set-BakunityNativeForward",
         ):
             self.assertIn(marker, lib)
@@ -197,6 +198,7 @@ class NativeTransportTests(unittest.TestCase):
             "CGO_ENABLED=0",
             "BakunityTransport.exe.sha256",
             "WINDOWS_ARTIFACT_SHA256",
+            "main.transportBuildRef=$CLIENT_REF",
             '[[ "$(head -c 2 "$CANDIDATE")" != "MZ" ]]',
         ):
             self.assertIn(marker, builder)
@@ -393,6 +395,40 @@ class NativeTransportTests(unittest.TestCase):
         self.assertIn("grace = 8 * time.Second", source)
         self.assertIn("connectionCounts", source)
         self.assertIn('"addrs": localAddrs', source)
+
+
+    def test_native_binary_upgrade_tracks_client_ref_for_host_and_connector(self) -> None:
+        host = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        connector = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for script in (host, connector):
+            self.assertIn("Get-BakunityNativeTransportBuildRef", script)
+            self.assertIn("$NeedsNativeBinary", script)
+        self.assertIn("$InstalledRef -ne $RepositoryRef", host)
+        self.assertIn("$InstalledRef -ne $RepositoryRef", connector)
+        self.assertIn("role=both", connector)
+        self.assertIn("keep that config and its", connector)
+        self.assertIn('var transportBuildRef = "dev"', source)
+        self.assertIn('"build_ref": transportBuildRef', source)
+
+    def test_smart_route_api_timeouts_are_bounded_but_not_too_short(self) -> None:
+        host = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        connector = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn("TimeSpan.FromSeconds(45)", host)
+        self.assertIn("TimeSpan.FromSeconds(45)", connector)
+        self.assertIn("Host Smart Route API POST $Path failed", host)
+        self.assertIn("Smart Route API GET $Path failed", connector)
+        self.assertIn("Smart Route API POST $Path failed", connector)
 
 
 

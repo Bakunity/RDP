@@ -90,7 +90,7 @@ namespace BakunityRdpSmartRoute
                 }
             };
             var client = new HttpClient(handler);
-            client.Timeout = TimeSpan.FromSeconds(15);
+            client.Timeout = TimeSpan.FromSeconds(45);
             return client;
         }
     }
@@ -114,7 +114,12 @@ function Invoke-ControlGet {
     $Request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, "$(([string]$Config.api_base_url).TrimEnd('/'))$Path")
     $Request.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', [string]$Config.access_token)
     try {
-        $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        try {
+            $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        }
+        catch {
+            throw "Smart Route API GET $Path failed: $($_.Exception.GetBaseException().Message)"
+        }
         try {
             $Text = $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             if (-not $Response.IsSuccessStatusCode) { throw "Smart Route API HTTP $([int]$Response.StatusCode): $Text" }
@@ -136,7 +141,12 @@ function Invoke-ControlPost {
     $Json = $Body | ConvertTo-Json -Depth 16 -Compress
     $Request.Content = New-Object System.Net.Http.StringContent($Json, [Text.Encoding]::UTF8, 'application/json')
     try {
-        $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        try {
+            $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        }
+        catch {
+            throw "Smart Route API POST $Path failed: $($_.Exception.GetBaseException().Message)"
+        }
         try {
             $Text = $Response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             if (-not $Response.IsSuccessStatusCode) { throw "Smart Route telemetry HTTP $([int]$Response.StatusCode): $Text" }
@@ -453,38 +463,51 @@ function Sync-ConnectorNativeTransport {
         return Get-BakunityNativeTransportStatus
     }
 
+    $RepositoryRef = ([string]$Config.repository_ref).Trim().ToLowerInvariant()
+    if ($RepositoryRef -notmatch '^[0-9a-f]{40}$') {
+        throw 'Connector repository ref is unavailable for native transport.'
+    }
+
     $Status = Get-BakunityNativeTransportStatus
     $NativeRole = if ($Status) { [string]$Status.role } else { '' }
-    $NeedsNativeConnector = [bool](
+    $InstalledRef = Get-BakunityNativeTransportBuildRef
+    $NeedsNativeConfig = [bool](
         -not $Status -or
         -not [bool]$Status.ok -or
         $NativeRole -notin @('connector','both')
     )
-    if ($NeedsNativeConnector) {
+    $NeedsNativeBinary = [bool](
+        $InstalledRef -ne $RepositoryRef
+    )
+
+    if ($NeedsNativeConfig -or $NeedsNativeBinary) {
         $Bootstrap = Invoke-ControlPost -Config $Config -Path '/v1/named-access/native-transport-bootstrap' -Body @{}
         if ($Bootstrap -and [bool]$Bootstrap.enabled) {
-            $RepositoryRef = [string]$Config.repository_ref
-            if ($RepositoryRef -notmatch '^[0-9a-fA-F]{40}$') {
-                throw 'Connector repository ref is unavailable for native transport.'
-            }
             $Artifact = $Bootstrap.windows_amd64
             if (-not $Artifact) {
                 throw 'Windows native transport artifact is unavailable.'
             }
             if (
                 ([string]$Artifact.repository_ref).ToLowerInvariant() -ne
-                $RepositoryRef.ToLowerInvariant()
+                $RepositoryRef
             ) {
                 throw 'Windows native transport artifact ref mismatch.'
             }
+
             $DownloadUrl = (
                 ([string]$Config.api_base_url).TrimEnd('/') +
                 [string]$Artifact.download_path
             )
             Install-BakunityNativeTransportBinary -RepositoryRef $RepositoryRef -DownloadUrl $DownloadUrl -ExpectedSha256 ([string]$Artifact.sha256) -ApiFingerprint ([string]$Config.api_fingerprint) -BearerToken ([string]$Config.access_token)
-            Set-BakunityNativeTransportConfig -Role connector -RelayAddr ([string]$Bootstrap.relay_addr)
+
+            # A PC can be both an RDP host and a connector. If its existing
+            # Native config already has role=both, keep that config and its
+            # host secret intact while replacing/restarting only the binary.
+            if ($NeedsNativeConfig) {
+                Set-BakunityNativeTransportConfig -Role connector -RelayAddr ([string]$Bootstrap.relay_addr)
+            }
             $Status = Start-BakunityNativeTransport
-            Write-Log "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id)"
+            Write-Log "NATIVE_TRANSPORT=ONLINE peer=$([string]$Status.peer_id) ref=$RepositoryRef role=$([string]$Status.role)"
         }
     }
     return Get-BakunityNativeTransportStatus
