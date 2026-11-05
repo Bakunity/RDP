@@ -312,6 +312,28 @@ class TelegramUxBot(TelegramBot):
 
         if data == "connector_add":
             self._set_live(False)
+
+            # A pending command contains a one-time connector token. Never
+            # persist that plaintext token in SQLite. If the previous command
+            # was abandoned before first contact, revoke it before creating a
+            # replacement.
+            pending_id = str(
+                self.registry.get_setting(
+                    "pending_connector_add_id",
+                    "",
+                )
+                or ""
+            )
+            if pending_id:
+                try:
+                    pending = self.registry.get_named_access_connector(
+                        pending_id
+                    )
+                    if not int(pending.get("last_seen") or 0):
+                        self.registry.revoke_named_access_token(pending_id)
+                except KeyError:
+                    pass
+
             connector, token = self.registry.create_named_access_token(
                 "Windows устройство"
             )
@@ -333,22 +355,45 @@ class TelegramUxBot(TelegramBot):
                 f"-AccessToken '{ps_quote(token)}' "
                 f"-RepositoryRef '{ps_quote(repository_ref)}'"
             )
-            self.api_call(
-                "sendMessage",
-                {
-                    "chat_id": self.config.telegram_chat_id,
-                    "parse_mode": "HTML",
-                    "text": (
-                        f"{self.icon('add')} НОВОЕ УСТРОЙСТВО\n\n"
-                        "Открой PowerShell от администратора на Windows и "
-                        "вставь команду целиком.\n\n"
-                        f"<pre><code>{html.escape(command)}</code></pre>\n\n"
-                        "Команда содержит одноразовый секрет подключения. Не пересылай её."
-                    ),
-                },
+            self._pending_connector_install_command = command
+            self.registry.set_setting(
+                "pending_connector_add_id",
+                str(connector["id"]),
             )
-            self.registry.set_setting("screen", "connectors")
+            self.registry.set_setting("screen", "connector_add")
             self._answer(callback_id, "Команда подключения создана")
+            self.render()
+            return
+
+        if data == "connector_add_done":
+            self._pending_connector_install_command = ""
+            self.registry.set_setting("pending_connector_add_id", "")
+            self.registry.set_setting("screen", "connectors")
+            self._answer(callback_id)
+            self.render()
+            return
+
+        if data == "connector_add_cancel":
+            pending_id = str(
+                self.registry.get_setting(
+                    "pending_connector_add_id",
+                    "",
+                )
+                or ""
+            )
+            if pending_id:
+                try:
+                    pending = self.registry.get_named_access_connector(
+                        pending_id
+                    )
+                    if not int(pending.get("last_seen") or 0):
+                        self.registry.revoke_named_access_token(pending_id)
+                except KeyError:
+                    pass
+            self._pending_connector_install_command = ""
+            self.registry.set_setting("pending_connector_add_id", "")
+            self.registry.set_setting("screen", "connectors")
+            self._answer(callback_id, "Добавление отменено")
             self.render()
             return
 
@@ -443,9 +488,11 @@ class TelegramUxBot(TelegramBot):
         text = (
             f"{self.icon('computer')} BAKUNITY RDP\n\n"
             f"Компьютеры: {len(devices)} · в сети {online}\n"
-            f"Устройства для подключения: {len(connectors)} · "
-            f"в сети {connector_online}\n\n"
-            "Выбери компьютер."
+            "К ним подключаемся удалённо.\n\n"
+            f"Устройства подключения: {len(connectors)} · "
+            f"в сети {connector_online}\n"
+            "С них подключаемся к компьютерам.\n\n"
+            "Выбери компьютер или добавь новое устройство."
         )
         rows = []
         for device in devices:
@@ -459,16 +506,31 @@ class TelegramUxBot(TelegramBot):
                     )
                 ]
             )
-        rows.append([self.button("add", "ДОБАВИТЬ КОМПЬЮТЕР", "add", style="primary")])
+        rows.append([
+            self.button(
+                "computer",
+                "⊞ ДОБАВИТЬ КОМПЬЮТЕР",
+                "add",
+                style="primary",
+            )
+        ])
         rows.append([
             self.button(
                 "globe",
-                "ОТКУДА ПОДКЛЮЧАЮСЬ",
+                "УСТРОЙСТВА ПОДКЛЮЧЕНИЯ",
                 "connectors",
                 style="primary",
             )
         ])
-        rows.append([self.button("refresh", "ОБНОВИТЬ", "refresh")])
+        rows.append([
+            self.button(
+                "globe",
+                "⊞ ДОБАВИТЬ УСТРОЙСТВО",
+                "connector_add",
+                style="primary",
+            )
+        ])
+        rows.append([self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh")])
         return text, {"inline_keyboard": rows}
 
     def _product_notice(self, device: dict[str, Any]) -> str:
@@ -498,7 +560,30 @@ class TelegramUxBot(TelegramBot):
 
         client_ref = str(telemetry.get("client_repository_ref") or "").lower()
         if client_ref and not self._client_ref_is_compatible(client_ref):
-            return f"{self.icon('upload')} Доступно обновление Bakunity RDP"
+            desired_ref = self._client_ref().lower()
+            maintenance = telemetry.get("maintenance_status") or {}
+            state = str(maintenance.get("state") or "").lower()
+            action = str(maintenance.get("action") or "").lower()
+            target = str(maintenance.get("repository_ref") or "").lower()
+            current_update = bool(
+                action == "update"
+                and desired_ref
+                and target == desired_ref
+            )
+            if current_update and state == "running":
+                return (
+                    f"{self.icon('timer')} Bakunity RDP обновляется "
+                    "автоматически"
+                )
+            if current_update and state == "failed":
+                return (
+                    f"{self.icon('warning')} Автообновление не завершилось · "
+                    "система повторит попытку автоматически"
+                )
+            return (
+                f"{self.icon('upload')} Доступно обновление Bakunity RDP · "
+                "установится автоматически"
+            )
         return ""
 
     def _product_rdp_endpoint(self, device: dict[str, Any]) -> str:
@@ -534,7 +619,7 @@ class TelegramUxBot(TelegramBot):
             [
                 self.button(
                     "add",
-                    "ДОБАВИТЬ УСТРОЙСТВО",
+                    "⊞ ДОБАВИТЬ УСТРОЙСТВО",
                     "connector_add",
                     style="primary",
                 )
@@ -542,12 +627,122 @@ class TelegramUxBot(TelegramBot):
         )
         rows.append([self.button("back", "НАЗАД", "home")])
         text = (
-            f"{self.icon('globe')} ОТКУДА ПОДКЛЮЧАЮСЬ\n\n"
-            "Это компьютеры, с которых можно открыть RDP к твоим "
-            "компьютерам через Bakunity.\n\n"
+            f"{self.icon('globe')} УСТРОЙСТВА ПОДКЛЮЧЕНИЯ\n\n"
+            "Это Windows-ПК и ноутбуки, с которых ты подключаешься "
+            "к своим компьютерам через Bakunity.\n\n"
             f"Всего: {len(connectors)}"
         )
         return text, {"inline_keyboard": rows}
+
+    def _connector_add_screen(self) -> tuple[str, dict[str, Any]]:
+        connector_id = str(
+            self.registry.get_setting(
+                "pending_connector_add_id",
+                "",
+            )
+            or ""
+        )
+        command = str(
+            getattr(self, "_pending_connector_install_command", "")
+            or ""
+        )
+
+        connector = None
+        if connector_id:
+            try:
+                connector = self.registry.get_named_access_connector(
+                    connector_id
+                )
+            except KeyError:
+                connector = None
+
+        if connector and int(connector.get("last_seen") or 0):
+            self._pending_connector_install_command = ""
+            text = (
+                f"{self.icon('success')} УСТРОЙСТВО ДОБАВЛЕНО\n\n"
+                "Bakunity уже получил первое подключение от Windows.\n"
+                "Устройство появилось в списке и готово к настройке маршрутов."
+            )
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        self.button(
+                            "globe",
+                            "ОТКРЫТЬ УСТРОЙСТВО",
+                            f"connector:{connector_id}",
+                            style="success",
+                        )
+                    ],
+                    [
+                        self.button(
+                            "back",
+                            "К УСТРОЙСТВАМ",
+                            "connector_add_done",
+                        )
+                    ],
+                ]
+            }
+            return text, keyboard
+
+        if not command:
+            text = (
+                f"{self.icon('warning')} КОМАНДА БОЛЬШЕ НЕ ПОКАЗЫВАЕТСЯ\n\n"
+                "Одноразовый секрет не хранится в базе Bakunity. "
+                "Если бот был перезапущен или экран уже закрывался, "
+                "создай новую команду."
+            )
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        self.button(
+                            "globe",
+                            "СОЗДАТЬ НОВУЮ КОМАНДУ",
+                            "connector_add",
+                            style="primary",
+                        )
+                    ],
+                    [
+                        self.button(
+                            "back",
+                            "К УСТРОЙСТВАМ",
+                            "connector_add_cancel",
+                        )
+                    ],
+                ]
+            }
+            return text, keyboard
+
+        text = (
+            f"{self.icon('add')} ДОБАВИТЬ УСТРОЙСТВО ПОДКЛЮЧЕНИЯ\n\n"
+            "Это Windows-ПК или ноутбук, с которого ты будешь "
+            "подключаться к своим компьютерам.\n\n"
+            "1. Открой PowerShell от администратора на этом устройстве.\n"
+            "2. Вставь команду целиком.\n"
+            "3. Bakunity добавит устройство автоматически.\n\n"
+            f"<pre><code>{html.escape(command)}</code></pre>\n\n"
+            "Команда содержит одноразовый секрет. Не пересылай её. "
+            "После выхода с этого экрана команда исчезнет из сообщения."
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    self.button(
+                        "success",
+                        "ГОТОВО",
+                        "connector_add_done",
+                        style="success",
+                    )
+                ],
+                [
+                    self.button(
+                        "cancel",
+                        "ОТМЕНИТЬ ДОБАВЛЕНИЕ",
+                        "connector_add_cancel",
+                    )
+                ],
+            ]
+        }
+        return text, keyboard
 
     def _connector(
         self,
@@ -620,7 +815,7 @@ class TelegramUxBot(TelegramBot):
                     )
                 ],
                 [
-                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh"),
                     self.button(
                         "back",
                         "К УСТРОЙСТВАМ",
@@ -655,7 +850,7 @@ class TelegramUxBot(TelegramBot):
             "",
             f"Адрес: {escape(self._product_rdp_endpoint(device))}",
             "",
-            "ОТКУДА ПОДКЛЮЧАЮСЬ",
+            "УСТРОЙСТВО ПОДКЛЮЧЕНИЯ",
         ]
         for connector in connectors:
             telemetry = connector.get("telemetry") or {}
@@ -691,8 +886,8 @@ class TelegramUxBot(TelegramBot):
         if not connectors:
             lines.extend(
                 [
-                    "Пока нет устройств, с которых настроено подключение.",
-                    "Добавь такое устройство одной PowerShell-командой.",
+                    "Устройств подключения пока нет.",
+                    "Добавь Windows-ПК или ноутбук, с которого будешь подключаться.",
                 ]
             )
         rows.append(
@@ -893,7 +1088,7 @@ class TelegramUxBot(TelegramBot):
                     )
                 ],
                 [
-                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh"),
                     self.button("back", "К СПИСКУ", "home"),
                 ],
             ]
@@ -1035,7 +1230,7 @@ class TelegramUxBot(TelegramBot):
                 [
                     self.button(
                         "refresh",
-                        "ОБНОВИТЬ",
+                        "ОБНОВИТЬ СТАТУС",
                         "refresh",
                     )
                 ]
@@ -1107,7 +1302,7 @@ class TelegramUxBot(TelegramBot):
                 [
                     self.button(
                         "refresh",
-                        "ОБНОВИТЬ",
+                        "ОБНОВИТЬ СТАТУС",
                         "refresh",
                     )
                 ]
@@ -1165,7 +1360,7 @@ class TelegramUxBot(TelegramBot):
                     )
                 ],
                 [
-                    self.button("refresh", "ОБНОВИТЬ", "refresh"),
+                    self.button("refresh", "ОБНОВИТЬ СТАТУС", "refresh"),
                     self.button(
                         "back",
                         "К КОМПЬЮТЕРУ",
@@ -1299,6 +1494,8 @@ class TelegramUxBot(TelegramBot):
                 return self._device_connection(
                     self.registry.get_device(device_id)
                 )
+        if screen == "connector_add":
+            return self._connector_add_screen()
         if screen == "connectors":
             return self._connectors()
         if screen == "connector":
