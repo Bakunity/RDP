@@ -115,6 +115,9 @@ def normalize_native_transport_host(
     }:
         path = "idle"
 
+    active_sessions = max(0, int(payload.get("active_sessions") or 0))
+    last_stream_at = max(0, int(payload.get("last_stream_at") or 0))
+
     return {
         "captured_at": int(payload.get("captured_at") or 0),
         "installed": bool(payload.get("installed")),
@@ -122,6 +125,8 @@ def normalize_native_transport_host(
         "peer_id": _clean_peer_id(payload.get("peer_id")),
         "relay_connected": bool(payload.get("relay_connected")),
         "path": path,
+        "active_sessions": active_sessions,
+        "last_stream_at": last_stream_at,
         "version": str(payload.get("version") or "")[:64],
         "last_error": str(payload.get("last_error") or "")[:500],
     }

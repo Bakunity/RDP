@@ -173,13 +173,26 @@ function Get-HostNativeTransportTelemetry {
         $PeerId = [string]$Status.peer_id
         $Version = [string]$Status.version
     }
+    $ActiveSessions = 0
+    $Path = 'idle'
+    $LastStreamAt = 0
+    if ($Status) {
+        try { $ActiveSessions = [int]$Status.inbound_active_sessions } catch { $ActiveSessions = 0 }
+        $LastPath = [string]$Status.inbound_last_stream_path
+        if ($ActiveSessions -gt 0 -and $LastPath -in @('direct','relay')) {
+            $Path = $LastPath
+        }
+        try { $LastStreamAt = [int64]$Status.inbound_last_stream_at } catch { $LastStreamAt = 0 }
+    }
     return [ordered]@{
         captured_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         installed = [bool]$Installed
         online = [bool]($Status -and $Status.ok)
         peer_id = $PeerId
         relay_connected = [bool]($Status -and $Status.relay_connected)
-        path = 'idle'
+        path = $Path
+        active_sessions = [int]$ActiveSessions
+        last_stream_at = [int64]$LastStreamAt
         version = $Version
         last_error = ''
     }

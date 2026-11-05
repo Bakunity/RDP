@@ -52,6 +52,30 @@ class TelegramProductUxTests(unittest.TestCase):
         self.assertNotIn("ПЕРЕЗАПУСТИТЬ ПОДКЛЮЧЕНИЕ", product)
         self.assertNotIn("ВОССТАНОВИТЬ", product)
 
+    def test_connection_card_never_labels_tcp_socket_counts_as_sessions(self) -> None:
+        text = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
+        state = text.split(
+            "    def _active_connection_state(",
+            1,
+        )[1].split("    def _update_status_text(", 1)[0]
+        device = text.split(
+            "    def _device(self, device: dict[str, Any])",
+            1,
+        )[1].split("    def _device_edit(", 1)[0]
+        self.assertIn("get_native_transport_host", text)
+        self.assertIn('native.get("active_sessions")', state)
+        self.assertIn('native.get("path")', state)
+        self.assertIn('"native_p2p"', state)
+        self.assertIn('"native_relay"', state)
+        self.assertLess(
+            state.index('telemetry.get("rdp_direct_connections")'),
+            state.index('telemetry.get("rdp_hermes_connections")'),
+        )
+        self.assertIn('connection["exact"]', device)
+        self.assertIn("RDP-сессий:", device)
+        self.assertNotIn('"sessions": through_bakunity', state)
+        self.assertNotIn('"sessions": direct', state)
+
     def test_details_unify_diagnostics_and_compact_update_status(self) -> None:
         text = (ROOT / "server/hermes_rdp/bot_ux.py").read_text(encoding="utf-8")
         self.assertIn("def _device_details", text)

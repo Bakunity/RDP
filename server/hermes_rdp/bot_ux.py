@@ -10,6 +10,7 @@ from .device_certificates import (
     get_device_certificate_target,
     set_device_slug_with_certificate,
 )
+from .native_transport import get_native_transport_host
 
 
 class TelegramUxBot(TelegramBot):
@@ -773,26 +774,34 @@ class TelegramUxBot(TelegramBot):
                 "exact": True,
             }
 
-        telemetry = device.get("telemetry") or {}
+        native = get_native_transport_host(
+            self.registry,
+            device_id,
+        )
         try:
-            through_bakunity = int(
-                telemetry.get("rdp_hermes_connections") or 0
-            )
+            native_sessions = int(native.get("active_sessions") or 0)
         except (TypeError, ValueError):
-            through_bakunity = 0
-        if through_bakunity > 0:
+            native_sessions = 0
+        native_path = str(native.get("path") or "").lower()
+        if native_sessions > 0 and native_path in {"direct", "relay"}:
+            route = (
+                "native_p2p"
+                if native_path == "direct"
+                else "native_relay"
+            )
             return {
                 "active": True,
-                "route": "server",
-                "label": "☁️ ЧЕРЕЗ СЕРВЕР BAKUNITY",
+                "route": route,
+                "label": self._route_label(route),
                 "latency_ms": 0,
                 "bytes_received": 0,
                 "bytes_sent": 0,
-                "sessions": through_bakunity,
+                "sessions": native_sessions,
                 "source": "",
-                "exact": False,
+                "exact": True,
             }
 
+        telemetry = device.get("telemetry") or {}
         try:
             direct = int(telemetry.get("rdp_direct_connections") or 0)
         except (TypeError, ValueError):
@@ -805,16 +814,22 @@ class TelegramUxBot(TelegramBot):
                 "latency_ms": 0,
                 "bytes_received": 0,
                 "bytes_sent": 0,
-                "sessions": direct,
+                "sessions": 0,
                 "source": "",
                 "exact": False,
             }
 
         try:
+            through_bakunity = int(
+                telemetry.get("rdp_hermes_connections") or 0
+            )
+        except (TypeError, ValueError):
+            through_bakunity = 0
+        try:
             total = int(telemetry.get("rdp_connections") or 0)
         except (TypeError, ValueError):
             total = 0
-        if total > 0:
+        if through_bakunity > 0 or total > 0:
             return {
                 "active": True,
                 "route": "rdp",
@@ -822,7 +837,7 @@ class TelegramUxBot(TelegramBot):
                 "latency_ms": 0,
                 "bytes_received": 0,
                 "bytes_sent": 0,
-                "sessions": total,
+                "sessions": 0,
                 "source": "",
                 "exact": False,
             }
@@ -1425,7 +1440,11 @@ class TelegramUxBot(TelegramBot):
                     ),
                 ]
             )
-        if connection["active"]:
+        if (
+            connection["active"]
+            and connection["exact"]
+            and int(connection["sessions"] or 0) > 0
+        ):
             connection_lines.append(
                 f"RDP-сессий: {int(connection['sessions'])}"
             )
