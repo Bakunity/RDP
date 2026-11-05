@@ -33,6 +33,8 @@ class NativeTransportTests(unittest.TestCase):
         self.assertTrue(state["online"])
         self.assertEqual(state["peer_id"], valid_peer)
         self.assertEqual(state["path"], "direct")
+        self.assertEqual(state["active_sessions"], 0)
+        self.assertEqual(state["last_stream_at"], 0)
 
         invalid = normalize_native_transport_host(
             {
@@ -531,6 +533,43 @@ class NativeTransportTests(unittest.TestCase):
             "runtime.activeSessions--",
         ):
             self.assertIn(marker, source)
+
+
+    def test_native_session_telemetry_uses_actual_streams(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        connector = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        host = (
+            ROOT / "client/BakunityHostSmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            '"inbound_active_sessions"',
+            '"inbound_last_stream_path"',
+            '"inbound_last_stream_at"',
+            "n.inboundActive++",
+            "n.inboundActive--",
+            "stream.Conn().Stat().Limited",
+        ):
+            self.assertIn(marker, source)
+        for marker in (
+            "active_sessions=0",
+            "last_stream_path=''",
+            "last_stream_at=0",
+            "$Forward.active_sessions",
+            "$Forward.last_stream_path",
+            "$Forward.last_stream_at",
+        ):
+            self.assertIn(marker, connector)
+        for marker in (
+            "$Status.inbound_active_sessions",
+            "$Status.inbound_last_stream_path",
+            "$Status.inbound_last_stream_at",
+            "active_sessions = [int]$ActiveSessions",
+        ):
+            self.assertIn(marker, host)
 
 
 
