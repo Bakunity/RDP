@@ -325,6 +325,9 @@ class TelegramBot:
             "device",
             "device_details",
             "device_technical",
+            "device_settings",
+            "device_connection",
+            "device_connection_source",
             "device_address_progress",
         }:
             return None
@@ -338,6 +341,38 @@ class TelegramBot:
 
         telemetry = device.get("telemetry") or {}
         last_result = device.get("last_result") or {}
+
+        # Connection routes are reported by the Windows connector rather than
+        # by the target PC. Include their product-facing state in the dashboard
+        # signature so an open computer card refreshes as soon as a route or
+        # RDP session appears/disappears.
+        connector_routes: list[tuple[Any, ...]] = []
+        list_connectors = getattr(
+            self.registry,
+            "list_named_access_tokens",
+            None,
+        )
+        if callable(list_connectors):
+            try:
+                for connector in list_connectors():
+                    connector_telemetry = connector.get("telemetry") or {}
+                    route = (
+                        connector_telemetry.get("routes") or {}
+                    ).get(device_id) or {}
+                    connector_routes.append(
+                        (
+                            str(connector.get("id") or ""),
+                            int(connector.get("last_seen") or 0),
+                            str(route.get("route") or ""),
+                            int(route.get("latency_ms") or 0),
+                            int(route.get("active_sessions") or 0),
+                            int(route.get("bytes_received") or 0),
+                            int(route.get("bytes_sent") or 0),
+                        )
+                    )
+            except Exception:
+                connector_routes = []
+
         return (
             device_id,
             bool(device.get("enabled", True)),
@@ -360,6 +395,10 @@ class TelegramBot:
             str((telemetry.get("maintenance_status") or {}).get("state") or ""),
             str((telemetry.get("maintenance_status") or {}).get("action") or ""),
             bool((telemetry.get("maintenance_status") or {}).get("ok")),
+            int(telemetry.get("rdp_connections") or 0),
+            int(telemetry.get("rdp_hermes_connections") or 0),
+            int(telemetry.get("rdp_direct_connections") or 0),
+            tuple(sorted(connector_routes)),
         )
 
     def _live_loop(self) -> None:
@@ -371,6 +410,9 @@ class TelegramBot:
                     "device",
                     "device_details",
                     "device_technical",
+                    "device_settings",
+                    "device_connection",
+                    "device_connection_source",
                     "device_address_progress",
                 }:
                     self.last_device_signature = None
