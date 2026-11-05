@@ -115,9 +115,13 @@ class NativeTransportTests(unittest.TestCase):
             "invalid transport authorization",
             "127.0.0.1:3389",
             "direct Bakunity path unavailable after hole-punch grace period",
+            "WithForceDirectDial",
+            "bakunity-direct-upgrade",
             '"direct_connections"',
             '"relay_connections"',
             '"peer_addrs"',
+            '"direct_dial_error"',
+            '"direct_dial_attempt_at"',
         ):
             self.assertIn(marker, source)
         self.assertNotIn("tailscale", source.lower())
@@ -429,6 +433,21 @@ class NativeTransportTests(unittest.TestCase):
         self.assertIn("Host Smart Route API POST $Path failed", host)
         self.assertIn("Smart Route API GET $Path failed", connector)
         self.assertIn("Smart Route API POST $Path failed", connector)
+
+
+    def test_native_relay_connection_is_explicitly_upgraded_to_direct(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        self.assertIn("func (n *nodeRuntime) tryDirectPeer", source)
+        self.assertIn("network.WithForceDirectDial", source)
+        self.assertIn("network.WithDialPeerTimeout", source)
+        self.assertIn('"/p2p-circuit"', source)
+        self.assertIn("no direct peer addresses known", source)
+        self.assertIn("force direct dial completed without direct connection", source)
+        self.assertIn("recordDirectAttempt", source)
+        self.assertIn('"direct_dial_error"', source)
+        self.assertIn('"direct_dial_attempt_at"', source)
 
 
 
