@@ -468,6 +468,21 @@ class NativeTransportTests(unittest.TestCase):
             self.assertIn(marker, source)
 
 
+    def test_relay_status_exposes_connected_peer_remote_addresses(self) -> None:
+        source = (
+            ROOT / "native-transport/cmd/bakunity-transport/main.go"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            '"connected_peers"',
+            '"remote_addr"',
+            '"direction"',
+            '"limited"',
+            "RemoteMultiaddr",
+            "RemotePeer",
+        ):
+            self.assertIn(marker, source)
+
+
 
 if __name__ == "__main__":
     unittest.main()

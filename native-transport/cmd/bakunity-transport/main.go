@@ -353,6 +353,25 @@ func runRelay(args []string) {
             addrs = append(addrs, addr.String())
         }
         sort.Strings(addrs)
+
+        peers := make([]map[string]any, 0)
+        for _, conn := range h.Network().Conns() {
+            if conn.RemotePeer() == h.ID() {
+                continue
+            }
+            peers = append(peers, map[string]any{
+                "peer_id": conn.RemotePeer().String(),
+                "remote_addr": conn.RemoteMultiaddr().String(),
+                "direction": conn.Stat().Direction.String(),
+                "limited": conn.Stat().Limited,
+            })
+        }
+        sort.Slice(peers, func(i, j int) bool {
+            left := fmt.Sprint(peers[i]["peer_id"], "|", peers[i]["remote_addr"])
+            right := fmt.Sprint(peers[j]["peer_id"], "|", peers[j]["remote_addr"])
+            return left < right
+        })
+
         writeJSON(w, http.StatusOK, map[string]any{
             "ok": true,
             "version": transportVersion,
@@ -360,6 +379,7 @@ func runRelay(args []string) {
             "peer_id": h.ID().String(),
             "addrs": addrs,
             "allowed_peers": acl.count(),
+            "connected_peers": peers,
         })
     })
 
