@@ -288,6 +288,7 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("$LauncherPort = if ($RelayPort -ge 1", worker)
         self.assertIn("$LocalPort = if ($Mode -eq 'transparent')", worker)
         self.assertIn("$LauncherPort", worker)
+        self.assertIn("$LauncherPortStart + $Index", worker)
         self.assertIn("$Target.hostname", launcher)
         self.assertIn("$Target.local_port", launcher)
         self.assertIn("Write-ManagedHosts -Mappings $Mappings", worker)
