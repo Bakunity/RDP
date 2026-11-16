@@ -52,6 +52,21 @@ DEFAULT_RDP_WAS_ACTIVE=0
 if systemctl is-active --quiet bakunity-rdp-default.service 2>/dev/null; then
   DEFAULT_RDP_WAS_ACTIVE=1
 fi
+DEFAULT_RDP_CONFIGURED="$(
+  python3 - "$DB" <<'PY'
+import sqlite3
+import sys
+
+connection = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+try:
+    row = connection.execute(
+        "SELECT value FROM settings WHERE key='default_rdp_device_id'"
+    ).fetchone()
+finally:
+    connection.close()
+print(1 if row and str(row[0] or "").strip() else 0)
+PY
+)"
 
 cleanup() {
   rm -rf "$WORK"
@@ -184,8 +199,10 @@ rollback_update() {
     visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null || rollback_ok=0
   fi
   systemctl restart hermes-rdp-sshd.service hermes-rdp.service || rollback_ok=0
-  if ((DEFAULT_RDP_WAS_ACTIVE == 1)); then
-    systemctl restart bakunity-rdp-default.service || rollback_ok=0
+  if ((DEFAULT_RDP_CONFIGURED == 1)); then
+    systemctl enable --now bakunity-rdp-default.service >/dev/null 2>&1 || rollback_ok=0
+  else
+    systemctl disable --now bakunity-rdp-default.service >/dev/null 2>&1 || true
   fi
   systemctl is-active --quiet hermes-rdp-sshd.service || rollback_ok=0
   systemctl is-active --quiet hermes-rdp.service || rollback_ok=0
@@ -576,9 +593,11 @@ PYTHONPATH=/opt/hermes-rdp/app \
 
 systemctl daemon-reload
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
-if ((DEFAULT_RDP_WAS_ACTIVE == 1)); then
-  systemctl restart bakunity-rdp-default.service
+if ((DEFAULT_RDP_CONFIGURED == 1)); then
+  systemctl enable --now bakunity-rdp-default.service >/dev/null
   systemctl is-active --quiet bakunity-rdp-default.service
+else
+  systemctl disable --now bakunity-rdp-default.service >/dev/null 2>&1 || true
 fi
 systemctl is-active --quiet hermes-rdp-sshd.service
 systemctl is-active --quiet hermes-rdp.service
