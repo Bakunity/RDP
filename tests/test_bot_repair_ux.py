@@ -295,8 +295,7 @@ class TelegramRepairUxTests(unittest.TestCase):
         summary_text, summary_keyboard = self.bot._device(device)
         self.assertIn("TEST PC", summary_text)
         self.assertIn("Windows 11 Pro", summary_text)
-        self.assertIn("Адрес: server.example", summary_text)
-        self.assertNotIn("Адрес: server.example:53391", summary_text)
+        self.assertIn("Адрес: server.example:53391", summary_text)
         self.assertIn("ПОДКЛЮЧЕНИЕ", summary_text)
         self.assertIn("Доступ включён", summary_text)
         self.assertIn("RDP ПОДКЛЮЧЕНО", summary_text)
@@ -416,6 +415,15 @@ class TelegramRepairUxTests(unittest.TestCase):
         )
         self.assertIn("Адрес: test-pc.tima.biz", text)
         self.assertNotIn("test-pc.tima.biz:53391", text)
+
+    def test_non_default_rdp_device_keeps_public_fallback_port(self) -> None:
+        self.registry.set_setting("device_domain", "tima.biz")
+        self.registry.set_setting("default_rdp_device_id", "other-device")
+        text, _ = self.bot._device(
+            self.registry.get_device("dev123")
+        )
+        self.assertIn("Адрес: test-pc.tima.biz:53391", text)
+
 
     def test_edit_name_flow_updates_device_from_plain_message(self) -> None:
         self.bot._handle_callback({"id": "cb-name", "data": "edit_name:dev123"})

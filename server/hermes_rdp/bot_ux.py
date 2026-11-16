@@ -678,9 +678,15 @@ class TelegramUxBot(TelegramBot):
         return ""
 
     def _product_rdp_endpoint(self, device: dict[str, Any]) -> str:
-        # Product identity is stable and portless. Smart Route uses a
-        # connector-local port while the public OpenSSH port is fallback-only.
-        return self._device_host(device)
+        # Only the configured default device is reachable on standard RDP
+        # TCP 3389 without an explicit port. Every other public fallback
+        # endpoint still requires its assigned reverse-SSH port.
+        default_device_id = str(
+            self.registry.get_setting("default_rdp_device_id", "") or ""
+        ).strip()
+        if default_device_id == str(device.get("id") or ""):
+            return self._device_host(device)
+        return self._rdp_endpoint(device)
 
     def _visible_connectors(self) -> list[dict[str, Any]]:
         connectors = [

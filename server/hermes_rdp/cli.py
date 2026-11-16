@@ -526,6 +526,11 @@ def main() -> None:
         default_device_id = str(
             registry.get_setting("default_rdp_device_id", "") or ""
         ).strip()
+        default_service = "bakunity-rdp-default.service"
+        default_service_active = (
+            systemctl("is-active", "--quiet", default_service).returncode == 0
+        )
+        default_listener = endpoint_listener_state(3389)
         if default_device_id:
             try:
                 default_device = registry.get_device(default_device_id)
@@ -535,22 +540,106 @@ def main() -> None:
                     if default_slug and device_domain
                     else config.public_host
                 )
-                if endpoint_listener_state(3389):
+                default_upstream = endpoint_listener_state(
+                    int(default_device["rdp_port"])
+                )
+                if default_service_active and default_listener is True:
                     print(
-                        "default-rdp: LISTEN 3389 -> "
-                        f"{default_host}:{default_device['rdp_port']}"
+                        "default-rdp: OK 3389 -> "
+                        f"{default_host}:{default_device['rdp_port']} "
+                        f"(upstream={'LISTEN' if default_upstream is True else 'MISSING' if default_upstream is False else 'UNKNOWN'})"
                     )
                 else:
                     errors += 1
                     print(
-                        "default-rdp: FAIL 3389 -> "
-                        f"{default_host}:{default_device['rdp_port']}"
+                        "default-rdp: FAIL "
+                        f"service={'active' if default_service_active else 'inactive'} "
+                        f"listener={'yes' if default_listener is True else 'no' if default_listener is False else 'unknown'} "
+                        f"-> {default_host}:{default_device['rdp_port']}"
                     )
             except KeyError:
                 errors += 1
                 print(f"default-rdp: FAIL missing-device {default_device_id}")
         else:
             print("default-rdp: disabled")
+
+        compatible_refs = {
+            str(config.client_ref or "").lower(),
+            *(
+                str(ref or "").lower()
+                for ref in config.compatible_client_refs
+            ),
+        }
+        now = int(time.time())
+        for device in registry.list_devices():
+            telemetry = device.get("telemetry") or {}
+            slug = str(device.get("slug") or "").strip()
+            host = (
+                f"{slug}.{device_domain}"
+                if slug and device_domain
+                else config.public_host
+            )
+            port = int(device["rdp_port"])
+            tunnel_state = endpoint_listener_state(port)
+            last_seen = int(device.get("last_seen") or 0)
+            age = "never" if not last_seen else f"{max(0, now - last_seen)}s"
+
+            client_ref = str(
+                telemetry.get("client_repository_ref") or ""
+            ).lower()
+            if not client_ref:
+                client_state = "unknown"
+            elif client_ref in compatible_refs:
+                client_state = f"ok:{client_ref[:7]}"
+            else:
+                client_state = f"stale:{client_ref[:7]}"
+
+            cert_ok = telemetry.get("certificate_lifecycle_ok")
+            reported_thumb = str(
+                telemetry.get("rdp_certificate_thumbprint") or ""
+            ).replace(" ", "").upper()
+            expected_thumb = ""
+            raw_target = registry.get_setting(
+                f"device_certificate_target:{device['id']}",
+                "",
+            )
+            if raw_target:
+                try:
+                    target = json.loads(str(raw_target))
+                    expected_thumb = str(
+                        target.get("thumbprint") or ""
+                    ).replace(" ", "").upper()
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    expected_thumb = ""
+
+            if expected_thumb:
+                cert_state = (
+                    "ok"
+                    if cert_ok is True and reported_thumb == expected_thumb
+                    else "drift"
+                )
+            elif cert_ok is True:
+                cert_state = "ok"
+            elif cert_ok is False:
+                cert_state = "fail"
+            else:
+                cert_state = "unknown"
+
+            tunnel_label = (
+                "LISTEN"
+                if tunnel_state is True
+                else "MISSING"
+                if tunnel_state is False
+                else "UNKNOWN"
+            )
+            role = "default" if str(device["id"]) == default_device_id else "device"
+            print(
+                "device: "
+                f"{device['display_name']} "
+                f"[{role}] public={host}:{port} "
+                f"tunnel={tunnel_label} last_seen={age} "
+                f"client={client_state} cert={cert_state}"
+            )
         try:
             context = ssl._create_unverified_context()
             with urllib.request.urlopen(

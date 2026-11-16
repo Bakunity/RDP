@@ -63,6 +63,22 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
         self.assertIn("update-metadata.json", text)
         self.assertIn('"resolved_sha": resolved_sha', text)
 
+    def test_update_server_recovers_configured_default_rdp_service(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_RDP_CONFIGURED", text)
+        self.assertIn(
+            "SELECT value FROM settings WHERE key='default_rdp_device_id'",
+            text,
+        )
+        self.assertIn(
+            "systemctl enable --now bakunity-rdp-default.service",
+            text,
+        )
+        self.assertIn(
+            "systemctl disable --now bakunity-rdp-default.service",
+            text,
+        )
+
     def test_update_server_has_health_gated_automatic_rollback(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("ROLLBACK_ARMED=1", text)
