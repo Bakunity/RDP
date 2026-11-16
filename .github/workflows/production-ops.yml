@@ -27,7 +27,9 @@ jobs:
         (
           github.event.comment.body == '/doctor' ||
           github.event.comment.body == '/deploy' ||
-          startsWith(github.event.comment.body, '/restart ')
+          startsWith(github.event.comment.body, '/restart ') ||
+          startsWith(github.event.comment.body, '/on ') ||
+          startsWith(github.event.comment.body, '/off ')
         )
       )
     runs-on: ubuntu-22.04
@@ -63,6 +65,18 @@ jobs:
             target="${OPS_COMMENT#/restart }"
             [[ "${target}" =~ ^[a-z0-9-]{1,48}$ ]]
             echo "action=restart" >> "${GITHUB_OUTPUT}"
+            echo "sha=" >> "${GITHUB_OUTPUT}"
+            echo "target=${target}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ "${OPS_COMMENT}" == /on\ * || "${OPS_COMMENT}" == /off\ * ]]; then
+            action="${OPS_COMMENT%% *}"
+            action="${action#/}"
+            target="${OPS_COMMENT#* }"
+            [[ "${action}" =~ ^(on|off)$ ]]
+            [[ "${target}" =~ ^[a-z0-9-]{1,48}$ ]]
+            echo "action=${action}" >> "${GITHUB_OUTPUT}"
             echo "sha=" >> "${GITHUB_OUTPUT}"
             echo "target=${target}" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -152,6 +166,9 @@ jobs:
           elif [[ "${action}" == "restart" ]]; then
             [[ "${target}" =~ ^[a-z0-9-]{1,48}$ ]]
             ssh "${ssh_args[@]}" "restart ${target}"
+          elif [[ "${action}" == "on" || "${action}" == "off" ]]; then
+            [[ "${target}" =~ ^[a-z0-9-]{1,48}$ ]]
+            ssh "${ssh_args[@]}" "${action} ${target}"
           else
             [[ "${sha}" =~ ^[0-9a-f]{40}$ ]]
             ssh "${ssh_args[@]}" "deploy ${sha}"
