@@ -107,6 +107,19 @@ class DefaultRdpEntrypointTests(unittest.TestCase):
         self.assertIn("client_state", cli)
         self.assertIn("cert_state", cli)
         self.assertIn("tunnel=", cli)
+        self.assertIn("ssh_tunnel_running", cli)
+        self.assertIn("ssh_process_count", cli)
+        self.assertIn("access=", cli)
+        self.assertIn("pending=", cli)
+        self.assertIn("last_command=", cli)
+
+    def test_cli_can_queue_one_device_fallback_restart(self) -> None:
+        cli = (ROOT / "server/hermes_rdp/cli.py").read_text(encoding="utf-8")
+        self.assertIn('devices_sub.add_parser(\n        "restart"', cli)
+        self.assertIn('args.devices_command == "restart"', cli)
+        self.assertIn('resolve_device_target(registry, args.target)', cli)
+        self.assertIn('registry.queue_command(str(device["id"]), "restart")', cli)
+        self.assertIn('print("QUEUED=PASS")', cli)
 
     def test_systemd_service_runs_unprivileged_proxy(self) -> None:
         service = (

@@ -5,7 +5,7 @@ REPO="Bakunity/RDP"
 CTL="/usr/local/bin/bakunity-rdpctl"
 
 usage() {
-  echo "usage: bakunity-rdp-github-ops doctor | deploy <40-char-main-sha>" >&2
+  echo "usage: bakunity-rdp-github-ops doctor | deploy <40-char-main-sha> | restart <device-slug>" >&2
   exit 64
 }
 
@@ -51,6 +51,13 @@ case "${action}" in
     echo "=== POST-DEPLOY DOCTOR ==="
     "${CTL}" doctor
     echo "PRODUCTION_DEPLOY=PASS"
+    ;;
+  restart)
+    [[ $# -eq 2 ]] || usage
+    target="${2,,}"
+    [[ "${target}" =~ ^[a-z0-9-]{1,48}$ ]] || usage
+    echo "=== BAKUNITY RDP DEVICE RESTART ==="
+    exec "${CTL}" devices restart "${target}"
     ;;
   *)
     usage

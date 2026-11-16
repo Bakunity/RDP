@@ -29,32 +29,12 @@ if ! id "${DEPLOY_USER}" >/dev/null 2>&1; then
 fi
 
 helper_tmp="$(mktemp)"
-trap 'rm -f "${helper_tmp}"' EXIT
+dispatcher_tmp="$(mktemp)"
+trap 'rm -f "${helper_tmp}" "${dispatcher_tmp}"' EXIT
 curl -fsSL "https://raw.githubusercontent.com/${REPO}/${repository_ref}/server/bin/bakunity-rdp-github-ops.sh" -o "${helper_tmp}"
+curl -fsSL "https://raw.githubusercontent.com/${REPO}/${repository_ref}/server/bin/bakunity-rdp-github-dispatch.sh" -o "${dispatcher_tmp}"
 install -o root -g root -m 0755 "${helper_tmp}" "${ROOT_HELPER}"
-
-cat > "${DISPATCHER}" <<'EOF'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-original="${SSH_ORIGINAL_COMMAND:-}"
-case "${original}" in
-  doctor)
-    exec sudo -n /usr/local/sbin/bakunity-rdp-github-ops doctor
-    ;;
-  deploy\ *)
-    sha="${original#deploy }"
-    if [[ "${sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-      exec sudo -n /usr/local/sbin/bakunity-rdp-github-ops deploy "${sha}"
-    fi
-    ;;
-esac
-
-echo "Command denied." >&2
-exit 64
-EOF
-chmod 0755 "${DISPATCHER}"
-chown root:root "${DISPATCHER}"
+install -o root -g root -m 0755 "${dispatcher_tmp}" "${DISPATCHER}"
 
 cat > "${SUDOERS}" <<EOF
 ${DEPLOY_USER} ALL=(root) NOPASSWD: ${ROOT_HELPER}
@@ -85,6 +65,6 @@ fi
 
 echo "GITHUB_OPS_ACCESS=PASS"
 echo "DEPLOY_USER=${DEPLOY_USER}"
-echo "ALLOWED_COMMANDS=doctor,deploy-main"
+echo "ALLOWED_COMMANDS=doctor,deploy-main,restart-device"
 echo "PROD_HOST_CANDIDATE=${public_host}"
 echo "PROD_HOSTKEY_SHA256=${hostkey}"
