@@ -211,7 +211,10 @@ class NativeTransportTests(unittest.TestCase):
             "return 0",
         ):
             self.assertIn(marker, builder)
-        cleanup = builder.split("cleanup() {", 1)[1].split("}", 1)[0]
+        cleanup = builder.split("cleanup() {", 1)[1].split(
+            "trap cleanup EXIT",
+            1,
+        )[0]
         self.assertIn("return 0", cleanup)
 
         setup = (
