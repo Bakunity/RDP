@@ -88,11 +88,25 @@ class DefaultRdpEntrypointTests(unittest.TestCase):
         self.assertIn('ufw allow "3389/tcp"', install)
         self.assertIn(unit, update)
         self.assertIn('ufw allow "3389/tcp"', update)
-        self.assertIn("DEFAULT_RDP_WAS_ACTIVE", update)
+        self.assertIn("DEFAULT_RDP_CONFIGURED", update)
+        self.assertIn(
+            "systemctl enable --now bakunity-rdp-default.service",
+            update,
+        )
         self.assertIn(
             "restore_optional_file /etc/systemd/system/bakunity-rdp-default.service",
             update,
         )
+
+    def test_doctor_checks_default_service_and_reports_device_health(self) -> None:
+        cli = (ROOT / "server/hermes_rdp/cli.py").read_text(encoding="utf-8")
+        self.assertIn('systemctl("is-active", "--quiet", default_service)', cli)
+        self.assertIn("default-rdp: OK 3389", cli)
+        self.assertIn("default-rdp: FAIL", cli)
+        self.assertIn("endpoint_listener_state(port)", cli)
+        self.assertIn("client_state", cli)
+        self.assertIn("cert_state", cli)
+        self.assertIn("tunnel=", cli)
 
     def test_systemd_service_runs_unprivileged_proxy(self) -> None:
         service = (
