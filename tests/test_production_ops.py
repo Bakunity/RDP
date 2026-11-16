@@ -22,6 +22,8 @@ class ProductionOpsTests(unittest.TestCase):
         self.assertIn("github.event.comment.body == '/doctor'", text)
         self.assertIn("github.event.comment.body == '/deploy'", text)
         self.assertIn("startsWith(github.event.comment.body, '/restart ')", text)
+        self.assertIn("startsWith(github.event.comment.body, '/on ')", text)
+        self.assertIn("startsWith(github.event.comment.body, '/off ')", text)
         self.assertIn("^[a-z0-9-]{1,48}$", text)
         self.assertIn("OPS_COMMENT:", text)
         self.assertIn("github.event.comment.body", text)
@@ -66,12 +68,14 @@ class ProductionOpsTests(unittest.TestCase):
         self.assertIn("doctor)", helper)
         self.assertIn("deploy)", helper)
         self.assertIn("restart)", helper)
+        self.assertIn("on|off)", helper)
         self.assertIn("repos/${REPO}/commits/main", helper)
         self.assertIn('if [[ "${sha}" != "${main_sha}" ]]', helper)
         self.assertIn("DEPLOY=DENIED", helper)
         self.assertIn('env BAKUNITY_RDP_REF="${sha}" bash "${tmp}"', helper)
         self.assertIn('"${CTL}" doctor', helper)
         self.assertIn('"${CTL}" devices restart "${target}"', helper)
+        self.assertIn('"${CTL}" devices access "${target}" "${action}"', helper)
         self.assertNotIn("eval ", helper)
 
     def test_server_updater_versions_privileged_ops_files(self) -> None:
