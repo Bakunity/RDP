@@ -41,6 +41,8 @@ jobs:
       - name: Determine operation
         id: op
         shell: bash
+        env:
+          OPS_COMMENT: ${{ github.event.comment.body }}
         run: |
           set -Eeuo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
@@ -49,8 +51,7 @@ jobs:
             exit 0
           fi
 
-          body="${{ github.event.comment.body }}"
-          if [[ "${body}" == "/doctor" ]]; then
+          if [[ "${OPS_COMMENT}" == "/doctor" ]]; then
             echo "action=doctor" >> "${GITHUB_OUTPUT}"
             echo "sha=" >> "${GITHUB_OUTPUT}"
             exit 0
