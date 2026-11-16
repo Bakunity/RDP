@@ -22,9 +22,12 @@ class ProductionOpsTests(unittest.TestCase):
         self.assertIn("github.event.comment.body == '/doctor'", text)
         self.assertIn("github.event.comment.body == '/deploy'", text)
         self.assertIn("startsWith(github.event.comment.body, '/restart ')", text)
-        self.assertIn(r'^[a-z0-9-]{1,48}
-    def test_workflow_pins_server_host_key_and_uses_restricted_account(self) -> None:
-        text = (
+        self.assertIn("^[a-z0-9-]{1,48}$", text)
+        self.assertIn("OPS_COMMENT:", text)
+        self.assertIn("github.event.comment.body", text)
+        self.assertNotIn('body="${{ github.event.comment.body }}"', text)
+
+    def test_workflow_pins_server_host_key_and_uses_restricted_account(self) -> None:        text = (
             ROOT / ".github/workflows/production-ops.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("BAKUNITY_RDP_PROD_HOSTKEY_SHA256", text)
