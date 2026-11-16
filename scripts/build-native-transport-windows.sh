@@ -12,7 +12,10 @@ MIN_BUILD_KB="${BAKUNITY_TRANSPORT_MIN_BUILD_KB:-2097152}"
 WORK=""
 
 cleanup() {
-  [[ -n "${WORK:-}" && -d "$WORK" ]] && rm -rf "$WORK"
+  if [[ -n "${WORK:-}" && -d "$WORK" ]]; then
+    rm -rf "$WORK"
+  fi
+  return 0
 }
 trap cleanup EXIT
 
