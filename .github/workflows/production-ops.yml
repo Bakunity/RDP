@@ -1,0 +1,141 @@
+name: Production Ops
+
+on:
+  push:
+    branches:
+      - main
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: bakunity-rdp-production
+  cancel-in-progress: false
+
+jobs:
+  production:
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.number == 105 &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        (
+          github.event.comment.body == '/doctor' ||
+          github.event.comment.body == '/deploy'
+        )
+      )
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      PROD_HOST: ${{ secrets.BAKUNITY_RDP_PROD_HOST }}
+      PROD_PORT: ${{ secrets.BAKUNITY_RDP_PROD_SSH_PORT }}
+      PROD_KEY: ${{ secrets.BAKUNITY_RDP_PROD_SSH_PRIVATE_KEY }}
+      PROD_HOSTKEY: ${{ secrets.BAKUNITY_RDP_PROD_HOSTKEY_SHA256 }}
+
+    steps:
+      - name: Determine operation
+        id: op
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "action=deploy" >> "${GITHUB_OUTPUT}"
+            echo "sha=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          body="${{ github.event.comment.body }}"
+          if [[ "${body}" == "/doctor" ]]; then
+            echo "action=doctor" >> "${GITHUB_OUTPUT}"
+            echo "sha=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          main_sha="$(
+            git ls-remote https://github.com/Bakunity/RDP.git refs/heads/main |
+            awk '{print $1}'
+          )"
+          [[ "${main_sha}" =~ ^[0-9a-f]{40}$ ]]
+          echo "action=deploy" >> "${GITHUB_OUTPUT}"
+          echo "sha=${main_sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check production configuration
+        id: config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "${PROD_HOST}" || -z "${PROD_KEY}" || -z "${PROD_HOSTKEY}" ]]; then
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+            echo "PRODUCTION_OPS=NOT_CONFIGURED"
+            echo "Required secrets: BAKUNITY_RDP_PROD_HOST, BAKUNITY_RDP_PROD_SSH_PRIVATE_KEY, BAKUNITY_RDP_PROD_HOSTKEY_SHA256"
+            exit 0
+          fi
+          echo "configured=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Prepare pinned SSH connection
+        if: steps.config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          port="${PROD_PORT:-22}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${PROD_KEY}" > "${HOME}/.ssh/id_ed25519"
+          chmod 0600 "${HOME}/.ssh/id_ed25519"
+
+          ssh-keyscan -T 8 -p "${port}" "${PROD_HOST}" > "${HOME}/.ssh/known_hosts.candidate" 2>/dev/null
+          [[ -s "${HOME}/.ssh/known_hosts.candidate" ]]
+
+          expected="${PROD_HOSTKEY#SHA256:}"
+          matched=0
+          while IFS= read -r line; do
+            fingerprint="$(
+              printf '%s\n' "${line}" |
+              ssh-keygen -lf - -E sha256 2>/dev/null |
+              awk '{print $2}' |
+              sed 's/^SHA256://'
+            )"
+            if [[ -n "${fingerprint}" && "${fingerprint}" == "${expected}" ]]; then
+              printf '%s\n' "${line}" > "${HOME}/.ssh/known_hosts"
+              matched=1
+              break
+            fi
+          done < "${HOME}/.ssh/known_hosts.candidate"
+
+          if [[ "${matched}" != "1" ]]; then
+            echo "PRODUCTION_HOST_KEY=FAIL"
+            exit 1
+          fi
+          chmod 0600 "${HOME}/.ssh/known_hosts"
+          echo "PRODUCTION_HOST_KEY=PASS"
+
+      - name: Run production operation
+        if: steps.config.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          port="${PROD_PORT:-22}"
+          action="${{ steps.op.outputs.action }}"
+          sha="${{ steps.op.outputs.sha }}"
+
+          ssh_args=(
+            -i "${HOME}/.ssh/id_ed25519"
+            -p "${port}"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+            -o ConnectTimeout=10
+            bakunity-deploy@"${PROD_HOST}"
+          )
+
+          if [[ "${action}" == "doctor" ]]; then
+            ssh "${ssh_args[@]}" doctor
+          else
+            [[ "${sha}" =~ ^[0-9a-f]{40}$ ]]
+            ssh "${ssh_args[@]}" "deploy ${sha}"
+          fi
