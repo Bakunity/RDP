@@ -65,6 +65,6 @@ fi
 
 echo "GITHUB_OPS_ACCESS=PASS"
 echo "DEPLOY_USER=${DEPLOY_USER}"
-echo "ALLOWED_COMMANDS=doctor,deploy-main,restart-device"
+echo "ALLOWED_COMMANDS=doctor,deploy-main,restart-device,on-device,off-device"
 echo "PROD_HOST_CANDIDATE=${public_host}"
 echo "PROD_HOSTKEY_SHA256=${hostkey}"
