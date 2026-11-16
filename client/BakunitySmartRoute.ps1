@@ -436,7 +436,26 @@ function Build-Mappings {
         }
         $NativePort = $NativeForwardPortStart + $Index
         $Route = Select-DeviceRoute -Device $Device -Policy $Policy -NativePort $NativePort
-        $LocalPort = if ($Mode -eq 'transparent') { $TransparentPort } else { $LauncherPortStart + $Index }
+
+        # In launcher mode keep the same externally advertised RDP port.
+        # Smart Route already maps each hostname to a dedicated 127.77.x.x
+        # address, so identical public/local ports remain isolated per device.
+        # This makes the Telegram/public endpoint usable on connector PCs too:
+        # fsrv.example:53392 goes to Smart Route locally and to VPS elsewhere.
+        $RelayPort = 0
+        try { $RelayPort = [int]$Device.routes.relay.port } catch { $RelayPort = 0 }
+        $LauncherPort = if ($RelayPort -ge 1 -and $RelayPort -le 65535) {
+            $RelayPort
+        }
+        else {
+            $LauncherPortStart + $Index
+        }
+        $LocalPort = if ($Mode -eq 'transparent') {
+            $TransparentPort
+        }
+        else {
+            $LauncherPort
+        }
         $Mappings += [pscustomobject]@{
             device_id=$Id
             hostname=[string]$Device.hostname
