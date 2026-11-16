@@ -172,6 +172,7 @@ rollback_update() {
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /usr/local/sbin/bakunity-rdp-github-ops || rollback_ok=0
   restore_optional_file /etc/sudoers.d/bakunity-rdp-mesh-key || rollback_ok=0
   restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
@@ -246,6 +247,7 @@ test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
 test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
 test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
+test -f "$ROOT/server/bin/bakunity-rdp-github-ops.sh"
 test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
 test -f "$ROOT/client/BakunityMesh.ps1"
 test -f "$ROOT/client/BakunityNativeTransport.ps1"
@@ -411,6 +413,7 @@ for path in \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/sbin/bakunity-rdp-mesh-key \
+  /usr/local/sbin/bakunity-rdp-github-ops \
   /etc/sudoers.d/bakunity-rdp-mesh-key \
   /usr/local/bin/hermes-rdpctl \
   /usr/local/bin/bakunity-rdpctl \
@@ -533,6 +536,9 @@ install -m 0644 \
 install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-mesh-key.sh" \
   /usr/local/sbin/bakunity-rdp-mesh-key
+install -m 0755 \
+  "$ROOT/server/bin/bakunity-rdp-github-ops.sh" \
+  /usr/local/sbin/bakunity-rdp-github-ops
 install -m 0440 \
   "$ROOT/server/sudoers/bakunity-rdp-mesh-key" \
   /etc/sudoers.d/bakunity-rdp-mesh-key
