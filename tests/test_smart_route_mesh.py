@@ -276,6 +276,22 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("'DERP relay only'", worker)
         self.assertIn("Sync-ConnectorMesh", worker)
 
+    def test_launcher_mode_reuses_public_rdp_port(self) -> None:
+        worker = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        launcher = (
+            ROOT / "client/BakunitySmartRouteLaunch.ps1"
+        ).read_text(encoding="utf-8-sig")
+        self.assertIn("$RelayPort = 0", worker)
+        self.assertIn("$Device.routes.relay.port", worker)
+        self.assertIn("$LauncherPort = if ($RelayPort -ge 1", worker)
+        self.assertIn("$LocalPort = if ($Mode -eq 'transparent')", worker)
+        self.assertIn("$LauncherPort", worker)
+        self.assertIn("$Target.hostname", launcher)
+        self.assertIn("$Target.local_port", launcher)
+        self.assertIn("Write-ManagedHosts -Mappings $Mappings", worker)
+
     def test_host_companion_is_separate_from_primary_agent(self) -> None:
         host = (
             ROOT / "client/BakunityHostSmartRoute.ps1"
