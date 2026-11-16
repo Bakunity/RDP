@@ -27,7 +27,8 @@ class ProductionOpsTests(unittest.TestCase):
         self.assertIn("github.event.comment.body", text)
         self.assertNotIn('body="${{ github.event.comment.body }}"', text)
 
-    def test_workflow_pins_server_host_key_and_uses_restricted_account(self) -> None:        text = (
+    def test_workflow_pins_server_host_key_and_uses_restricted_account(self) -> None:
+        text = (
             ROOT / ".github/workflows/production-ops.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("BAKUNITY_RDP_PROD_HOSTKEY_SHA256", text)
