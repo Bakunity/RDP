@@ -125,6 +125,13 @@ class DefaultRdpEntrypointTests(unittest.TestCase):
         self.assertIn('registry.queue_command(str(device["id"]), "restart")', cli)
         self.assertIn('print("QUEUED=PASS")', cli)
 
+    def test_cli_can_queue_bounded_device_access_state(self) -> None:
+        cli = (ROOT / "server/hermes_rdp/cli.py").read_text(encoding="utf-8")
+        self.assertIn('"access"', cli)
+        self.assertIn('choices=["on", "off"]', cli)
+        self.assertIn('args.devices_command == "access"', cli)
+        self.assertIn('registry.queue_command(str(device["id"]), action)', cli)
+
     def test_systemd_service_runs_unprivileged_proxy(self) -> None:
         service = (
             ROOT / "server/systemd/bakunity-rdp-default.service"
