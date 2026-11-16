@@ -54,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     device_slug = devices_sub.add_parser("slug")
     device_slug.add_argument("device_id")
     device_slug.add_argument("slug")
+    device_restart = devices_sub.add_parser(
+        "restart",
+        help="restart one device OpenSSH fallback tunnel",
+    )
+    device_restart.add_argument(
+        "target",
+        help="device id, slug, hostname, machine name, or display name",
+    )
 
     domain = sub.add_parser("domain", help="manage wildcard device domain")
     domain_sub = domain.add_subparsers(dest="domain_command", required=True)
@@ -231,6 +239,16 @@ def main() -> None:
         if domain:
             print(f"HOST={slug}.{domain}")
         print("OK")
+        return
+
+    if args.command == "devices" and args.devices_command == "restart":
+        device = resolve_device_target(registry, args.target)
+        seq = registry.queue_command(str(device["id"]), "restart")
+        print(f"DEVICE={device['display_name']}")
+        print(f"DEVICE_ID={device['id']}")
+        print(f"COMMAND=restart")
+        print(f"SEQ={seq}")
+        print("QUEUED=PASS")
         return
 
     if args.command == "domain":
@@ -632,12 +650,41 @@ def main() -> None:
                 if tunnel_state is False
                 else "UNKNOWN"
             )
+            access_enabled = bool(
+                telemetry.get(
+                    "access_enabled",
+                    bool(device.get("enabled", True)),
+                )
+            )
+            ssh_running = bool(telemetry.get("ssh_tunnel_running"))
+            try:
+                ssh_processes = max(
+                    0,
+                    int(telemetry.get("ssh_process_count") or 0),
+                )
+            except (TypeError, ValueError):
+                ssh_processes = 0
+            pending = str(device.get("pending_command") or "none")
+            last_result = device.get("last_result") or {}
+            last_action = str(last_result.get("action") or "")
+            last_ok = last_result.get("ok")
+            if last_action:
+                last_label = (
+                    f"{last_action}:{'ok' if last_ok is True else 'fail'}"
+                )
+            else:
+                last_label = "none"
+
             role = "default" if str(device["id"]) == default_device_id else "device"
             print(
                 "device: "
                 f"{device['display_name']} "
                 f"[{role}] public={host}:{port} "
                 f"tunnel={tunnel_label} last_seen={age} "
+                f"access={'on' if access_enabled else 'off'} "
+                f"ssh={'running' if ssh_running else 'stopped'} "
+                f"ssh_processes={ssh_processes} "
+                f"pending={pending} last_command={last_label} "
                 f"client={client_state} cert={cert_state}"
             )
         try:
