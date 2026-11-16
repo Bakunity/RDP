@@ -1084,7 +1084,7 @@ function Invoke-CertificateTargetReconcile {
     }
 
     try {
-        if ([int]$Telemetry.rdp_connections -gt 0) {
+        if ([int]$Telemetry.rdp_user_sessions -gt 0) {
             return
         }
     }
@@ -1187,7 +1187,7 @@ function Invoke-MaintenanceReconcile {
     }
 
     try {
-        if ([int]$Telemetry.rdp_connections -gt 0) {
+        if ([int]$Telemetry.rdp_user_sessions -gt 0) {
             return
         }
     }
