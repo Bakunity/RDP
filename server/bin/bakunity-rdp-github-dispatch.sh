@@ -18,6 +18,13 @@ case "${original}" in
       exec sudo -n /usr/local/sbin/bakunity-rdp-github-ops restart "${target}"
     fi
     ;;
+  on\ *|off\ *)
+    action="${original%% *}"
+    target="${original#* }"
+    if [[ "${action}" =~ ^(on|off)$ && "${target}" =~ ^[a-z0-9-]{1,48}$ ]]; then
+      exec sudo -n /usr/local/sbin/bakunity-rdp-github-ops "${action}" "${target}"
+    fi
+    ;;
 esac
 
 echo "Command denied." >&2

@@ -121,7 +121,8 @@ class DeviceDomainCertificateTests(unittest.TestCase):
         self.assertIn("rdp_certificate_thumbprint", agent)
         self.assertIn("$CertificateTargetRetrySeconds = 60", agent)
         self.assertIn("$CertificateSyncPath", agent)
-        self.assertIn("rdp_connections -gt 0", agent)
+        self.assertIn("rdp_user_sessions -gt 0", agent)
+        self.assertNotIn("Telemetry.rdp_connections -gt 0", agent)
 
     def test_certificate_sync_is_serialized(self) -> None:
         sync = (

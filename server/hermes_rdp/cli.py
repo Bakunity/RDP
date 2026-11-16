@@ -62,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         "target",
         help="device id, slug, hostname, machine name, or display name",
     )
+    device_access = devices_sub.add_parser(
+        "access",
+        help="set one device fallback access on or off",
+    )
+    device_access.add_argument(
+        "target",
+        help="device id, slug, hostname, machine name, or display name",
+    )
+    device_access.add_argument("state", choices=["on", "off"])
 
     domain = sub.add_parser("domain", help="manage wildcard device domain")
     domain_sub = domain.add_subparsers(dest="domain_command", required=True)
@@ -247,6 +256,17 @@ def main() -> None:
         print(f"DEVICE={device['display_name']}")
         print(f"DEVICE_ID={device['id']}")
         print(f"COMMAND=restart")
+        print(f"SEQ={seq}")
+        print("QUEUED=PASS")
+        return
+
+    if args.command == "devices" and args.devices_command == "access":
+        device = resolve_device_target(registry, args.target)
+        action = str(args.state)
+        seq = registry.queue_command(str(device["id"]), action)
+        print(f"DEVICE={device['display_name']}")
+        print(f"DEVICE_ID={device['id']}")
+        print(f"COMMAND={action}")
         print(f"SEQ={seq}")
         print("QUEUED=PASS")
         return
@@ -664,6 +684,20 @@ def main() -> None:
                 )
             except (TypeError, ValueError):
                 ssh_processes = 0
+            try:
+                rdp_tcp = max(
+                    0,
+                    int(telemetry.get("rdp_connections") or 0),
+                )
+            except (TypeError, ValueError):
+                rdp_tcp = 0
+            try:
+                rdp_users = max(
+                    0,
+                    int(telemetry.get("rdp_user_sessions") or 0),
+                )
+            except (TypeError, ValueError):
+                rdp_users = 0
             pending = str(device.get("pending_command") or "none")
             last_result = device.get("last_result") or {}
             last_action = str(last_result.get("action") or "")
@@ -684,6 +718,7 @@ def main() -> None:
                 f"access={'on' if access_enabled else 'off'} "
                 f"ssh={'running' if ssh_running else 'stopped'} "
                 f"ssh_processes={ssh_processes} "
+                f"rdp_tcp={rdp_tcp} rdp_users={rdp_users} "
                 f"pending={pending} last_command={last_label} "
                 f"client={client_state} cert={cert_state}"
             )
