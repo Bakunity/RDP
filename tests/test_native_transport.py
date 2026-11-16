@@ -208,8 +208,11 @@ class NativeTransportTests(unittest.TestCase):
             "WINDOWS_ARTIFACT_SHA256",
             "main.transportBuildRef=$CLIENT_REF",
             '[[ "$(head -c 2 "$CANDIDATE")" != "MZ" ]]',
+            "return 0",
         ):
             self.assertIn(marker, builder)
+        cleanup = builder.split("cleanup() {", 1)[1].split("}", 1)[0]
+        self.assertIn("return 0", cleanup)
 
         setup = (
             ROOT / "scripts/setup-native-transport.sh"
