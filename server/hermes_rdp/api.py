@@ -269,7 +269,28 @@ class ApiHandler(BaseHTTPRequestHandler):
                 code = self.server.registry.create_pair_code(
                     ttl_seconds=self.server.config.pair_ttl_seconds
                 )
-                self._json(HTTPStatus.OK, {"ok": True, "code": code, "ttl_seconds": self.server.config.pair_ttl_seconds})
+                command = (
+                    "$u='" + self.server.config.client_installer_url + "'\n"
+                    "$s=(irm $u).TrimStart([char]0xFEFF)\n"
+                    "$p=@{\n"
+                    f"  Server='{self.server.config.public_host}'\n"
+                    f"  PairCode='{code}'\n"
+                    f"  Fingerprint='{self.server.config.tls_fingerprint}'\n"
+                    f"  RepositoryRef='{self.server.config.client_ref}'\n"
+                    "}\n"
+                    "& ([scriptblock]::Create($s)) @p"
+                )
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "code": code,
+                        "ttl_seconds": self.server.config.pair_ttl_seconds,
+                        "command": command,
+                        "fingerprint": self.server.config.tls_fingerprint,
+                        "repository_ref": self.server.config.client_ref,
+                    },
+                )
                 return
             if path.startswith("/v1/admin/device/"):
                 if not self._admin_auth():
