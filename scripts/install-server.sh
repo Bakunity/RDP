@@ -12,6 +12,7 @@ PORT_START=53389
 PORT_END=53420
 MIGRATE=0
 TRUSTED_RDP_CERT=0
+AUTODEPLOY="${BAKUNITY_RDP_AUTODEPLOY:-0}"
 SSH_USER="hermes-tunnel"
 
 usage() {
@@ -26,6 +27,7 @@ Options:
   --port-start PORT     first RDP port (default: 53389)
   --port-end PORT       last RDP port (default: 53420)
   --trusted-rdp-cert    enable trusted public-IP RDP certificate lifecycle
+  --autodeploy          track this non-main branch and deploy only green CI commits
   --migrate             replace an existing legacy FRP installation
 EOF
 }
@@ -40,6 +42,7 @@ while (($#)); do
     --port-start) PORT_START="${2:?}"; shift 2 ;;
     --port-end) PORT_END="${2:?}"; shift 2 ;;
     --trusted-rdp-cert) TRUSTED_RDP_CERT=1; shift ;;
+    --autodeploy) AUTODEPLOY=1; shift ;;
     --migrate) MIGRATE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -131,6 +134,9 @@ for path in \
   /etc/systemd/system/hermes-rdp.service \
   /etc/systemd/system/hermes-rdp-cert-renew.service \
   /etc/systemd/system/hermes-rdp-cert-renew.timer \
+  /etc/systemd/system/hermes-rdp-autodeploy.service \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer \
+  /usr/local/sbin/hermes-rdp-autodeploy \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /etc/sudoers.d/hermes-rdp; do
   if [[ -e "$path" ]]; then
@@ -271,6 +277,7 @@ cat > /etc/hermes-rdp/config.json <<EOF
   "close_tunnel_helper": "/usr/local/sbin/hermes-rdp-close-tunnel",
   "client_installer_url": "https://raw.githubusercontent.com/$REPO/$REF/scripts/install-client.ps1",
   "repository_ref": "$REF",
+  "repository_requested_ref": "$REF",
   "client_repository_ref": "$REF",
   "client_compatible_refs": ["$REF"]
 }
@@ -345,6 +352,18 @@ install \
   -m 0644 \
   "$SOURCE_ROOT/server/systemd/bakunity-rdp-default.service" \
   /etc/systemd/system/bakunity-rdp-default.service
+install \
+  -m 0644 \
+  "$SOURCE_ROOT/server/systemd/hermes-rdp-autodeploy.service" \
+  /etc/systemd/system/hermes-rdp-autodeploy.service
+install \
+  -m 0644 \
+  "$SOURCE_ROOT/server/systemd/hermes-rdp-autodeploy.timer" \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer
+install \
+  -m 0755 \
+  "$SOURCE_ROOT/server/bin/hermes-rdp-autodeploy.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy
 
 if ((MIGRATE == 1)); then
   rm -f /etc/systemd/system/frps.service /usr/local/bin/frps
@@ -361,7 +380,22 @@ PYTHONPATH=/opt/hermes-rdp/app \
 
 systemctl daemon-reload
 systemctl enable hermes-rdp-sshd.service hermes-rdp.service
+if [[ "$AUTODEPLOY" == "1" ]]; then
+  if [[ "$REF" == "main" || "$REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "--autodeploy requires a mutable non-main branch ref." >&2
+    exit 2
+  fi
+  touch /etc/hermes-rdp/autodeploy.enabled
+  chmod 0644 /etc/hermes-rdp/autodeploy.enabled
+  systemctl enable hermes-rdp-autodeploy.timer
+else
+  rm -f /etc/hermes-rdp/autodeploy.enabled
+  systemctl disable hermes-rdp-autodeploy.timer >/dev/null 2>&1 || true
+fi
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
+if [[ "$AUTODEPLOY" == "1" ]]; then
+  systemctl start hermes-rdp-autodeploy.timer
+fi
 sleep 3
 
 if ((MIGRATE == 1)); then
@@ -394,6 +428,7 @@ echo "ssh_tunnel_port=$SSH_PORT"
 echo "rdp_ports=$PORT_START-$PORT_END"
 echo "ssh_tunnel=$(systemctl is-active hermes-rdp-sshd.service)"
 echo "controller=$(systemctl is-active hermes-rdp.service)"
+echo "autodeploy=$(if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then systemctl is-active hermes-rdp-autodeploy.timer; else echo disabled; fi)"
 echo "web_ui=https://$HOST:$API_PORT/admin/"
 echo "web_admin_token=$(cat /etc/hermes-rdp/web-admin-token)"
 if ((TRUSTED_RDP_CERT == 1)); then
