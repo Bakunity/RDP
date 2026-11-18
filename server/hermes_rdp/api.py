@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from http.cookies import SimpleCookie
 import ssl
 import socket
 import struct
@@ -15,6 +16,13 @@ from urllib.parse import urlparse
 
 from . import __version__
 from .config import Config
+from .auth import (
+    SESSION_TTL_SECONDS,
+    create_session,
+    read_credentials,
+    verify_password,
+    verify_session,
+)
 from .admin_web import ADMIN_HTML
 from .device_certificates import set_device_slug_with_certificate
 from .db import Registry
@@ -50,6 +58,7 @@ DEVICE_CERT_TIMEOUT_SECONDS = 25
 CERT_STATE_FILE = Path("/etc/hermes-rdp/trusted-rdp-cert-state.json")
 AUTODEPLOY_MARKER = Path("/etc/hermes-rdp/autodeploy.enabled")
 AUTODEPLOY_STATUS_FILE = Path("/var/lib/hermes-rdp/autodeploy-status.json")
+ADMIN_SESSION_COOKIE = "__Host-bakunity_admin_session"
 
 
 def parse_helper_json(text: str) -> dict[str, Any]:
@@ -347,11 +356,122 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _named_access_auth(self) -> dict[str, Any] | None:
         return self.server.registry.authenticate_named_access_token(self._bearer())
 
+    def _cookie_value(self, name: str) -> str:
+        raw = self.headers.get("Cookie", "")
+        if not raw:
+            return ""
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw)
+        except Exception:
+            return ""
+        morsel = cookie.get(name)
+        return "" if morsel is None else str(morsel.value or "")
+
+    def _admin_session(self) -> dict[str, object] | None:
+        token = self._cookie_value(ADMIN_SESSION_COOKIE)
+        if not token:
+            return None
+        secret = self.server.config.web_admin_token
+        if not secret:
+            return None
+        return verify_session(secret, token)
+
     def _admin_auth(self) -> bool:
         import secrets
+
+        if self._admin_session():
+            return True
+
+        # Legacy/internal compatibility only. The Web UI no longer stores
+        # or asks users for this bearer token.
         token = self._bearer()
         expected = self.server.config.web_admin_token
-        return bool(token and expected and secrets.compare_digest(token, expected))
+        return bool(
+            token
+            and expected
+            and secrets.compare_digest(token, expected)
+        )
+
+    def _admin_auth_status(self) -> None:
+        credentials = read_credentials(
+            self.server.config.web_admin_credentials_file
+        )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "configured": credentials is not None,
+                "authenticated": self._admin_auth(),
+                "username": (
+                    credentials.username if credentials is not None else ""
+                ),
+            },
+        )
+
+    def _admin_login(self) -> None:
+        body = self._read_json()
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        if not verify_password(
+            self.server.config.web_admin_credentials_file,
+            username=username,
+            password=password,
+        ):
+            time.sleep(0.35)
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "invalid username or password"},
+            )
+            return
+
+        token = create_session(
+            self.server.config.web_admin_token,
+            username=username,
+            ttl_seconds=SESSION_TTL_SECONDS,
+        )
+        payload = json.dumps(
+            {
+                "ok": True,
+                "username": username,
+                "expires_in": SESSION_TTL_SECONDS,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Set-Cookie",
+            (
+                f"{ADMIN_SESSION_COOKIE}={token}; "
+                "Path=/; HttpOnly; Secure; SameSite=Strict; "
+                f"Max-Age={SESSION_TTL_SECONDS}"
+            ),
+        )
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _admin_logout(self) -> None:
+        payload = b'{"ok":true}'
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Set-Cookie",
+            (
+                f"{ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; "
+                "SameSite=Strict; Max-Age=0"
+            ),
+        )
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
 
     def _html(self, status: int, text: str) -> None:
         data = text.encode("utf-8")
@@ -562,6 +682,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path in {"/", "/admin", "/admin/"}:
             self._html(HTTPStatus.OK, ADMIN_HTML)
             return
+        if path == "/v1/admin/auth/status":
+            self._admin_auth_status()
+            return
         if path == "/v1/admin/state":
             self._admin_state()
             return
@@ -605,6 +728,12 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/v1/admin/auth/login":
+                self._admin_login()
+                return
+            if path == "/v1/admin/auth/logout":
+                self._admin_logout()
+                return
             if path == "/v1/admin/autodeploy":
                 self._admin_autodeploy()
                 return
