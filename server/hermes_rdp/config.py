@@ -20,7 +20,6 @@ class Config:
     db_path: Path
     telegram_token_file: Path
     telegram_chat_id: str
-    web_admin_token_file: Path
     tls_cert_file: Path
     tls_key_file: Path
     tls_fingerprint_file: Path
@@ -28,6 +27,7 @@ class Config:
     client_installer_url: str
     repository_ref: str
     close_tunnel_helper: Path
+    web_admin_token_file: Path = Path("/etc/hermes-rdp/web-admin-token")
     client_repository_ref: str = ""
     client_compatible_refs: tuple[str, ...] = ()
     online_after_seconds: int = 15
