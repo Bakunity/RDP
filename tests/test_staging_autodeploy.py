@@ -132,10 +132,8 @@ class StagingAutodeployTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('repository_requested_ref: str = "main"', config)
-        self.assertIn(
-            'data.get("repository_requested_ref",',
-            config,
-        )
+        self.assertIn('"repository_requested_ref"', config)
+        self.assertIn('data.get("repository_ref", "main")', config)
 
 
 if __name__ == "__main__":
