@@ -400,6 +400,28 @@ function Set-PortProxy {
     if ($LASTEXITCODE -ne 0) { throw "portproxy failed: $($Output -join ' ')" }
 }
 
+function Test-LocalProxy {
+    param([string]$ListenAddress, [int]$ListenPort, [int]$TimeoutMs = 1500)
+    if (-not (Test-LoopbackAddress -Address $ListenAddress) -or $ListenPort -le 0) {
+        return $false
+    }
+    $Client = New-Object Net.Sockets.TcpClient
+    try {
+        $Async = $Client.BeginConnect($ListenAddress, $ListenPort, $null, $null)
+        if (-not $Async.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        $Client.EndConnect($Async)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $Client.Dispose()
+    }
+}
+
 function Get-ExistingMap {
     param([object]$State)
     $Result = @{}
@@ -595,10 +617,41 @@ function Sync-SmartRoute {
         $Port = if ($Entry.PSObject.Properties['local_port']) { [int]$Entry.local_port } else { 3389 }
         if (Test-LoopbackAddress -Address $Address) { Remove-PortProxy -ListenAddress $Address -ListenPort $Port }
     }
-    foreach ($Mapping in $Mappings) {
-        Set-PortProxy -ListenAddress ([string]$Mapping.loopback) -ListenPort ([int]$Mapping.local_port) -TargetIPv4 ([string]$Mapping.target_ipv4) -TargetPort ([int]$Mapping.target_port)
+
+    # Only hijack DNS for routes that are actually usable. If Smart Route
+    # cannot create/verify the local proxy, fail open: remove managed hosts so
+    # normal public DNS/relay still works instead of black-holing RDP on
+    # 127.77.x.x.
+    $ActiveMappings = @(
+        $Mappings | Where-Object {
+            [bool]$_.enabled -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.target_ipv4) -and
+            [int]$_.target_port -gt 0
+        }
+    )
+    $AppliedMappings = @()
+    try {
+        foreach ($Mapping in $ActiveMappings) {
+            Set-PortProxy -ListenAddress ([string]$Mapping.loopback) -ListenPort ([int]$Mapping.local_port) -TargetIPv4 ([string]$Mapping.target_ipv4) -TargetPort ([int]$Mapping.target_port)
+            Start-Sleep -Milliseconds 120
+            if (-not (Test-LocalProxy -ListenAddress ([string]$Mapping.loopback) -ListenPort ([int]$Mapping.local_port))) {
+                throw (
+                    "Smart Route local proxy verification failed: " +
+                    "$($Mapping.hostname) $($Mapping.loopback):$($Mapping.local_port)"
+                )
+            }
+            $AppliedMappings += $Mapping
+        }
+        Write-ManagedHosts -Mappings $AppliedMappings
     }
-    Write-ManagedHosts -Mappings $Mappings
+    catch {
+        foreach ($Mapping in $AppliedMappings) {
+            Remove-PortProxy -ListenAddress ([string]$Mapping.loopback) -ListenPort ([int]$Mapping.local_port)
+        }
+        Write-ManagedHosts -Mappings @()
+        Write-Log "FAIL_OPEN=PUBLIC_DNS reason=$($_.Exception.Message)"
+        throw
+    }
 
     $MapState = [ordered]@{}
     $RouteTelemetry = [ordered]@{}

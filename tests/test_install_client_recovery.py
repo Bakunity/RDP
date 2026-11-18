@@ -28,6 +28,21 @@ class InstallClientRecoveryTests(unittest.TestCase):
         self.assertLess(task_start, readiness)
         self.assertLess(readiness, success)
 
+    def test_success_requires_server_confirmed_public_endpoint(self) -> None:
+        text = self.text
+        self.assertIn("function Wait-HermesEndpointReady", text)
+        self.assertIn("/endpoint-status", text)
+        self.assertIn("rdp_endpoint_available", text)
+        self.assertIn("live_screen_endpoint_available", text)
+        self.assertIn("-RequireRdp $RdpSupported", text)
+        tunnel = text.index("$TunnelProcess = Wait-HermesTunnelReady")
+        endpoint = text.index("Wait-HermesEndpointReady", tunnel)
+        certificate = text.index("Invoke-CertificateRotationSetup", endpoint)
+        success = text.index("=== ГОТОВО ===", certificate)
+        self.assertLess(tunnel, endpoint)
+        self.assertLess(endpoint, certificate)
+        self.assertLess(certificate, success)
+
     def test_failed_install_restores_local_snapshot_after_safe_revoke(self) -> None:
         text = self.text
         self.assertIn("function Restore-InstallSnapshot", text)

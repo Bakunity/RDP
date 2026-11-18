@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Bakunity RDP staging branch for a green deploy
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+RandomizedDelaySec=10s
+AccuracySec=5s
+Persistent=true
+Unit=hermes-rdp-autodeploy.service
+
+[Install]
+WantedBy=timers.target

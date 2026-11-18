@@ -116,9 +116,44 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
             self.assertIn(wrapper, text)
             self.assertIn(f"restore_optional_file {wrapper}", text)
             self.assertIn(f"{wrapper} doctor >/dev/null", text)
-        self.assertGreaterEqual(
-            text.count("export PYTHONPATH=/opt/hermes-rdp/app"),
-            2,
+        self.assertIn(
+            "export PYTHONPATH=/opt/hermes-rdp/app",
+            text,
+        )
+        self.assertIn(
+            'exec /usr/local/bin/hermes-rdpctl "$@"',
+            text,
+        )
+
+    def test_update_server_migrates_and_preserves_web_admin_token(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        self.assertIn("/etc/hermes-rdp/web-admin-token", text)
+        self.assertIn("openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token", text)
+        self.assertIn("chown root:hermes-rdp /etc/hermes-rdp/web-admin-token", text)
+        self.assertIn(
+            "restore_optional_file /etc/hermes-rdp/web-admin-token",
+            text,
+        )
+
+    def test_update_keeps_sqlite_runtime_files_owned_by_service_user(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'for sqlite_path in "$DB" "$DB-wal" "$DB-shm"; do',
+            text,
+        )
+        self.assertIn('chown "$DB_UID:$DB_GID" "$sqlite_path"', text)
+        self.assertIn('chmod "$DB_MODE" "$sqlite_path"', text)
+        self.assertIn(
+            "/usr/sbin/runuser -u hermes-rdp -- env "
+            "PYTHONPATH=/opt/hermes-rdp/app",
+            text,
+        )
+        self.assertIn(
+            'if [[ "$(id -u)" -eq 0 && ! ( "${1:-}" == "admin" '
+            '&& "${2:-}" == "password" ) ]]; then',
+            text,
         )
 
     def test_plain_updater_refuses_major_frp_migration(self) -> None:

@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 REPO="bakunity/RDP"
 REF="${BAKUNITY_RDP_REF:-${HERMES_RDP_REF:-main}}"
+TRACK_REF="${BAKUNITY_RDP_TRACK_REF:-$REF}"
+AUTODEPLOY_REQUESTED="${BAKUNITY_RDP_AUTODEPLOY:-0}"
 CONFIG=/etc/hermes-rdp/config.json
 DB=/var/lib/hermes-rdp/state.sqlite3
 
@@ -17,6 +19,11 @@ fi
 if [[ ! -s "$DB" ]]; then
   echo "Bakunity RDP database is missing or empty." >&2
   exit 1
+fi
+if [[ "$AUTODEPLOY_REQUESTED" == "1" ]] && ! command -v git >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq git >/dev/null
 fi
 if ! python3 - <<'PY'
 import json
@@ -102,6 +109,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 paths = [
     "client/HermesRdpAgent.ps1",
+    "client/BakunityAccessHost.ps1",
     "client/HermesRdpMaintenance.ps1",
     "client/HermesRdpCertRotation.ps1",
     "client/BakunityMesh.ps1",
@@ -110,6 +118,7 @@ paths = [
     "client/BakunitySmartRoute.ps1",
     "client/BakunitySmartRouteLaunch.ps1",
     "scripts/setup-smart-route-host.ps1",
+    "scripts/setup-access-host.ps1",
     "scripts/install-smart-route-connector.ps1",
     "native-transport/go.mod",
     "native-transport/cmd/bakunity-transport/main.go",
@@ -167,18 +176,27 @@ rollback_update() {
     /etc/systemd/system/hermes-rdp-sshd.service || rollback_ok=0
 
   restore_optional_file /etc/systemd/system/bakunity-rdp-default.service || rollback_ok=0
+  restore_optional_file /etc/systemd/system/hermes-rdp-autodeploy.service || rollback_ok=0
+  restore_optional_file /etc/systemd/system/hermes-rdp-autodeploy.timer || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-device-cert-package || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-close-tunnel || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-autodeploy || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-autodeploy-control || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-github-ops || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdp-github-dispatch || rollback_ok=0
   restore_optional_file /etc/sudoers.d/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /etc/sudoers.d/hermes-rdp-autodeploy-control || rollback_ok=0
   restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/trusted-rdp-cert-state.json || rollback_ok=0
+  restore_optional_file /etc/hermes-rdp/web-admin-token || rollback_ok=0
+  restore_optional_file /etc/hermes-rdp/web-admin-credentials.json || rollback_ok=0
+  restore_optional_file /etc/hermes-rdp/autodeploy.enabled || rollback_ok=0
 
   if [[ -s "$BACKUP/var/lib/hermes-rdp/state.sqlite3" ]]; then
     rm -f "$DB" "$DB-wal" "$DB-shm"
@@ -200,6 +218,9 @@ rollback_update() {
   if [[ -e /etc/sudoers.d/bakunity-rdp-mesh-key ]]; then
     visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null || rollback_ok=0
   fi
+  if [[ -e /etc/sudoers.d/hermes-rdp-autodeploy-control ]]; then
+    visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null || rollback_ok=0
+  fi
   systemctl restart hermes-rdp-sshd.service hermes-rdp.service || rollback_ok=0
   if ((DEFAULT_RDP_CONFIGURED == 1)); then
     systemctl enable --now bakunity-rdp-default.service >/dev/null 2>&1 || rollback_ok=0
@@ -209,6 +230,11 @@ rollback_update() {
   systemctl is-active --quiet hermes-rdp-sshd.service || rollback_ok=0
   systemctl is-active --quiet hermes-rdp.service || rollback_ok=0
   wait_health || rollback_ok=0
+  if [[ -e /etc/hermes-rdp/autodeploy.enabled && -e /etc/systemd/system/hermes-rdp-autodeploy.timer ]]; then
+    systemctl enable --now hermes-rdp-autodeploy.timer >/dev/null 2>&1 || rollback_ok=0
+  else
+    systemctl disable --now hermes-rdp-autodeploy.timer >/dev/null 2>&1 || true
+  fi
 
   if ((rollback_ok == 1)); then
     echo "ROLLBACK=PASS backup=$BACKUP" >&2
@@ -247,13 +273,21 @@ test -f "$ROOT/server/pyproject.toml"
 test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
 test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
+test -f "$ROOT/server/systemd/hermes-rdp-autodeploy.service"
+test -f "$ROOT/server/systemd/hermes-rdp-autodeploy.timer"
+test -f "$ROOT/server/bin/hermes-rdp-autodeploy.sh"
+test -f "$ROOT/server/bin/hermes-rdp-autodeploy-control.sh"
+test -f "$ROOT/server/sudoers/hermes-rdp-autodeploy-control"
 test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
+test -f "$ROOT/server/bin/hermes-rdp-close-tunnel.sh"
 test -f "$ROOT/server/bin/bakunity-rdp-github-ops.sh"
 test -f "$ROOT/server/bin/bakunity-rdp-github-dispatch.sh"
 test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
 test -f "$ROOT/client/BakunityMesh.ps1"
 test -f "$ROOT/client/BakunityNativeTransport.ps1"
 test -f "$ROOT/client/BakunityHostSmartRoute.ps1"
+test -f "$ROOT/client/BakunityAccessHost.ps1"
+test -f "$ROOT/scripts/setup-access-host.ps1"
 test -f "$ROOT/native-transport/go.mod"
 test -f "$ROOT/native-transport/cmd/bakunity-transport/main.go"
 test -f "$ROOT/scripts/setup-native-transport.sh"
@@ -410,18 +444,27 @@ for path in \
   /etc/systemd/system/hermes-rdp.service \
   /etc/systemd/system/hermes-rdp-sshd.service \
   /etc/systemd/system/bakunity-rdp-default.service \
+  /etc/systemd/system/hermes-rdp-autodeploy.service \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer \
   /usr/local/sbin/hermes-rdp-cert-package \
   /usr/local/sbin/hermes-rdp-device-cert-package \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/sbin/bakunity-rdp-mesh-key \
+  /usr/local/sbin/hermes-rdp-close-tunnel \
+  /usr/local/sbin/hermes-rdp-autodeploy \
+  /usr/local/sbin/hermes-rdp-autodeploy-control \
   /usr/local/sbin/bakunity-rdp-github-ops \
   /usr/local/bin/bakunity-rdp-github-dispatch \
   /etc/sudoers.d/bakunity-rdp-mesh-key \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control \
   /usr/local/bin/hermes-rdpctl \
   /usr/local/bin/bakunity-rdpctl \
   /etc/sudoers.d/hermes-rdp-cert-package \
-  /etc/hermes-rdp/trusted-rdp-cert-state.json; do
+  /etc/hermes-rdp/trusted-rdp-cert-state.json \
+  /etc/hermes-rdp/web-admin-token \
+  /etc/hermes-rdp/web-admin-credentials.json \
+  /etc/hermes-rdp/autodeploy.enabled; do
   [[ -e "$path" ]] && cp -a --parents "$path" "$BACKUP/"
 done
 
@@ -448,7 +491,7 @@ chmod 0600 "$BACKUP/var/lib/hermes-rdp/state.sqlite3"
 
 python3 - \
   "$BACKUP/update-metadata.json" \
-  "$REF" \
+  "$TRACK_REF" \
   "$RESOLVED_SHA" \
   "$PREVIOUS_REF" \
   "$PREVIOUS_CLIENT_REF" \
@@ -514,6 +557,9 @@ cat > /usr/local/bin/hermes-rdpctl <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 export PYTHONPATH=/opt/hermes-rdp/app
+if [[ "$(id -u)" -eq 0 && ! ( "${1:-}" == "admin" && "${2:-}" == "password" ) ]]; then
+  exec /usr/sbin/runuser -u hermes-rdp -- env PYTHONPATH="$PYTHONPATH" /usr/bin/python3 -m hermes_rdp.cli "$@"
+fi
 exec /usr/bin/python3 -m hermes_rdp.cli "$@"
 EOF
 chmod 0755 /usr/local/bin/hermes-rdpctl
@@ -521,8 +567,7 @@ chmod 0755 /usr/local/bin/hermes-rdpctl
 cat > /usr/local/bin/bakunity-rdpctl <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-export PYTHONPATH=/opt/hermes-rdp/app
-exec /usr/bin/python3 -m hermes_rdp.cli "$@"
+exec /usr/local/bin/hermes-rdpctl "$@"
 EOF
 chmod 0755 /usr/local/bin/bakunity-rdpctl
 
@@ -535,10 +580,25 @@ install -m 0644 \
 install -m 0644 \
   "$ROOT/server/systemd/bakunity-rdp-default.service" \
   /etc/systemd/system/bakunity-rdp-default.service
+install -m 0644 \
+  "$ROOT/server/systemd/hermes-rdp-autodeploy.service" \
+  /etc/systemd/system/hermes-rdp-autodeploy.service
+install -m 0644 \
+  "$ROOT/server/systemd/hermes-rdp-autodeploy.timer" \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer
 
 install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-mesh-key.sh" \
   /usr/local/sbin/bakunity-rdp-mesh-key
+install -m 0755 \
+  "$ROOT/server/bin/hermes-rdp-close-tunnel.sh" \
+  /usr/local/sbin/hermes-rdp-close-tunnel
+install -m 0755 \
+  "$ROOT/server/bin/hermes-rdp-autodeploy.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy
+install -m 0755 \
+  "$ROOT/server/bin/hermes-rdp-autodeploy-control.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy-control
 install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-github-ops.sh" \
   /usr/local/sbin/bakunity-rdp-github-ops
@@ -548,7 +608,11 @@ install -m 0755 \
 install -m 0440 \
   "$ROOT/server/sudoers/bakunity-rdp-mesh-key" \
   /etc/sudoers.d/bakunity-rdp-mesh-key
+install -m 0440 \
+  "$ROOT/server/sudoers/hermes-rdp-autodeploy-control" \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control
 visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null
+visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null
 
 if ((TRUSTED_CERT_ENABLED == 1)); then
   install -m 0755 \
@@ -571,7 +635,7 @@ if ((TRUSTED_CERT_ENABLED == 1)); then
   test -s /etc/hermes-rdp/trusted-rdp-cert-state.json
 fi
 
-python3 - "$REF" "$RESOLVED_SHA" "$NEW_CLIENT_REF" "$COMPATIBLE_CLIENT_CSV" <<'PY'
+python3 - "$TRACK_REF" "$RESOLVED_SHA" "$NEW_CLIENT_REF" "$COMPATIBLE_CLIENT_CSV" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -597,11 +661,29 @@ PY
 chmod 0640 /etc/hermes-rdp/config.json
 chown root:hermes-rdp /etc/hermes-rdp/config.json
 
+if [[ "$AUTODEPLOY_REQUESTED" == "1" ]]; then
+  touch /etc/hermes-rdp/autodeploy.enabled
+  chmod 0644 /etc/hermes-rdp/autodeploy.enabled
+fi
+
+if [[ ! -s /etc/hermes-rdp/web-admin-token ]]; then
+  openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token
+fi
+chmod 0640 /etc/hermes-rdp/web-admin-token
+chown root:hermes-rdp /etc/hermes-rdp/web-admin-token
+
 ufw allow "3389/tcp" comment 'Bakunity RDP default device' >/dev/null || true
 
 PYTHONPATH=/opt/hermes-rdp/app \
   python3 -m compileall -q /opt/hermes-rdp/app/hermes_rdp
 /usr/sbin/sshd -t -f /etc/hermes-rdp/sshd_config
+
+for sqlite_path in "$DB" "$DB-wal" "$DB-shm"; do
+  if [[ -e "$sqlite_path" ]]; then
+    chown "$DB_UID:$DB_GID" "$sqlite_path"
+    chmod "$DB_MODE" "$sqlite_path"
+  fi
+done
 
 systemctl daemon-reload
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
@@ -614,7 +696,13 @@ fi
 systemctl is-active --quiet hermes-rdp-sshd.service
 systemctl is-active --quiet hermes-rdp.service
 wait_health
-PYTHONPATH=/opt/hermes-rdp/app python3 -m hermes_rdp.cli doctor >/dev/null
+if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then
+  systemctl enable --now hermes-rdp-autodeploy.timer >/dev/null
+else
+  systemctl disable --now hermes-rdp-autodeploy.timer >/dev/null 2>&1 || true
+fi
+/usr/sbin/runuser -u hermes-rdp -- env PYTHONPATH=/opt/hermes-rdp/app \
+  /usr/bin/python3 -m hermes_rdp.cli doctor >/dev/null
 /usr/local/bin/hermes-rdpctl doctor >/dev/null
 /usr/local/bin/bakunity-rdpctl doctor >/dev/null
 python3 - "$DB" <<'PY'
@@ -632,4 +720,7 @@ PY
 
 ROLLBACK_ARMED=0
 echo "Updated to $RESOLVED_SHA. Backup: $BACKUP"
+if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then
+  echo "AUTODEPLOY=ENABLED ref=$TRACK_REF"
+fi
 echo "UPDATE=PASS"

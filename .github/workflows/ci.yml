@@ -73,3 +73,7 @@ jobs:
         shell: powershell
         working-directory: repo
         run: .\tests\Test-PinnedHttpClient.ps1
+      - name: Smoke Live Screen loopback host
+        shell: powershell
+        working-directory: repo
+        run: .\tests\Test-BakunityAccessHost.ps1

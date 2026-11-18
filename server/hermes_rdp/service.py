@@ -26,12 +26,17 @@ def main() -> None:
         config.command_timeout_seconds,
     )
     api_server = create_api_server(config, registry)
-    bot = TelegramUxBot(config, registry)
+    bot = None
+    if config.telegram_token and config.telegram_chat_id:
+        bot = TelegramUxBot(config, registry)
 
     api_thread = threading.Thread(target=api_server.serve_forever, daemon=True)
-    bot_thread = threading.Thread(target=bot.run, daemon=True)
     api_thread.start()
-    bot_thread.start()
+    if bot is not None:
+        bot_thread = threading.Thread(target=bot.run, daemon=True)
+        bot_thread.start()
+    else:
+        LOG.warning("Telegram is not configured; web/API control remains available")
 
     stop_event = threading.Event()
 
@@ -43,7 +48,8 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop_handler)
     LOG.info("Hermes RDP started on HTTPS port %s", config.api_port)
     stop_event.wait()
-    bot.stop()
+    if bot is not None:
+        bot.stop()
     api_server.shutdown()
     api_server.server_close()
 

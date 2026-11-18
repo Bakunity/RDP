@@ -1,0 +1,2 @@
+hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-autodeploy-control on
+hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-autodeploy-control off

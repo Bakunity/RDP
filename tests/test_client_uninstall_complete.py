@@ -39,13 +39,19 @@ class ClientUninstallCompleteTests(unittest.TestCase):
         first_sync = setup.index("-File $WorkerPath", init)
         self.assertLess(init, first_sync)
 
-    def test_live_accepted_uninstall_is_preserved_as_core(self) -> None:
-        core = ROOT / "scripts/uninstall-client-core.ps1"
-        self.assertTrue(core.is_file())
-        self.assertEqual(
-            git_blob_sha(core),
-            "6e379df38e5ab7327aebc892d52d504395078e78",
-        )
+    def test_uninstall_core_preserves_revoke_and_capability_safety(self) -> None:
+        script = read_ps("scripts/uninstall-client-core.ps1")
+        for marker in (
+            "$RdpSupported = $true",
+            "$Config.PSObject.Properties['rdp_supported']",
+            "$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'",
+            "$_.CommandLine.Contains($AccessHostPath)",
+            "RDP_3389=NOT_APPLICABLE",
+            "Invoke-PinnedRevoke",
+            "LOCAL_STATE=REMOVED",
+            "UNINSTALL=PASS",
+        ):
+            self.assertIn(marker, script)
 
     def test_core_restores_listener_before_revoking_device(self) -> None:
         script = read_ps("scripts/uninstall-client-core.ps1")

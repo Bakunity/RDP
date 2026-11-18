@@ -8,6 +8,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControlStateDashboardTests(unittest.TestCase):
+    def test_web_admin_uses_server_truth_named_pairing_and_access_workspace(self) -> None:
+        api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
+        web = (ROOT / "server/hermes_rdp/admin_web.py").read_text(encoding="utf-8")
+        for marker in (
+            "rdp_state = endpoint_listener_state",
+            "live_screen_state = self._access_endpoint_state(device)",
+            "def _access_endpoint_state(",
+            'sock.sendall(b"PING\\n")',
+            'return response == b"OK"',
+            '"rdp_endpoint_available": rdp_state',
+            '"live_screen_endpoint_available": live_screen_state',
+            'display_name=name',
+            "f\"  Name='{ps_quote(name)}'\\n\"",
+            "def _admin_screen(",
+            "def _admin_screen_input(",
+            'socket.create_connection(("127.0.0.1", port)',
+        ):
+            self.assertIn(marker, api)
+        for marker in (
+            'id="pairName"',
+            "api('/v1/admin/pair',{name})",
+            'id="page-device"',
+            'id="liveStage"',
+            "function accessReady(d)",
+            "function startLive(control)",
+            "function setLiveControl(v)",
+            "/screen-input",
+            "Windows Home не принимает входящие Microsoft RDP",
+        ):
+            self.assertIn(marker, web)
+        self.assertNotIn('id="drawerBack"', web)
+        self.assertNotIn("function renderDrawer()", web)
+
     def test_agent_uses_unique_key_path_for_ssh_identity(self) -> None:
         text = (ROOT / "client/HermesRdpAgent.ps1").read_text(encoding="utf-8-sig")
         start = text.index("function Get-SshProcesses")

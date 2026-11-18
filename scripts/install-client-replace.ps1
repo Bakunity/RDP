@@ -363,6 +363,20 @@ try {
             'нового туннеля. После успеха старые credentials будут отозваны.'
         )
 
+        if ([string]::IsNullOrWhiteSpace($Name)) {
+            $Name = [string]$ExistingConfig.device_name
+            if ([string]::IsNullOrWhiteSpace($Name)) {
+                $Name = $env:COMPUTERNAME
+            }
+        }
+        Write-Host "Имя на новом сервере: $Name"
+        Write-Host (
+            'После подтверждения REPLACE установщик больше не задаёт вопросов. ' +
+            'Если новый публичный RDP endpoint не поднимется, старая установка ' +
+            'будет восстановлена автоматически.'
+        )
+        Write-Host
+
         if (-not $ReplaceExisting) {
             $Answer = Read-Host 'Введите REPLACE для переподключения к новому серверу'
             if ($Answer -ne 'REPLACE') {
@@ -395,7 +409,7 @@ try {
         ApiPort = $ApiPort
         RepositoryRef = $ResolvedSha
     }
-    if ($PSBoundParameters.ContainsKey('Name')) {
+    if (-not [string]::IsNullOrWhiteSpace($Name)) {
         $CoreParams.Name = $Name
     }
 

@@ -12,12 +12,13 @@ PORT_START=53389
 PORT_END=53420
 MIGRATE=0
 TRUSTED_RDP_CERT=0
+AUTODEPLOY="${BAKUNITY_RDP_AUTODEPLOY:-0}"
 SSH_USER="hermes-tunnel"
 
 usage() {
   cat <<'EOF'
 Usage:
-  install-server.sh --host HOST --telegram-token TOKEN --telegram-chat-id ID [options]
+  install-server.sh --host HOST [--telegram-token TOKEN --telegram-chat-id ID] [options]
 
 Options:
   --api-port PORT       HTTPS API port (default: 7443)
@@ -26,6 +27,7 @@ Options:
   --port-start PORT     first RDP port (default: 53389)
   --port-end PORT       last RDP port (default: 53420)
   --trusted-rdp-cert    enable trusted public-IP RDP certificate lifecycle
+  --autodeploy          track this non-main branch and deploy only green CI commits
   --migrate             replace an existing legacy FRP installation
 EOF
 }
@@ -40,6 +42,7 @@ while (($#)); do
     --port-start) PORT_START="${2:?}"; shift 2 ;;
     --port-end) PORT_END="${2:?}"; shift 2 ;;
     --trusted-rdp-cert) TRUSTED_RDP_CERT=1; shift ;;
+    --autodeploy) AUTODEPLOY=1; shift ;;
     --migrate) MIGRATE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -50,9 +53,15 @@ if [[ ${EUID} -ne 0 ]]; then
   echo "Run as root or through sudo." >&2
   exit 1
 fi
-if [[ -z "$HOST" || -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+if [[ -z "$HOST" ]]; then
   usage >&2
   exit 2
+fi
+if [[ -n "$TELEGRAM_TOKEN" || -n "$TELEGRAM_CHAT_ID" ]]; then
+  if [[ -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+    echo "telegram-token and telegram-chat-id must be provided together." >&2
+    exit 2
+  fi
 fi
 if ! [[ "$API_PORT" =~ ^[0-9]+$ && "$SSH_PORT" =~ ^[0-9]+$ && "$PORT_START" =~ ^[0-9]+$ && "$PORT_END" =~ ^[0-9]+$ ]]; then
   echo "Ports must be integers." >&2
@@ -77,6 +86,7 @@ apt-get update -qq
 apt-get install -y -qq \
   ca-certificates \
   curl \
+  git \
   openssl \
   openssh-server \
   python3 \
@@ -125,7 +135,12 @@ for path in \
   /etc/systemd/system/hermes-rdp.service \
   /etc/systemd/system/hermes-rdp-cert-renew.service \
   /etc/systemd/system/hermes-rdp-cert-renew.timer \
+  /etc/systemd/system/hermes-rdp-autodeploy.service \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer \
+  /usr/local/sbin/hermes-rdp-autodeploy \
+  /usr/local/sbin/hermes-rdp-autodeploy-control \
   /usr/local/sbin/hermes-rdp-cert-renew \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control \
   /etc/sudoers.d/hermes-rdp; do
   if [[ -e "$path" ]]; then
     cp -a --parents "$path" "$BACKUP_DIR/"
@@ -196,9 +211,19 @@ install -d -m 0750 -o root -g hermes-rdp /etc/hermes-rdp
 install -d -m 0750 -o root -g hermes-rdp /etc/hermes-rdp/tls
 install -d -m 0750 -o hermes-rdp -g hermes-rdp /var/lib/hermes-rdp
 
-printf '%s\n' "$TELEGRAM_TOKEN" > /etc/hermes-rdp/telegram-token
+if [[ -n "$TELEGRAM_TOKEN" ]]; then
+  printf '%s\n' "$TELEGRAM_TOKEN" > /etc/hermes-rdp/telegram-token
+else
+  : > /etc/hermes-rdp/telegram-token
+fi
 chmod 0640 /etc/hermes-rdp/telegram-token
 chown root:hermes-rdp /etc/hermes-rdp/telegram-token
+
+if [[ ! -s /etc/hermes-rdp/web-admin-token ]]; then
+  openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token
+fi
+chmod 0640 /etc/hermes-rdp/web-admin-token
+chown root:hermes-rdp /etc/hermes-rdp/web-admin-token
 
 API_TLS_DIR=/etc/hermes-rdp/tls
 if [[ ! -s "$API_TLS_DIR/api.key" || ! -s "$API_TLS_DIR/api.crt" ]]; then
@@ -250,10 +275,13 @@ cat > /etc/hermes-rdp/config.json <<EOF
   "port_start": $PORT_START,
   "port_end": $PORT_END,
   "telegram_chat_id": "$TELEGRAM_CHAT_ID",
+  "web_admin_token_file": "/etc/hermes-rdp/web-admin-token",
+  "web_admin_credentials_file": "/etc/hermes-rdp/web-admin-credentials.json",
   "ssh_host_key_file": "/etc/hermes-rdp/ssh-host-key.pub",
   "close_tunnel_helper": "/usr/local/sbin/hermes-rdp-close-tunnel",
   "client_installer_url": "https://raw.githubusercontent.com/$REPO/$REF/scripts/install-client.ps1",
   "repository_ref": "$REF",
+  "repository_requested_ref": "$REF",
   "client_repository_ref": "$REF",
   "client_compatible_refs": ["$REF"]
 }
@@ -306,48 +334,9 @@ chmod 0640 /etc/hermes-rdp/sshd_config
 chown root:hermes-rdp /etc/hermes-rdp/sshd_config
 /usr/sbin/sshd -t -f /etc/hermes-rdp/sshd_config
 
-cat > /usr/local/sbin/hermes-rdp-close-tunnel <<'EOF'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-if (($# != 1)) || ! [[ "$1" =~ ^[0-9]+$ ]]; then
-  echo "usage: hermes-rdp-close-tunnel PORT" >&2
-  exit 2
-fi
-PORT="$1"
-read -r START END < <(
-  python3 - <<'PY'
-import json
-with open("/etc/hermes-rdp/config.json", encoding="utf-8") as handle:
-    data = json.load(handle)
-print(int(data["port_start"]), int(data["port_end"]))
-PY
-)
-if ((PORT < START || PORT > END)); then
-  echo "port outside Hermes RDP range" >&2
-  exit 2
-fi
-
-CLOSED=0
-while read -r PID; do
-  [[ -n "$PID" && -e "/proc/$PID/exe" ]] || continue
-  EXE="$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)"
-  if [[ "$EXE" == /usr/sbin/sshd ]]; then
-    kill -TERM "$PID"
-    CLOSED=1
-  fi
-done < <(
-  ss -H -ltnp "sport = :$PORT" 2>/dev/null |
-    grep -oE 'pid=[0-9]+' |
-    cut -d= -f2 |
-    sort -u
-)
-
-if ((CLOSED == 0)); then
-  exit 3
-fi
-EOF
-chmod 0755 /usr/local/sbin/hermes-rdp-close-tunnel
+install -m 0755 \
+  "$SOURCE_ROOT/server/bin/hermes-rdp-close-tunnel.sh" \
+  /usr/local/sbin/hermes-rdp-close-tunnel
 
 cat > /etc/sudoers.d/hermes-rdp <<'EOF'
 hermes-rdp ALL=(root) NOPASSWD: /usr/local/sbin/hermes-rdp-close-tunnel *
@@ -367,6 +356,27 @@ install \
   -m 0644 \
   "$SOURCE_ROOT/server/systemd/bakunity-rdp-default.service" \
   /etc/systemd/system/bakunity-rdp-default.service
+install \
+  -m 0644 \
+  "$SOURCE_ROOT/server/systemd/hermes-rdp-autodeploy.service" \
+  /etc/systemd/system/hermes-rdp-autodeploy.service
+install \
+  -m 0644 \
+  "$SOURCE_ROOT/server/systemd/hermes-rdp-autodeploy.timer" \
+  /etc/systemd/system/hermes-rdp-autodeploy.timer
+install \
+  -m 0755 \
+  "$SOURCE_ROOT/server/bin/hermes-rdp-autodeploy.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy
+install \
+  -m 0755 \
+  "$SOURCE_ROOT/server/bin/hermes-rdp-autodeploy-control.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy-control
+install \
+  -m 0440 \
+  "$SOURCE_ROOT/server/sudoers/hermes-rdp-autodeploy-control" \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control
+visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null
 
 if ((MIGRATE == 1)); then
   rm -f /etc/systemd/system/frps.service /usr/local/bin/frps
@@ -383,7 +393,22 @@ PYTHONPATH=/opt/hermes-rdp/app \
 
 systemctl daemon-reload
 systemctl enable hermes-rdp-sshd.service hermes-rdp.service
+if [[ "$AUTODEPLOY" == "1" ]]; then
+  if [[ "$REF" == "main" || "$REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "--autodeploy requires a mutable non-main branch ref." >&2
+    exit 2
+  fi
+  touch /etc/hermes-rdp/autodeploy.enabled
+  chmod 0644 /etc/hermes-rdp/autodeploy.enabled
+  systemctl enable hermes-rdp-autodeploy.timer
+else
+  rm -f /etc/hermes-rdp/autodeploy.enabled
+  systemctl disable hermes-rdp-autodeploy.timer >/dev/null 2>&1 || true
+fi
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
+if [[ "$AUTODEPLOY" == "1" ]]; then
+  systemctl start hermes-rdp-autodeploy.timer
+fi
 sleep 3
 
 if ((MIGRATE == 1)); then
@@ -416,6 +441,10 @@ echo "ssh_tunnel_port=$SSH_PORT"
 echo "rdp_ports=$PORT_START-$PORT_END"
 echo "ssh_tunnel=$(systemctl is-active hermes-rdp-sshd.service)"
 echo "controller=$(systemctl is-active hermes-rdp.service)"
+echo "autodeploy=$(if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then systemctl is-active hermes-rdp-autodeploy.timer; else echo disabled; fi)"
+echo "web_ui=https://$HOST:$API_PORT/admin/"
+echo "web_admin_login=admin"
+echo "web_admin_password_setup=bakunity-rdpctl admin password --generate"
 if ((TRUSTED_RDP_CERT == 1)); then
   echo "trusted_rdp_certificate=$(systemctl is-active hermes-rdp-cert-renew.timer)"
 fi

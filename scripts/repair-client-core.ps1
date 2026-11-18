@@ -435,6 +435,10 @@ catch {
 
 $DeviceId = [string]$Config.device_id
 $DeviceToken = [string]$Config.device_token
+$RdpSupported = $true
+if ($Config.PSObject.Properties['rdp_supported']) {
+    $RdpSupported = [bool]$Config.rdp_supported
+}
 $KeyPath = [string]$Config.ssh_key_path
 $KnownHostsPath = [string]$Config.known_hosts_path
 $ApiBase = [string]$Config.api_base_url
@@ -694,16 +698,18 @@ try {
             Set-SecretAcl -Path $Secret
         }
 
-        Set-ItemProperty `
-            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-            -Name fDenyTSConnections `
-            -Value 0
-        Get-NetFirewallRule `
-            -Name 'RemoteDesktop-*' `
-            -ErrorAction SilentlyContinue |
-            Enable-NetFirewallRule
-        Set-Service -Name TermService -StartupType Automatic
-        Start-Service -Name TermService
+        if ($RdpSupported) {
+            Set-ItemProperty `
+                -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                -Name fDenyTSConnections `
+                -Value 0
+            Get-NetFirewallRule `
+                -Name 'RemoteDesktop-*' `
+                -ErrorAction SilentlyContinue |
+                Enable-NetFirewallRule
+            Set-Service -Name TermService -StartupType Automatic
+            Start-Service -Name TermService
+        }
 
         # Preserve the canonical native path expected by the SYSTEM task. If a
         # historical config contains the same canonical path, no config write
@@ -749,6 +755,7 @@ try {
         Write-Host "Backup: $BackupDir"
         Write-Host "DeviceId: $DeviceId"
         Write-Host "RdpPort: $OriginalRdpPort"
+        Write-Host "RdpSupported: $RdpSupported"
         Write-Host "DesiredAccess: $DesiredEnabled"
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"

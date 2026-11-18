@@ -214,12 +214,20 @@ ensure_certificate() {
   certificate_is_usable && return 0
 
   local -a auth_args=()
+  local listeners
+  listeners="$(port80_listener)"
   if [[ "$ACME_MODE" == "nginx-webroot" ]]; then
     configure_nginx_route
     auth_args=(--webroot --webroot-path "$ACME_WEBROOT")
+  elif [[ -n "$listeners" ]] && grep -q 'nginx' <<<"$listeners"; then
+    # The server may have been installed while :80 was free and nginx added
+    # later. Do not keep a stale standalone decision forever.
+    configure_nginx_route
+    auth_args=(--webroot --webroot-path "$ACME_WEBROOT")
   else
-    if [[ -n "$(port80_listener)" ]]; then
-      echo "TCP 80 is occupied; standalone HTTP-01 cannot start" >&2
+    if [[ -n "$listeners" ]]; then
+      echo "TCP 80 is occupied by a non-nginx service; HTTP-01 cannot start safely" >&2
+      printf '%s\n' "$listeners" >&2
       return 1
     fi
     auth_args=(--standalone)

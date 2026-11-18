@@ -1,0 +1,12 @@
+[Unit]
+Description=Bakunity RDP staging auto-deploy
+After=network-online.target hermes-rdp.service
+Wants=network-online.target
+ConditionPathExists=/etc/hermes-rdp/autodeploy.enabled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hermes-rdp-autodeploy
+User=root
+Group=root
+Nice=10

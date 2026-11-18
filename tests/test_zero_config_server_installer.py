@@ -20,9 +20,10 @@ class ZeroConfigServerInstallerTests(unittest.TestCase):
         self.assertIn("read -r -s -n1 char </dev/tty", self.bootstrap)
         self.assertIn("printf '*' >/dev/tty", self.bootstrap)
         self.assertIn("for attempt in 1 2 3", self.bootstrap)
-        self.assertIn("Telegram bot token пустой. Попробуйте ещё раз", self.bootstrap)
+        self.assertIn("Telegram необязателен. Нажмите Enter без токена", self.bootstrap)
         self.assertIn("Telegram bot token не прошёл проверку getMe", self.bootstrap)
-        self.assertIn("Telegram bot token не удалось подтвердить после 3 попыток", self.bootstrap)
+        self.assertIn("Telegram пропущен. Продолжаю установку в WEB-режиме", self.bootstrap)
+        self.assertIn("Telegram недоступен или пропущен. Продолжаю установку в WEB-режиме", self.bootstrap)
         self.assertIn("telegram_call getMe", self.bootstrap)
         self.assertIn("telegram_call getWebhookInfo", self.bootstrap)
         self.assertNotIn("echo $TG_TOKEN", self.bootstrap)
@@ -62,7 +63,7 @@ class ZeroConfigServerInstallerTests(unittest.TestCase):
         self.assertLess(owner, install)
         self.assertIn('chat.get("type") != "private"', self.bootstrap)
         self.assertIn('str(chat.get("id", "")) != str(actor.get("id", ""))', self.bootstrap)
-        self.assertIn('--telegram-chat-id "$OWNER_ID"', self.bootstrap)
+        self.assertIn('INSTALL_ARGS+=(--telegram-token "$TG_TOKEN" --telegram-chat-id "$OWNER_ID")', self.bootstrap)
 
     def test_public_ipv4_and_trusted_tls_are_automatic(self) -> None:
         self.assertIn("detect_public_ipv4", self.bootstrap)
@@ -92,6 +93,7 @@ class ZeroConfigServerInstallerTests(unittest.TestCase):
         self.assertNotIn("Базовая установка:", self.quickstart)
         self.assertNotIn("С trusted public-IP RDP certificate lifecycle:", self.quickstart)
         self.assertIn("/claim", self.quickstart)
+        self.assertIn("Web UI:", self.bootstrap)
         self.assertIn("advanced", self.quickstart.lower())
 
 

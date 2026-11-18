@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+from http.cookies import SimpleCookie
 import ssl
+import socket
+import struct
 import subprocess
 import time
 from http import HTTPStatus
@@ -13,10 +16,20 @@ from urllib.parse import urlparse
 
 from . import __version__
 from .config import Config
+from .auth import (
+    SESSION_TTL_SECONDS,
+    create_session,
+    read_credentials,
+    verify_password,
+    verify_session,
+)
+from .admin_web import ADMIN_HTML
+from .device_certificates import set_device_slug_with_certificate
 from .db import Registry
 from .device_certificates import get_device_certificate_target
 from .native_transport import (
     authorize_native_transport_peer,
+    get_native_transport_host,
     native_transport_bootstrap,
     native_transport_enabled,
     native_transport_host_manifest,
@@ -43,6 +56,9 @@ DEVICE_CERT_PACKAGE_HELPER = "/usr/local/sbin/hermes-rdp-device-cert-package"
 CERT_PACKAGE_TIMEOUT_SECONDS = 30
 DEVICE_CERT_TIMEOUT_SECONDS = 25
 CERT_STATE_FILE = Path("/etc/hermes-rdp/trusted-rdp-cert-state.json")
+AUTODEPLOY_MARKER = Path("/etc/hermes-rdp/autodeploy.enabled")
+AUTODEPLOY_STATUS_FILE = Path("/var/lib/hermes-rdp/autodeploy-status.json")
+ADMIN_SESSION_COOKIE = "__Host-bakunity_admin_session"
 
 
 def parse_helper_json(text: str) -> dict[str, Any]:
@@ -150,6 +166,174 @@ class ApiHandler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
 
+    def _image(
+        self,
+        data: bytes,
+        *,
+        width: int,
+        height: int,
+        left: int,
+        top: int,
+    ) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Bakunity-Width", str(width))
+        self.send_header("X-Bakunity-Height", str(height))
+        self.send_header("X-Bakunity-Left", str(left))
+        self.send_header("X-Bakunity-Top", str(top))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _access_port(device: dict[str, Any]) -> int:
+        return int(device["rdp_port"]) + 1000
+
+    def _access_endpoint_state(
+        self,
+        device: dict[str, Any],
+    ) -> bool | None:
+        port = self._access_port(device)
+        listener = endpoint_listener_state(port)
+        if listener is not True:
+            return listener
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.5) as sock:
+                sock.settimeout(1.5)
+                sock.sendall(b"PING\n")
+                response = self._read_access_frame(sock, max_size=64 * 1024)
+            return response == b"OK"
+        except (OSError, TimeoutError, ConnectionError, ValueError):
+            return False
+
+    @staticmethod
+    def _read_access_frame(
+        sock: socket.socket,
+        *,
+        max_size: int,
+    ) -> bytes:
+        header = b""
+        while len(header) < 4:
+            chunk = sock.recv(4 - len(header))
+            if not chunk:
+                raise ConnectionError("live screen tunnel closed")
+            header += chunk
+        length = struct.unpack("<I", header)[0]
+        if length > max_size:
+            raise ValueError("live screen frame is too large")
+        data = bytearray()
+        while len(data) < length:
+            chunk = sock.recv(min(65536, length - len(data)))
+            if not chunk:
+                raise ConnectionError("live screen frame ended early")
+            data.extend(chunk)
+        return bytes(data)
+
+    def _access_snapshot(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[dict[str, Any], bytes]:
+        port = self._access_port(device)
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+            sock.settimeout(5)
+            sock.sendall(b"SNAPSHOT\n")
+            meta_raw = self._read_access_frame(sock, max_size=64 * 1024)
+            image = self._read_access_frame(sock, max_size=16 * 1024 * 1024)
+        meta = json.loads(meta_raw.decode("utf-8"))
+        if not isinstance(meta, dict):
+            raise ValueError("invalid live screen metadata")
+        width = int(meta.get("width") or 0)
+        height = int(meta.get("height") or 0)
+        if width <= 0 or height <= 0:
+            raise ValueError("invalid live screen dimensions")
+        return meta, image
+
+    def _access_input(
+        self,
+        device: dict[str, Any],
+        body: dict[str, Any],
+    ) -> None:
+        kind = str(body.get("kind") or "").strip().lower()
+        if kind not in {"move", "button", "wheel", "key", "text"}:
+            raise ValueError("unsupported live screen input")
+        raw = json.dumps(
+            body,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(raw) > 64 * 1024:
+            raise ValueError("live screen input is too large")
+        port = self._access_port(device)
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+            sock.settimeout(5)
+            sock.sendall(f"INPUT {len(raw)}\n".encode("ascii"))
+            sock.sendall(raw)
+            response = self._read_access_frame(sock, max_size=64 * 1024)
+        if response != b"OK":
+            detail = response.decode("utf-8", errors="replace")
+            raise RuntimeError(detail[:500] or "live screen input failed")
+
+    def _admin_screen(self, device_id: str) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        device = self.server.registry.get_device(device_id)
+        if not device:
+            self._json(
+                HTTPStatus.NOT_FOUND,
+                {"ok": False, "error": "device not found"},
+            )
+            return
+        if self._access_endpoint_state(device) is not True:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "live screen is unavailable"},
+            )
+            return
+        meta, image = self._access_snapshot(device)
+        self._image(
+            image,
+            width=int(meta.get("width") or 0),
+            height=int(meta.get("height") or 0),
+            left=int(meta.get("left") or 0),
+            top=int(meta.get("top") or 0),
+        )
+
+    def _admin_screen_input(self, device_id: str) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        device = self.server.registry.get_device(device_id)
+        if not device:
+            self._json(
+                HTTPStatus.NOT_FOUND,
+                {"ok": False, "error": "device not found"},
+            )
+            return
+        if self._access_endpoint_state(device) is not True:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "live screen is unavailable"},
+            )
+            return
+        body = self._read_json()
+        self._access_input(device, body)
+        LOG.debug(
+            "live screen input device=%s kind=%s",
+            device_id,
+            str(body.get("kind") or ""),
+        )
+        self._json(HTTPStatus.OK, {"ok": True})
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0 or length > MAX_BODY:
@@ -172,8 +356,376 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _named_access_auth(self) -> dict[str, Any] | None:
         return self.server.registry.authenticate_named_access_token(self._bearer())
 
+    def _cookie_value(self, name: str) -> str:
+        raw = self.headers.get("Cookie", "")
+        if not raw:
+            return ""
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw)
+        except Exception:
+            return ""
+        morsel = cookie.get(name)
+        return "" if morsel is None else str(morsel.value or "")
+
+    def _session_header(self) -> str:
+        value = str(self.headers.get("X-Bakunity-Session", "") or "").strip()
+        return value
+
+    def _admin_session(self) -> dict[str, object] | None:
+        token = (
+            self._cookie_value(ADMIN_SESSION_COOKIE)
+            or self._session_header()
+        )
+        if not token:
+            return None
+        secret = self.server.config.web_admin_token
+        if not secret:
+            return None
+        try:
+            credentials = read_credentials(
+                self.server.config.web_admin_credentials_file
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        if credentials is None:
+            return None
+        session = verify_session(
+            secret,
+            token,
+            min_issued_at=credentials.updated_at,
+        )
+        if not session:
+            return None
+        if str(session.get("u") or "") != credentials.username:
+            return None
+        return session
+
+    def _admin_auth(self) -> bool:
+        import secrets
+
+        if self._admin_session():
+            return True
+
+        # Legacy/internal compatibility only. The Web UI no longer stores
+        # or asks users for this bearer token.
+        token = self._bearer()
+        expected = self.server.config.web_admin_token
+        return bool(
+            token
+            and expected
+            and secrets.compare_digest(token, expected)
+        )
+
+    def _admin_auth_status(self) -> None:
+        credentials = read_credentials(
+            self.server.config.web_admin_credentials_file
+        )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "configured": credentials is not None,
+                "authenticated": self._admin_auth(),
+                "username": (
+                    credentials.username if credentials is not None else ""
+                ),
+            },
+        )
+
+    def _admin_login(self) -> None:
+        body = self._read_json()
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "")
+        if not verify_password(
+            self.server.config.web_admin_credentials_file,
+            username=username,
+            password=password,
+        ):
+            LOG.warning(
+                "admin login rejected username=%s credentials=%s",
+                username[:64],
+                self.server.config.web_admin_credentials_file,
+            )
+            time.sleep(0.35)
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "invalid username or password"},
+            )
+            return
+
+        token = create_session(
+            self.server.config.web_admin_token,
+            username=username,
+            ttl_seconds=SESSION_TTL_SECONDS,
+        )
+        payload = json.dumps(
+            {
+                "ok": True,
+                "username": username,
+                "expires_in": SESSION_TTL_SECONDS,
+                "session": token,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Set-Cookie",
+            (
+                f"{ADMIN_SESSION_COOKIE}={token}; "
+                "Path=/; HttpOnly; Secure; SameSite=Strict; "
+                f"Max-Age={SESSION_TTL_SECONDS}"
+            ),
+        )
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _admin_logout(self) -> None:
+        payload = b'{"ok":true}'
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Set-Cookie",
+            (
+                f"{ADMIN_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; "
+                "SameSite=Strict; Max-Age=0"
+            ),
+        )
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _html(self, status: int, text: str) -> None:
+        data = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _autodeploy_status() -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if AUTODEPLOY_STATUS_FILE.is_file():
+            try:
+                raw = json.loads(
+                    AUTODEPLOY_STATUS_FILE.read_text(encoding="utf-8")
+                )
+                if isinstance(raw, dict):
+                    payload = raw
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        return {
+            "enabled": AUTODEPLOY_MARKER.exists(),
+            "state": str(payload.get("state") or "unknown"),
+            "ref": str(payload.get("ref") or ""),
+            "target_sha": str(payload.get("target_sha") or ""),
+            "detail": str(payload.get("detail") or ""),
+            "updated_at": int(payload.get("updated_at") or 0),
+        }
+
+    def _admin_autodeploy(self) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        body = self._read_json()
+        enabled = bool(body.get("enabled"))
+        track_ref = str(
+            self.server.config.repository_requested_ref or ""
+        ).strip()
+        immutable = (
+            len(track_ref) == 40
+            and all(ch in "0123456789abcdefABCDEF" for ch in track_ref)
+        )
+        if enabled and (track_ref == "main" or immutable or not track_ref):
+            self._json(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "ok": False,
+                    "error": (
+                        "autodeploy requires a mutable non-main "
+                        "repository_requested_ref"
+                    ),
+                },
+            )
+            return
+        action = "on" if enabled else "off"
+        result = subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "/usr/local/sbin/hermes-rdp-autodeploy-control",
+                action,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or "autodeploy control failed"
+            )
+            self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": detail[:500]},
+            )
+            return
+        self._json(
+            HTTPStatus.OK,
+            {"ok": True, "autodeploy": self._autodeploy_status()},
+        )
+
+    def _admin_state(self) -> None:
+        if not self._admin_auth():
+            self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+            return
+        now = int(time.time())
+        domain = self.server.registry.get_device_domain()
+        devices = []
+        for device in self.server.registry.list_devices():
+            last_seen = int(device.get("last_seen") or 0)
+            age = max(0, now - last_seen) if last_seen else None
+            online = last_seen > 0 and age <= max(
+                int(self.server.config.online_after_seconds), 45
+            )
+            slug = str(device.get("slug") or "")
+            host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
+            telemetry = device.get("telemetry") or {}
+            rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+            live_screen_state = self._access_endpoint_state(device)
+            smart = get_host_smart_route(self.server.registry, str(device["id"]))
+            native = get_native_transport_host(self.server.registry, str(device["id"]))
+            sessions = telemetry.get("sessions") or []
+            interactive_user = str(
+                telemetry.get("interactive_user")
+                or (sessions[0] if sessions else "")
+                or ""
+            )
+            devices.append(
+                {
+                    "id": str(device["id"]),
+                    "name": str(device["display_name"]),
+                    "machine_name": str(device["machine_name"]),
+                    "slug": slug,
+                    "enabled": bool(device.get("enabled", True)),
+                    "online": online,
+                    "last_seen": last_seen,
+                    "last_seen_age": age,
+                    "rdp_port": int(device["rdp_port"]),
+                    "rdp": f"{host}:{int(device['rdp_port'])}",
+                    "pending_command": str(device.get("pending_command") or ""),
+                    "last_result": device.get("last_result") or {},
+                    "telemetry": {
+                        "os": str(telemetry.get("os") or ""),
+                        "windows_edition": str(
+                            telemetry.get("windows_edition") or ""
+                        ),
+                        "rdp_supported": bool(
+                            telemetry.get("rdp_supported", True)
+                        ),
+                        "live_screen_capable": bool(
+                            telemetry.get("live_screen_capable")
+                        ),
+                        "live_screen_running": bool(
+                            telemetry.get("live_screen_running")
+                        ),
+                        "user": interactive_user,
+                        "cpu_percent": float(telemetry.get("cpu_percent") or 0),
+                        "ram_percent": float(telemetry.get("ram_percent") or 0),
+                        "ram_used_bytes": int(telemetry.get("ram_used_bytes") or 0),
+                        "ram_total_bytes": int(telemetry.get("ram_total_bytes") or 0),
+                        "disk_percent": float(telemetry.get("disk_percent") or 0),
+                        "disk_used_bytes": int(telemetry.get("disk_used_bytes") or 0),
+                        "disk_total_bytes": int(telemetry.get("disk_total_bytes") or 0),
+                        "network_received_bytes": int(telemetry.get("network_received_bytes") or 0),
+                        "network_sent_bytes": int(telemetry.get("network_sent_bytes") or 0),
+                        "route": str(telemetry.get("route") or ""),
+                        "access_enabled": telemetry.get("access_enabled"),
+                        "ssh_tunnel_running": telemetry.get("ssh_tunnel_running"),
+                        "ssh_process_count": telemetry.get("ssh_process_count"),
+                        "endpoint_available": rdp_state,
+                        "rdp_endpoint_available": rdp_state,
+                        "live_screen_endpoint_available": live_screen_state,
+                        "endpoint_source": (
+                            "server_listener" if rdp_state is not None else "unknown"
+                        ),
+                        "rdp_hermes_connections": telemetry.get("rdp_hermes_connections"),
+                        "rdp_direct_connections": telemetry.get("rdp_direct_connections"),
+                        "maintenance_capable": bool(telemetry.get("maintenance_capable")),
+                        "client_repository_ref": str(telemetry.get("client_repository_ref") or ""),
+                        "certificate_lifecycle_ok": telemetry.get("certificate_lifecycle_ok"),
+                        "maintenance_status": telemetry.get("maintenance_status") or {},
+                    },
+                    "smart_route": smart,
+                    "native_transport": native,
+                }
+            )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "server": {
+                    "public_host": self.server.config.public_host,
+                    "api_port": self.server.config.api_port,
+                    "ssh_port": self.server.config.ssh_bind_port,
+                    "rdp_port_start": self.server.config.port_start,
+                    "rdp_port_end": self.server.config.port_end,
+                    "device_domain": domain,
+                    "repository_ref": self.server.config.repository_ref,
+                    "repository_requested_ref": (
+                        self.server.config.repository_requested_ref
+                    ),
+                    "client_ref": self.server.config.client_ref,
+                    "telegram_enabled": bool(
+                        self.server.config.telegram_token
+                        and self.server.config.telegram_chat_id
+                    ),
+                    "smart_route_enabled": mesh_enabled(self.server.registry),
+                    "smart_route_control_url": mesh_control_url(self.server.registry),
+                    "native_transport_enabled": native_transport_enabled(self.server.registry),
+                    "native_transport_relay_addr": native_transport_relay_addr(self.server.registry),
+                    "autodeploy": self._autodeploy_status(),
+                },
+                "devices": devices,
+            },
+        )
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/", "/admin", "/admin/"}:
+            self._html(HTTPStatus.OK, ADMIN_HTML)
+            return
+        if path == "/v1/admin/auth/status":
+            self._admin_auth_status()
+            return
+        if path == "/v1/admin/state":
+            self._admin_state()
+            return
+        parts = [part for part in path.split("/") if part]
+        if (
+            len(parts) == 5
+            and parts[:3] == ["v1", "admin", "device"]
+            and parts[4] == "screen"
+        ):
+            self._admin_screen(parts[3])
+            return
         if path == "/healthz":
             self._json(
                 HTTPStatus.OK,
@@ -206,6 +758,112 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/v1/admin/auth/login":
+                self._admin_login()
+                return
+            if path == "/v1/admin/auth/logout":
+                self._admin_logout()
+                return
+            if path == "/v1/admin/autodeploy":
+                self._admin_autodeploy()
+                return
+            if path == "/v1/admin/pair":
+                if not self._admin_auth():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+                    return
+                body = self._read_json()
+                name = str(body.get("name") or "").strip()
+                if not name:
+                    raise ValueError("computer name is required")
+                code = self.server.registry.create_pair_code(
+                    display_name=name,
+                    ttl_seconds=self.server.config.pair_ttl_seconds,
+                )
+
+                def ps_quote(value: str) -> str:
+                    return str(value).replace("'", "''")
+
+                command = (
+                    "$u='" + ps_quote(self.server.config.client_installer_url) + "'\n"
+                    "$s=(irm $u).TrimStart([char]0xFEFF)\n"
+                    "$p=@{\n"
+                    f"  Server='{ps_quote(self.server.config.public_host)}'\n"
+                    f"  PairCode='{ps_quote(code)}'\n"
+                    f"  Fingerprint='{ps_quote(self.server.config.tls_fingerprint)}'\n"
+                    f"  RepositoryRef='{ps_quote(self.server.config.client_ref)}'\n"
+                    f"  Name='{ps_quote(name)}'\n"
+                    "}\n"
+                    "& ([scriptblock]::Create($s)) @p"
+                )
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "code": code,
+                        "ttl_seconds": self.server.config.pair_ttl_seconds,
+                        "command": command,
+                        "fingerprint": self.server.config.tls_fingerprint,
+                        "repository_ref": self.server.config.client_ref,
+                        "name": name,
+                    },
+                )
+                return
+            if path.startswith("/v1/admin/device/"):
+                if not self._admin_auth():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+                    return
+                parts = [part for part in path.split("/") if part]
+                if len(parts) != 5:
+                    self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+                    return
+                device_id, action = parts[3], parts[4]
+                if action == "screen-input":
+                    self._admin_screen_input(device_id)
+                    return
+                body = self._read_json()
+                if action == "rename":
+                    self.server.registry.rename_device(device_id, str(body.get("name") or ""))
+                    self._json(HTTPStatus.OK, {"ok": True})
+                    return
+                if action == "slug":
+                    slug, _ = set_device_slug_with_certificate(
+                        self.server.config, self.server.registry, device_id, str(body.get("slug") or "")
+                    )
+                    domain = self.server.registry.get_device_domain()
+                    host = f"{slug}.{domain}" if domain else slug
+                    device = self.server.registry.get_device(device_id)
+                    self._json(HTTPStatus.OK, {"ok": True, "slug": slug, "rdp": f"{host}:{int(device['rdp_port'])}"})
+                    return
+                if action == "command":
+                    command = str(body.get("action") or "")
+                    seq = self.server.registry.queue_command(device_id, command)
+                    if command == "off":
+                        try:
+                            device = self.server.registry.get_device(device_id)
+                            close_tunnel(self.server.config, int(device["rdp_port"]))
+                        except Exception as exc:
+                            LOG.warning("admin tunnel close failed: %s", exc)
+                    self._json(HTTPStatus.OK, {"ok": True, "seq": seq})
+                    return
+                if action == "delete":
+                    device = self.server.registry.get_device(device_id)
+                    for port in (
+                        int(device["rdp_port"]),
+                        self._access_port(device),
+                    ):
+                        try:
+                            close_tunnel(self.server.config, port)
+                        except Exception as exc:
+                            LOG.warning(
+                                "admin tunnel close before delete failed port=%s: %s",
+                                port,
+                                exc,
+                            )
+                    self.server.registry.revoke_device(device_id)
+                    self._json(HTTPStatus.OK, {"ok": True})
+                    return
+                self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+                return
             if path == "/v1/pair":
                 self._pair()
                 return
@@ -223,6 +881,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 device_id, action = parts[2], parts[3]
                 if action == "telemetry":
                     self._telemetry(device_id)
+                    return
+                if action == "endpoint-status":
+                    self._endpoint_status(device_id)
                     return
                 if action == "command-result":
                     self._command_result(device_id)
@@ -698,6 +1359,27 @@ class ApiHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _endpoint_status(self, device_id: str) -> None:
+        device = self._device_auth(device_id)
+        if not device:
+            self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+            return
+        self._read_json()
+        rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+        live_screen_state = self._access_endpoint_state(device)
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "endpoint_available": rdp_state,
+                "rdp_endpoint_available": rdp_state,
+                "live_screen_endpoint_available": live_screen_state,
+                "rdp_port": int(device["rdp_port"]),
+                "live_screen_port": self._access_port(device),
+                "source": "server_listener",
+            },
+        )
+
     def _telemetry(self, device_id: str) -> None:
         device = self._device_auth(device_id)
         if not device:
@@ -720,13 +1402,20 @@ class ApiHandler(BaseHTTPRequestHandler):
         # can be a false positive behind VPN/TUN/proxy routing, so never trust
         # the client value for the public Hermes listener.
         telemetry = dict(telemetry)
-        endpoint_state = endpoint_listener_state(int(device["rdp_port"]))
-        if endpoint_state is None:
+        rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+        live_screen_state = self._access_endpoint_state(device)
+        if rdp_state is None:
             telemetry.pop("endpoint_available", None)
+            telemetry.pop("rdp_endpoint_available", None)
             telemetry["endpoint_source"] = "unknown"
         else:
-            telemetry["endpoint_available"] = endpoint_state
+            telemetry["endpoint_available"] = rdp_state
+            telemetry["rdp_endpoint_available"] = rdp_state
             telemetry["endpoint_source"] = "server_listener"
+        if live_screen_state is None:
+            telemetry.pop("live_screen_endpoint_available", None)
+        else:
+            telemetry["live_screen_endpoint_available"] = live_screen_state
 
         command = self.server.registry.update_telemetry(device_id, telemetry)
         if command and command.get("action") in {"repair", "update"}:
@@ -798,10 +1487,18 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
             return
         self.server.registry.revoke_device(device_id)
-        try:
-            close_tunnel(self.server.config, int(device["rdp_port"]))
-        except Exception as exc:
-            LOG.warning("self-revoke tunnel close failed: %s", exc)
+        for port in (
+            int(device["rdp_port"]),
+            self._access_port(device),
+        ):
+            try:
+                close_tunnel(self.server.config, port)
+            except Exception as exc:
+                LOG.warning(
+                    "self-revoke tunnel close failed port=%s: %s",
+                    port,
+                    exc,
+                )
         self._json(HTTPStatus.OK, {"ok": True})
 
     def _device_certificate_mode(

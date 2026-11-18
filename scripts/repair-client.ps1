@@ -11,6 +11,7 @@ $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
+$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'
 $ClientRefPath = Join-Path $BaseDir 'client-ref.txt'
 $CoreCandidate = Join-Path (
     [IO.Path]::GetTempPath()
@@ -21,6 +22,9 @@ $CertSetupCandidate = Join-Path (
 $SmartRouteSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("BakunityHostSmartRouteRepair-$([Guid]::NewGuid().ToString('N')).ps1")
+$AccessSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityAccessRepair-$([Guid]::NewGuid().ToString('N')).ps1")
 
 function Resolve-RepositorySha {
     param([string]$Ref)
@@ -132,6 +136,8 @@ function Restore-MainSnapshot {
     param(
         [bool]$AgentExisted,
         [string]$BackupAgent,
+        [bool]$AccessHostExisted,
+        [string]$BackupAccessHost,
         [bool]$TaskExisted,
         [string]$TaskXml,
         [string]$TaskState
@@ -152,6 +158,19 @@ function Restore-MainSnapshot {
     else {
         Remove-Item `
             -LiteralPath $AgentPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
+
+    if ($AccessHostExisted) {
+        Copy-Item `
+            -LiteralPath $BackupAccessHost `
+            -Destination $AccessHostPath `
+            -Force
+    }
+    else {
+        Remove-Item `
+            -LiteralPath $AccessHostPath `
             -Force `
             -ErrorAction SilentlyContinue
     }
@@ -186,6 +205,10 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
+$AccessSetupUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/scripts/setup-access-host.ps1"
+)
 $NativePowerShell = Get-NativePowerShellPath
 
 try {
@@ -197,8 +220,13 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
+    Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $AccessSetupUrl `
+        -OutFile $AccessSetupCandidate
     Assert-PowerShellFile -Path $CoreCandidate
     Assert-PowerShellFile -Path $CertSetupCandidate
+    Assert-PowerShellFile -Path $AccessSetupCandidate
 
     $TaskBefore = Get-ScheduledTask `
         -TaskName $TaskName `
@@ -217,15 +245,23 @@ try {
         $null
     }
     $AgentExistedBefore = Test-Path -LiteralPath $AgentPath
+    $AccessHostExistedBefore = Test-Path -LiteralPath $AccessHostPath
 
     $BackupRoot = Join-Path $BaseDir 'backups\repair-lifecycle'
     $BackupDir = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
     New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
     $BackupAgent = Join-Path $BackupDir 'HermesRdpAgent.ps1'
+    $BackupAccessHost = Join-Path $BackupDir 'BakunityAccessHost.ps1'
     if ($AgentExistedBefore) {
         Copy-Item `
             -LiteralPath $AgentPath `
             -Destination $BackupAgent `
+            -Force
+    }
+    if ($AccessHostExistedBefore) {
+        Copy-Item `
+            -LiteralPath $AccessHostPath `
+            -Destination $BackupAccessHost `
             -Force
     }
     if ($TaskExistedBefore) {
@@ -258,15 +294,50 @@ try {
     }
 
     try {
-        $CertOutput = & $NativePowerShell `
+        $AccessOutput = & $NativePowerShell `
             -NoProfile `
             -ExecutionPolicy Bypass `
-            -File $CertSetupCandidate `
+            -File $AccessSetupCandidate `
             -RepositoryRef $ResolvedSha 2>&1 |
             Out-String
-        $CertExit = $LASTEXITCODE
-        if ($CertExit -ne 0) {
-            throw "Certificate rotation setup failed with code $CertExit. $($CertOutput.Trim())"
+        $AccessExit = $LASTEXITCODE
+        if ($AccessExit -ne 0) {
+            throw "Live Screen setup failed with code $AccessExit. $($AccessOutput.Trim())"
+        }
+
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -eq 'powershell.exe' -and
+                $_.CommandLine -and
+                $_.CommandLine.Contains($AccessHostPath)
+            } |
+            ForEach-Object {
+                Stop-Process `
+                    -Id ([int]$_.ProcessId) `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            }
+
+        $LocalConfig = Get-Content `
+            -LiteralPath (Join-Path $BaseDir 'device.json') `
+            -Raw |
+            ConvertFrom-Json
+        $RdpSupported = $true
+        if ($LocalConfig.PSObject.Properties['rdp_supported']) {
+            $RdpSupported = [bool]$LocalConfig.rdp_supported
+        }
+
+        if ($RdpSupported) {
+            $CertOutput = & $NativePowerShell `
+                -NoProfile `
+                -ExecutionPolicy Bypass `
+                -File $CertSetupCandidate `
+                -RepositoryRef $ResolvedSha 2>&1 |
+                Out-String
+            $CertExit = $LASTEXITCODE
+            if ($CertExit -ne 0) {
+                throw "Certificate rotation setup failed with code $CertExit. $($CertOutput.Trim())"
+            }
         }
     }
     catch {
@@ -277,6 +348,8 @@ try {
             Restore-MainSnapshot `
                 -AgentExisted $AgentExistedBefore `
                 -BackupAgent $BackupAgent `
+                -AccessHostExisted $AccessHostExistedBefore `
+                -BackupAccessHost $BackupAccessHost `
                 -TaskExisted $TaskExistedBefore `
                 -TaskXml $TaskXmlBefore `
                 -TaskState $TaskStateBefore
@@ -313,12 +386,18 @@ try {
     else {
         Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
     }
-    Write-Host 'CertificateRotation: managed'
+    Write-Host 'LiveScreen: managed'
+    if ($RdpSupported) {
+        Write-Host 'CertificateRotation: managed'
+    }
+    else {
+        Write-Host 'CertificateRotation: not-applicable'
+    }
     Write-Host 'CERT-013_REPAIR=PASS' -ForegroundColor Green
 }
 finally {
     Remove-Item `
-        -LiteralPath $CoreCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate `
+        -LiteralPath $CoreCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate, $AccessSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
