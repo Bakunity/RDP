@@ -375,7 +375,24 @@ class ApiHandler(BaseHTTPRequestHandler):
         secret = self.server.config.web_admin_token
         if not secret:
             return None
-        return verify_session(secret, token)
+        try:
+            credentials = read_credentials(
+                self.server.config.web_admin_credentials_file
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        if credentials is None:
+            return None
+        session = verify_session(
+            secret,
+            token,
+            min_issued_at=credentials.updated_at,
+        )
+        if not session:
+            return None
+        if str(session.get("u") or "") != credentials.username:
+            return None
+        return session
 
     def _admin_auth(self) -> bool:
         import secrets
