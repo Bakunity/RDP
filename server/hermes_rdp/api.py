@@ -299,7 +299,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         body = self._read_json()
         self._access_input(device, body)
-        LOG.info(
+        LOG.debug(
             "live screen input device=%s kind=%s",
             device_id,
             str(body.get("kind") or ""),
