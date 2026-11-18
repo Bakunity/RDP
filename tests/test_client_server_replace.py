@@ -137,6 +137,19 @@ class ClientServerReplaceTests(unittest.TestCase):
         old_revoke = wrapper.index("$OldRevoke = Invoke-PinnedRevoke")
         self.assertGreater(rollback, old_revoke)
 
+    def test_interrupted_replace_has_local_recovery_flow(self) -> None:
+        recovery = read_ps("scripts/recover-replace.ps1")
+        for marker in (
+            "HermesRDP.replace.*",
+            "HermesRdpInstallReplace-",
+            "HermesRdpInstallCore-",
+            "Move-Item -LiteralPath $Backup.FullName -Destination $BaseDir",
+            "scripts/repair-client.ps1",
+            "-ExpectedDeviceId $DeviceId",
+            "REPLACE_RECOVERY=PASS",
+        ):
+            self.assertIn(marker, recovery)
+
     def test_old_revoke_failure_does_not_break_new_install(self) -> None:
         wrapper = read_ps("scripts/install-client-replace.ps1")
         self.assertIn("Старый сервер недоступен", wrapper)
