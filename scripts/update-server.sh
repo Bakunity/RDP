@@ -195,6 +195,7 @@ rollback_update() {
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/trusted-rdp-cert-state.json || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/web-admin-token || rollback_ok=0
+  restore_optional_file /etc/hermes-rdp/web-admin-credentials.json || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/autodeploy.enabled || rollback_ok=0
 
   if [[ -s "$BACKUP/var/lib/hermes-rdp/state.sqlite3" ]]; then
@@ -462,6 +463,7 @@ for path in \
   /etc/sudoers.d/hermes-rdp-cert-package \
   /etc/hermes-rdp/trusted-rdp-cert-state.json \
   /etc/hermes-rdp/web-admin-token \
+  /etc/hermes-rdp/web-admin-credentials.json \
   /etc/hermes-rdp/autodeploy.enabled; do
   [[ -e "$path" ]] && cp -a --parents "$path" "$BACKUP/"
 done
