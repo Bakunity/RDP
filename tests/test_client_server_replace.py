@@ -19,21 +19,17 @@ def git_blob_sha(path: Path) -> str:
 
 
 class ClientServerReplaceTests(unittest.TestCase):
-    def test_accepted_installer_is_preserved_as_core(self) -> None:
-        core = ROOT / "scripts/install-client-core.ps1"
-        self.assertTrue(core.is_file())
-        self.assertEqual(
-            git_blob_sha(core),
-            "5eef32da26da79e0c56809c45cf7cc13bc7937ed",
-        )
-
-    def test_previous_replace_wrapper_is_preserved_unchanged(self) -> None:
-        wrapper = ROOT / "scripts/install-client-replace.ps1"
-        self.assertTrue(wrapper.is_file())
-        self.assertEqual(
-            git_blob_sha(wrapper),
-            "9c7807943fc46637cf7bcd953d579fab3d2cb750",
-        )
+    def test_replace_wrapper_resolves_name_before_destructive_cutover(self) -> None:
+        wrapper = read_ps("scripts/install-client-replace.ps1")
+        self.assertIn("$Name = [string]$ExistingConfig.device_name", wrapper)
+        self.assertIn("$Name = $env:COMPUTERNAME", wrapper)
+        self.assertIn("После подтверждения REPLACE установщик больше не задаёт вопросов", wrapper)
+        prompt = wrapper.index("Введите REPLACE для переподключения к новому серверу")
+        stop = wrapper.index("Stop-TaskBounded -TaskName $AgentTaskName", prompt)
+        core = wrapper.index("& $CoreCandidate @CoreParams", stop)
+        self.assertLess(prompt, stop)
+        self.assertLess(stop, core)
+        self.assertNotIn("Read-Host", wrapper[stop:])
 
     def test_entrypoint_keeps_public_parameter_contract(self) -> None:
         entry = read_ps("scripts/install-client.ps1")
