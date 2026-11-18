@@ -293,6 +293,22 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("$Target.local_port", launcher)
         self.assertIn("Write-ManagedHosts -Mappings $Mappings", worker)
 
+    def test_connector_fails_open_if_local_proxy_is_unavailable(self) -> None:
+        worker = (
+            ROOT / "client/BakunitySmartRoute.ps1"
+        ).read_text(encoding="utf-8-sig")
+        for marker in (
+            "function Test-LocalProxy",
+            "$ActiveMappings = @(",
+            "Write-ManagedHosts -Mappings $AppliedMappings",
+            "Write-ManagedHosts -Mappings @()",
+            "FAIL_OPEN=PUBLIC_DNS",
+            "Smart Route local proxy verification failed",
+        ):
+            self.assertIn(marker, worker)
+        self.assertIn("[bool]$_.enabled", worker)
+        self.assertIn("[int]$_.target_port -gt 0", worker)
+
     def test_host_companion_is_separate_from_primary_agent(self) -> None:
         host = (
             ROOT / "client/BakunityHostSmartRoute.ps1"
