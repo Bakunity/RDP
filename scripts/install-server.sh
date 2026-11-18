@@ -17,7 +17,7 @@ SSH_USER="hermes-tunnel"
 usage() {
   cat <<'EOF'
 Usage:
-  install-server.sh --host HOST --telegram-token TOKEN --telegram-chat-id ID [options]
+  install-server.sh --host HOST [--telegram-token TOKEN --telegram-chat-id ID] [options]
 
 Options:
   --api-port PORT       HTTPS API port (default: 7443)
@@ -50,9 +50,15 @@ if [[ ${EUID} -ne 0 ]]; then
   echo "Run as root or through sudo." >&2
   exit 1
 fi
-if [[ -z "$HOST" || -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+if [[ -z "$HOST" ]]; then
   usage >&2
   exit 2
+fi
+if [[ -n "$TELEGRAM_TOKEN" || -n "$TELEGRAM_CHAT_ID" ]]; then
+  if [[ -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+    echo "telegram-token and telegram-chat-id must be provided together." >&2
+    exit 2
+  fi
 fi
 if ! [[ "$API_PORT" =~ ^[0-9]+$ && "$SSH_PORT" =~ ^[0-9]+$ && "$PORT_START" =~ ^[0-9]+$ && "$PORT_END" =~ ^[0-9]+$ ]]; then
   echo "Ports must be integers." >&2
@@ -196,9 +202,19 @@ install -d -m 0750 -o root -g hermes-rdp /etc/hermes-rdp
 install -d -m 0750 -o root -g hermes-rdp /etc/hermes-rdp/tls
 install -d -m 0750 -o hermes-rdp -g hermes-rdp /var/lib/hermes-rdp
 
-printf '%s\n' "$TELEGRAM_TOKEN" > /etc/hermes-rdp/telegram-token
+if [[ -n "$TELEGRAM_TOKEN" ]]; then
+  printf '%s\n' "$TELEGRAM_TOKEN" > /etc/hermes-rdp/telegram-token
+else
+  : > /etc/hermes-rdp/telegram-token
+fi
 chmod 0640 /etc/hermes-rdp/telegram-token
 chown root:hermes-rdp /etc/hermes-rdp/telegram-token
+
+if [[ ! -s /etc/hermes-rdp/web-admin-token ]]; then
+  openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token
+fi
+chmod 0640 /etc/hermes-rdp/web-admin-token
+chown root:hermes-rdp /etc/hermes-rdp/web-admin-token
 
 API_TLS_DIR=/etc/hermes-rdp/tls
 if [[ ! -s "$API_TLS_DIR/api.key" || ! -s "$API_TLS_DIR/api.crt" ]]; then
@@ -250,6 +266,7 @@ cat > /etc/hermes-rdp/config.json <<EOF
   "port_start": $PORT_START,
   "port_end": $PORT_END,
   "telegram_chat_id": "$TELEGRAM_CHAT_ID",
+  "web_admin_token_file": "/etc/hermes-rdp/web-admin-token",
   "ssh_host_key_file": "/etc/hermes-rdp/ssh-host-key.pub",
   "close_tunnel_helper": "/usr/local/sbin/hermes-rdp-close-tunnel",
   "client_installer_url": "https://raw.githubusercontent.com/$REPO/$REF/scripts/install-client.ps1",
@@ -416,6 +433,8 @@ echo "ssh_tunnel_port=$SSH_PORT"
 echo "rdp_ports=$PORT_START-$PORT_END"
 echo "ssh_tunnel=$(systemctl is-active hermes-rdp-sshd.service)"
 echo "controller=$(systemctl is-active hermes-rdp.service)"
+echo "web_ui=https://$HOST:$API_PORT/admin/"
+echo "web_admin_token=$(cat /etc/hermes-rdp/web-admin-token)"
 if ((TRUSTED_RDP_CERT == 1)); then
   echo "trusted_rdp_certificate=$(systemctl is-active hermes-rdp-cert-renew.timer)"
 fi
