@@ -116,9 +116,13 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
             self.assertIn(wrapper, text)
             self.assertIn(f"restore_optional_file {wrapper}", text)
             self.assertIn(f"{wrapper} doctor >/dev/null", text)
-        self.assertGreaterEqual(
-            text.count("export PYTHONPATH=/opt/hermes-rdp/app"),
-            2,
+        self.assertIn(
+            "export PYTHONPATH=/opt/hermes-rdp/app",
+            text,
+        )
+        self.assertIn(
+            'exec /usr/local/bin/hermes-rdpctl "$@"',
+            text,
         )
 
     def test_update_server_migrates_and_preserves_web_admin_token(self) -> None:
