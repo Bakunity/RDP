@@ -48,6 +48,8 @@ DEVICE_CERT_PACKAGE_HELPER = "/usr/local/sbin/hermes-rdp-device-cert-package"
 CERT_PACKAGE_TIMEOUT_SECONDS = 30
 DEVICE_CERT_TIMEOUT_SECONDS = 25
 CERT_STATE_FILE = Path("/etc/hermes-rdp/trusted-rdp-cert-state.json")
+AUTODEPLOY_MARKER = Path("/etc/hermes-rdp/autodeploy.enabled")
+AUTODEPLOY_STATUS_FILE = Path("/var/lib/hermes-rdp/autodeploy-status.json")
 
 
 def parse_helper_json(text: str) -> dict[str, Any]:
@@ -362,6 +364,84 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    @staticmethod
+    def _autodeploy_status() -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if AUTODEPLOY_STATUS_FILE.is_file():
+            try:
+                raw = json.loads(
+                    AUTODEPLOY_STATUS_FILE.read_text(encoding="utf-8")
+                )
+                if isinstance(raw, dict):
+                    payload = raw
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+        return {
+            "enabled": AUTODEPLOY_MARKER.exists(),
+            "state": str(payload.get("state") or "unknown"),
+            "ref": str(payload.get("ref") or ""),
+            "target_sha": str(payload.get("target_sha") or ""),
+            "detail": str(payload.get("detail") or ""),
+            "updated_at": int(payload.get("updated_at") or 0),
+        }
+
+    def _admin_autodeploy(self) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        body = self._read_json()
+        enabled = bool(body.get("enabled"))
+        if enabled:
+            AUTODEPLOY_MARKER.touch(exist_ok=True)
+            AUTODEPLOY_MARKER.chmod(0o644)
+            command = [
+                "systemctl",
+                "enable",
+                "--now",
+                "hermes-rdp-autodeploy.timer",
+            ]
+        else:
+            AUTODEPLOY_MARKER.unlink(missing_ok=True)
+            command = [
+                "systemctl",
+                "disable",
+                "--now",
+                "hermes-rdp-autodeploy.timer",
+            ]
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or "systemctl failed"
+            )
+            self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                {"ok": False, "error": detail[:500]},
+            )
+            return
+        if enabled:
+            subprocess.run(
+                ["systemctl", "start", "hermes-rdp-autodeploy.service"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        self._json(
+            HTTPStatus.OK,
+            {"ok": True, "autodeploy": self._autodeploy_status()},
+        )
+
     def _admin_state(self) -> None:
         if not self._admin_auth():
             self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
@@ -468,6 +548,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "smart_route_control_url": mesh_control_url(self.server.registry),
                     "native_transport_enabled": native_transport_enabled(self.server.registry),
                     "native_transport_relay_addr": native_transport_relay_addr(self.server.registry),
+                    "autodeploy": self._autodeploy_status(),
                 },
                 "devices": devices,
             },
@@ -521,7 +602,10 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
-            if path == "/v1/admin/pair":
+            if path == "/v1/admin/autodeploy":
+            self._admin_autodeploy()
+            return
+        if path == "/v1/admin/pair":
                 if not self._admin_auth():
                     self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
                     return
