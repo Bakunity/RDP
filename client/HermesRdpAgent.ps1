@@ -1159,15 +1159,22 @@ function Get-SlowTelemetry {
     $CertificateHealth = Get-CertificateLifecycleHealth
     $MaintenanceStatus = Get-MaintenanceStatus
     $ClientRepositoryRef = Get-ClientRepositoryRef
+    $WindowsEdition = ''
+    try {
+        $WindowsEdition = [string](
+            Get-ItemProperty `
+                'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+        ).EditionID
+    }
+    catch {
+        $WindowsEdition = ''
+    }
 
     return [ordered]@{
         resource_captured_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         computer_name = $env:COMPUTERNAME
         os = $Os.Caption
-        windows_edition = try {
-            [string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').EditionID
-        }
-        catch { '' }
+        windows_edition = $WindowsEdition
         rdp_supported = [bool](Test-RdpHostSupported)
         live_screen_capable = [bool](Test-Path -LiteralPath $AccessHostPath)
         live_screen_running = [bool](Test-AccessHostReady)
