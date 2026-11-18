@@ -369,8 +369,9 @@ function Wait-HermesEndpointReady {
         Start-Sleep -Seconds 1
     }
 
+    $ExpectedMode = if ($RequireRdp) { 'RDP' } else { 'Live Screen' }
     throw (
-        "Новый публичный RDP endpoint $Port не подтверждён сервером за " +
+        "Новый $ExpectedMode endpoint не подтверждён сервером за " +
         "$TimeoutSeconds сек. $LastDetail"
     )
 }
