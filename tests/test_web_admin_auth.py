@@ -137,7 +137,8 @@ class WebAdminAuthTests(unittest.TestCase):
         )
         for marker in (
             'sub.add_parser("admin"',
-            'admin_sub.add_parser("password"',
+            "admin_password = admin_sub.add_parser(",
+            '"password",',
             '"--generate"',
             'getpass.getpass("Новый пароль Web Admin: ")',
             "write_credentials(",
