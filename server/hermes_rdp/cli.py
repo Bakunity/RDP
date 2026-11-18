@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import grp
 import ipaddress
+import os
 import json
 import secrets
 import socket
@@ -12,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from .config import load_config
+from .auth import generate_password, read_credentials, write_credentials
 from .db import Registry
 from .device_certificates import ensure_device_certificate_target, set_device_slug_with_certificate
 from .tunnel import close_tunnel, endpoint_listener_state
@@ -128,6 +132,20 @@ def build_parser() -> argparse.ArgumentParser:
     default_rdp_sub.add_parser("show")
     default_rdp_sub.add_parser("clear")
 
+    admin = sub.add_parser("admin", help="manage Web Admin login")
+    admin_sub = admin.add_subparsers(dest="admin_command", required=True)
+    admin_password = admin_sub.add_parser(
+        "password",
+        help="set or generate the Web Admin password",
+    )
+    admin_password.add_argument("--username", default="admin")
+    admin_password.add_argument(
+        "--generate",
+        action="store_true",
+        help="generate a strong password and print it once",
+    )
+    admin_sub.add_parser("status")
+
     dashboard = sub.add_parser("dashboard")
     dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
     dashboard_sub.add_parser("reset")
@@ -185,6 +203,49 @@ def main() -> None:
         config.port_end,
         config.command_timeout_seconds,
     )
+
+    if args.command == "admin":
+        credentials_path = config.web_admin_credentials_file
+
+        if args.admin_command == "status":
+            credentials = read_credentials(credentials_path)
+            print(
+                "ADMIN_AUTH="
+                + ("configured" if credentials is not None else "not-configured")
+            )
+            if credentials is not None:
+                print(f"USERNAME={credentials.username}")
+            return
+
+        if args.admin_command == "password":
+            username = str(args.username or "admin").strip() or "admin"
+            if args.generate:
+                password = generate_password()
+            else:
+                first = getpass.getpass("Новый пароль Web Admin: ")
+                second = getpass.getpass("Повтори пароль: ")
+                if first != second:
+                    raise SystemExit("пароли не совпадают")
+                password = first
+
+            write_credentials(
+                credentials_path,
+                username=username,
+                password=password,
+            )
+            try:
+                group = grp.getgrnam("hermes-rdp")
+                os.chown(credentials_path, 0, group.gr_gid)
+                os.chmod(credentials_path, 0o640)
+            except KeyError:
+                os.chmod(credentials_path, 0o600)
+
+            print("ADMIN_AUTH=PASS")
+            print(f"USERNAME={username}")
+            if args.generate:
+                print(f"PASSWORD={password}")
+                print("NOTE=Сохрани пароль: повторно он не показывается.")
+            return
 
     if args.command == "pair" and args.pair_command == "create":
         code = registry.create_pair_code(
