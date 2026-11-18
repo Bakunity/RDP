@@ -324,6 +324,44 @@ function Wait-HermesTunnelReady {
     )
 }
 
+function Wait-HermesEndpointReady {
+    param(
+        [System.Net.Http.HttpClient]$Client,
+        [string]$ApiBase,
+        [string]$DeviceId,
+        [string]$Token,
+        [int]$Port,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $LastDetail = 'endpoint state was not observed'
+    while ([DateTime]::UtcNow -lt $Deadline) {
+        try {
+            $Status = Invoke-PinnedPost `
+                -Client $Client `
+                -Url "$ApiBase/v1/devices/$DeviceId/endpoint-status" `
+                -Token $Token `
+                -Body @{}
+            if ($Status -and $Status.endpoint_available -eq $true) {
+                return
+            }
+            if ($Status -and $Status.PSObject.Properties['endpoint_available']) {
+                $LastDetail = "server endpoint_available=$($Status.endpoint_available)"
+            }
+        }
+        catch {
+            $LastDetail = $_.Exception.Message
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw (
+        "Новый публичный RDP endpoint $Port не подтверждён сервером за " +
+        "$TimeoutSeconds сек. $LastDetail"
+    )
+}
+
 function Restore-InstallSnapshot {
     param(
         [string]$BasePath,
@@ -767,6 +805,14 @@ try {
         -KeyPath $SshKeyPath `
         -TimeoutSeconds $StartupTimeoutSeconds `
         -StableSeconds $StartupStableSeconds
+
+    Wait-HermesEndpointReady `
+        -Client $Http `
+        -ApiBase $ApiBase `
+        -DeviceId ([string]$Pair.device.id) `
+        -Token ([string]$Pair.device.token) `
+        -Port ([int]$Pair.device.rdp_port) `
+        -TimeoutSeconds 30
 
     Invoke-CertificateRotationSetup `
         -SetupPath $CertSetupCandidate `
