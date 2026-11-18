@@ -131,7 +131,16 @@ class BakunityAccessTests(unittest.TestCase):
             self.assertIn("LiveScreen", text)
         self.assertIn("$AccessHostExistedBefore", update)
         self.assertIn("$BackupAccessHost", update)
+        self.assertIn("$AccessHostExistedBefore", repair)
+        self.assertIn("$BackupAccessHost", repair)
+        self.assertIn("Stop-Process", repair)
         self.assertIn("$RdpSupported", repair_core)
+
+        replace = (ROOT / "scripts/install-client-replace.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("function Stop-HermesProcesses", replace)
+        self.assertIn("$_.CommandLine.Contains($BaseDir)", replace)
 
     def test_server_update_versions_access_bundle_and_close_helper(self) -> None:
         update = (ROOT / "scripts/update-server.sh").read_text(
