@@ -393,26 +393,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
         body = self._read_json()
-        enabled = bool(body.get("enabled"))
-        if enabled:
-            AUTODEPLOY_MARKER.touch(exist_ok=True)
-            AUTODEPLOY_MARKER.chmod(0o644)
-            command = [
-                "systemctl",
-                "enable",
-                "--now",
-                "hermes-rdp-autodeploy.timer",
-            ]
-        else:
-            AUTODEPLOY_MARKER.unlink(missing_ok=True)
-            command = [
-                "systemctl",
-                "disable",
-                "--now",
-                "hermes-rdp-autodeploy.timer",
-            ]
+        action = "on" if bool(body.get("enabled")) else "off"
         result = subprocess.run(
-            command,
+            [
+                "sudo",
+                "-n",
+                "/usr/local/sbin/hermes-rdp-autodeploy-control",
+                action,
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -422,21 +410,13 @@ class ApiHandler(BaseHTTPRequestHandler):
             detail = (
                 result.stderr.strip()
                 or result.stdout.strip()
-                or "systemctl failed"
+                or "autodeploy control failed"
             )
             self._json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"ok": False, "error": detail[:500]},
             )
             return
-        if enabled:
-            subprocess.run(
-                ["systemctl", "start", "hermes-rdp-autodeploy.service"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
         self._json(
             HTTPStatus.OK,
             {"ok": True, "autodeploy": self._autodeploy_status()},
