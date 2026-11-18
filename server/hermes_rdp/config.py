@@ -26,6 +26,7 @@ class Config:
     ssh_host_key_file: Path
     client_installer_url: str
     repository_ref: str
+    repository_requested_ref: str
     close_tunnel_helper: Path
     web_admin_token_file: Path = Path("/etc/hermes-rdp/web-admin-token")
     client_repository_ref: str = ""
@@ -117,6 +118,12 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
             )
         ),
         repository_ref=str(data.get("repository_ref", "main")),
+        repository_requested_ref=str(
+            data.get(
+                "repository_requested_ref",
+                data.get("repository_ref", "main"),
+            )
+        ),
         close_tunnel_helper=Path(
             data.get(
                 "close_tunnel_helper",
