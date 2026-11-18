@@ -417,6 +417,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if action == "telemetry":
                     self._telemetry(device_id)
                     return
+                if action == "endpoint-status":
+                    self._endpoint_status(device_id)
+                    return
                 if action == "command-result":
                     self._command_result(device_id)
                     return
@@ -888,6 +891,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "host_key": ssh_host_key,
                     "remote_bind": "0.0.0.0",
                 },
+            },
+        )
+
+    def _endpoint_status(self, device_id: str) -> None:
+        device = self._device_auth(device_id)
+        if not device:
+            self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+            return
+        self._read_json()
+        state = endpoint_listener_state(int(device["rdp_port"]))
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "endpoint_available": state,
+                "rdp_port": int(device["rdp_port"]),
+                "source": "server_listener" if state is not None else "unknown",
             },
         )
 
