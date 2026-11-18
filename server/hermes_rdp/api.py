@@ -181,6 +181,23 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _access_port(device: dict[str, Any]) -> int:
         return int(device["rdp_port"]) + 1000
 
+    def _access_endpoint_state(
+        self,
+        device: dict[str, Any],
+    ) -> bool | None:
+        port = self._access_port(device)
+        listener = endpoint_listener_state(port)
+        if listener is not True:
+            return listener
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.5) as sock:
+                sock.settimeout(1.5)
+                sock.sendall(b"PING\n")
+                response = self._read_access_frame(sock, max_size=64 * 1024)
+            return response == b"OK"
+        except (OSError, TimeoutError, ConnectionError, ValueError):
+            return False
+
     @staticmethod
     def _read_access_frame(
         sock: socket.socket,
@@ -262,7 +279,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 {"ok": False, "error": "device not found"},
             )
             return
-        if endpoint_listener_state(self._access_port(device)) is not True:
+        if self._access_endpoint_state(device) is not True:
             self._json(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {"ok": False, "error": "live screen is unavailable"},
@@ -291,7 +308,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 {"ok": False, "error": "device not found"},
             )
             return
-        if endpoint_listener_state(self._access_port(device)) is not True:
+        if self._access_endpoint_state(device) is not True:
             self._json(
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {"ok": False, "error": "live screen is unavailable"},
@@ -362,9 +379,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
             telemetry = device.get("telemetry") or {}
             rdp_state = endpoint_listener_state(int(device["rdp_port"]))
-            live_screen_state = endpoint_listener_state(
-                self._access_port(device)
-            )
+            live_screen_state = self._access_endpoint_state(device)
             smart = get_host_smart_route(self.server.registry, str(device["id"]))
             native = get_native_transport_host(self.server.registry, str(device["id"]))
             sessions = telemetry.get("sessions") or []
@@ -1105,9 +1120,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         self._read_json()
         rdp_state = endpoint_listener_state(int(device["rdp_port"]))
-        live_screen_state = endpoint_listener_state(
-            self._access_port(device)
-        )
+        live_screen_state = self._access_endpoint_state(device)
         self._json(
             HTTPStatus.OK,
             {
@@ -1144,9 +1157,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         # the client value for the public Hermes listener.
         telemetry = dict(telemetry)
         rdp_state = endpoint_listener_state(int(device["rdp_port"]))
-        live_screen_state = endpoint_listener_state(
-            self._access_port(device)
-        )
+        live_screen_state = self._access_endpoint_state(device)
         if rdp_state is None:
             telemetry.pop("endpoint_available", None)
             telemetry.pop("rdp_endpoint_available", None)
