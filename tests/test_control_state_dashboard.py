@@ -13,7 +13,10 @@ class ControlStateDashboardTests(unittest.TestCase):
         web = (ROOT / "server/hermes_rdp/admin_web.py").read_text(encoding="utf-8")
         for marker in (
             "rdp_state = endpoint_listener_state",
-            "live_screen_state = endpoint_listener_state",
+            "live_screen_state = self._access_endpoint_state(device)",
+            "def _access_endpoint_state(",
+            'sock.sendall(b"PING\\n")',
+            'return response == b"OK"',
             '"rdp_endpoint_available": rdp_state',
             '"live_screen_endpoint_available": live_screen_state',
             'display_name=name',
