@@ -12,6 +12,8 @@ $MaintenanceStatusPath = Join-Path $BaseDir 'maintenance-status.json'
 $MaintenanceActivePath = Join-Path $BaseDir 'maintenance-active.json'
 $MaintenanceTaskName = 'Hermes RDP Maintenance'
 $CertificateSyncPath = Join-Path $BaseDir 'sync-rdp-certificate.ps1'
+$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'
+$AccessHostPort = 48400
 $AutoMaintenanceRetrySeconds = 3600
 $CertificateTargetRetrySeconds = 60
 $PollSeconds = 3
@@ -91,6 +93,149 @@ if (-not ('HermesRdp.AgentPinnedHttpClientFactory' -as [type])) {
         -TypeDefinition $PinnedHttpClientSource `
         -Language CSharp `
         -ReferencedAssemblies 'System.Net.Http.dll'
+}
+
+
+$AccessLauncherSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace HermesRdp
+{
+    public static class InteractiveProcessLauncher
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct STARTUPINFO
+        {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars;
+            public int dwFillAttribute;
+            public int dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput, hStdOutput, hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
+
+        [DllImport("kernel32.dll")]
+        static extern uint WTSGetActiveConsoleSessionId();
+
+        [DllImport("wtsapi32.dll", SetLastError=true)]
+        static extern bool WTSQueryUserToken(uint sessionId, out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError=true)]
+        static extern bool DuplicateTokenEx(
+            IntPtr existingToken,
+            uint desiredAccess,
+            IntPtr tokenAttributes,
+            int impersonationLevel,
+            int tokenType,
+            out IntPtr primaryToken);
+
+        [DllImport("userenv.dll", SetLastError=true)]
+        static extern bool CreateEnvironmentBlock(
+            out IntPtr environment,
+            IntPtr token,
+            bool inherit);
+
+        [DllImport("userenv.dll")]
+        static extern bool DestroyEnvironmentBlock(IntPtr environment);
+
+        [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+        static extern bool CreateProcessAsUser(
+            IntPtr token,
+            string applicationName,
+            string commandLine,
+            IntPtr processAttributes,
+            IntPtr threadAttributes,
+            bool inheritHandles,
+            uint creationFlags,
+            IntPtr environment,
+            string currentDirectory,
+            ref STARTUPINFO startupInfo,
+            out PROCESS_INFORMATION processInformation);
+
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr handle);
+
+        const uint MAXIMUM_ALLOWED = 0x02000000;
+        const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
+        const uint CREATE_NO_WINDOW = 0x08000000;
+
+        public static int Start(string application, string arguments, string workingDirectory)
+        {
+            uint sessionId = WTSGetActiveConsoleSessionId();
+            if (sessionId == 0xFFFFFFFF) return 0;
+
+            IntPtr userToken = IntPtr.Zero;
+            IntPtr primaryToken = IntPtr.Zero;
+            IntPtr environment = IntPtr.Zero;
+            PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+            try
+            {
+                if (!WTSQueryUserToken(sessionId, out userToken))
+                    return 0;
+                if (!DuplicateTokenEx(
+                    userToken,
+                    MAXIMUM_ALLOWED,
+                    IntPtr.Zero,
+                    2,
+                    1,
+                    out primaryToken))
+                    return 0;
+
+                CreateEnvironmentBlock(out environment, primaryToken, false);
+
+                var si = new STARTUPINFO();
+                si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                si.lpDesktop = "winsta0\\default";
+                string command = "\"" + application + "\" " + arguments;
+
+                bool ok = CreateProcessAsUser(
+                    primaryToken,
+                    null,
+                    command,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    false,
+                    CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
+                    environment,
+                    workingDirectory,
+                    ref si,
+                    out pi);
+                if (!ok) return 0;
+                return pi.dwProcessId;
+            }
+            finally
+            {
+                if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+                if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
+                if (environment != IntPtr.Zero) DestroyEnvironmentBlock(environment);
+                if (primaryToken != IntPtr.Zero) CloseHandle(primaryToken);
+                if (userToken != IntPtr.Zero) CloseHandle(userToken);
+            }
+        }
+    }
+}
+'@
+
+if (-not ('HermesRdp.InteractiveProcessLauncher' -as [type])) {
+    Add-Type `
+        -TypeDefinition $AccessLauncherSource `
+        -Language CSharp `
+        -ReferencedAssemblies 'userenv.dll'
 }
 
 function Write-AgentLog {
@@ -453,6 +598,83 @@ function Invoke-ApiPost {
     }
 }
 
+function Get-AccessHostProcesses {
+    if (-not (Test-Path -LiteralPath $AccessHostPath)) {
+        return @()
+    }
+    return @(
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and $_.CommandLine.Contains($AccessHostPath)
+            }
+    )
+}
+
+function Test-AccessHostReady {
+    $Client = New-Object Net.Sockets.TcpClient
+    try {
+        $Async = $Client.BeginConnect('127.0.0.1', $AccessHostPort, $null, $null)
+        if (-not $Async.AsyncWaitHandle.WaitOne(500, $false)) {
+            return $false
+        }
+        $Client.EndConnect($Async)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $Client.Dispose()
+    }
+}
+
+function Ensure-AccessHost {
+    if (-not (Test-Path -LiteralPath $AccessHostPath)) {
+        return $false
+    }
+    if (Test-AccessHostReady) {
+        return $true
+    }
+
+    foreach ($Process in @(Get-AccessHostProcesses)) {
+        Stop-Process -Id ([int]$Process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+
+    $PowerShellPath = Get-NativePowerShellPath
+    $Args = (
+        '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+        $AccessHostPath + '" -Port ' + $AccessHostPort
+    )
+    $PidValue = [HermesRdp.InteractiveProcessLauncher]::Start(
+        $PowerShellPath,
+        $Args,
+        $BaseDir
+    )
+    if ($PidValue -le 0) {
+        return $false
+    }
+
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 150
+        if (Test-AccessHostReady) {
+            Write-AgentLog "Live Screen host started in interactive session: PID=$PidValue"
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-RdpHostSupported {
+    if ($Config.PSObject.Properties['rdp_supported']) {
+        return [bool]$Config.rdp_supported
+    }
+    return $true
+}
+
+function Get-AccessServerPort {
+    return ([int]$Config.rdp_port + 1000)
+}
+
 function Get-SshProcesses {
     param([switch]$ForceRefresh)
 
@@ -537,8 +759,16 @@ function Start-SshTunnel {
         'GlobalKnownHostsFile=NUL'
         '-o'
         'LogLevel=ERROR'
+    )
+    if (Test-RdpHostSupported) {
+        $Arguments += @(
+            '-R'
+            "0.0.0.0:$($Config.rdp_port):127.0.0.1:3389"
+        )
+    }
+    $Arguments += @(
         '-R'
-        "0.0.0.0:$($Config.rdp_port):127.0.0.1:3389"
+        "127.0.0.1:$(Get-AccessServerPort):127.0.0.1:$AccessHostPort"
         "$($Config.ssh_user)@$($Config.server)"
     )
 
@@ -935,6 +1165,13 @@ function Get-SlowTelemetry {
         resource_captured_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
         computer_name = $env:COMPUTERNAME
         os = $Os.Caption
+        windows_edition = try {
+            [string](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').EditionID
+        }
+        catch { '' }
+        rdp_supported = [bool](Test-RdpHostSupported)
+        live_screen_capable = [bool](Test-Path -LiteralPath $AccessHostPath)
+        live_screen_running = [bool](Test-AccessHostReady)
         interactive_user = Get-InteractiveUser -Sessions $Sessions
         sessions = $Sessions
         cpu_percent = Get-CpuPercent
@@ -1002,6 +1239,10 @@ function Get-Telemetry {
         resource_captured_at = [int64]$Slow.resource_captured_at
         computer_name = $Slow.computer_name
         os = $Slow.os
+        windows_edition = [string]$Slow.windows_edition
+        rdp_supported = [bool]$Slow.rdp_supported
+        live_screen_capable = [bool]$Slow.live_screen_capable
+        live_screen_running = [bool]$Slow.live_screen_running
         interactive_user = $Slow.interactive_user
         sessions = @($Slow.sessions)
         cpu_percent = $Slow.cpu_percent
@@ -1351,6 +1592,16 @@ while ($true) {
     }
     catch {
         Write-AgentLog "Control poll error: $($_.Exception.Message)"
+    }
+
+    try {
+        $AccessReady = Ensure-AccessHost
+        if (-not $AccessReady -and (Get-CimInstance Win32_ComputerSystem).UserName) {
+            Write-AgentLog 'Live Screen host is not ready in the interactive session'
+        }
+    }
+    catch {
+        Write-AgentLog "Live Screen reconcile error: $($_.Exception.Message)"
     }
 
     # Transport recovery is intentionally isolated from the control poll.
