@@ -38,6 +38,7 @@ class OpenSshArchitectureTests(unittest.TestCase):
             "StrictHostKeyChecking=yes",
             "UserKnownHostsFile=",
             "0.0.0.0:$($Config.rdp_port):127.0.0.1:3389",
+            "127.0.0.1:$(Get-AccessServerPort):127.0.0.1:$AccessHostPort",
             "ssh_tunnel_running",
         ):
             self.assertIn(value, text)
@@ -65,6 +66,8 @@ class OpenSshArchitectureTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('permitlisten="0.0.0.0:{port}"', auth)
+        self.assertIn('permitlisten="127.0.0.1:{access_port}"', auth)
+        self.assertIn("access_port = port + 1000", auth)
         self.assertIn("no-agent-forwarding", auth)
         self.assertIn("no-pty", auth)
 
