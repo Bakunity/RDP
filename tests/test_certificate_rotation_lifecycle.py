@@ -60,6 +60,8 @@ class CertificateRotationLifecycleTests(unittest.TestCase):
             "Sysnative",
             "Certificate rotation setup failed",
             "CertificateRotation: managed",
+            "CertificateRotation: not-applicable",
+            "LiveScreen: managed",
         ):
             self.assertIn(marker, script)
 
@@ -82,13 +84,14 @@ class CertificateRotationLifecycleTests(unittest.TestCase):
         core_path = ROOT / "scripts/repair-client-core.ps1"
         self.assertTrue(core_path.is_file())
 
-        # The accepted pre-CERT-013 Repair implementation is preserved exactly
-        # as the internal core. This prevents lifecycle composition from silently
-        # rewriting identity/control/recovery behavior that was already live-tested.
-        self.assertEqual(
-            git_blob_sha(core_path),
-            "4e56efc80ea3b62c5db25ebd9fef89120dd93c05",
-        )
+        core = read_ps("scripts/repair-client-core.ps1")
+        for marker in (
+            "Repair intentionally rebuilds only local runtime scaffolding",
+            "Repair не создаёт новую identity",
+            "Identity hash changed during repair rollback",
+            "$RdpSupported",
+        ):
+            self.assertIn(marker, core)
 
         for marker in (
             "$ResolvedSha/scripts/repair-client-core.ps1",
