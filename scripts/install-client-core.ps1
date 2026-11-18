@@ -21,6 +21,7 @@ Add-Type -AssemblyName System.Net.Http
 $Repo = 'bakunity/RDP'
 $BaseDir = 'C:\ProgramData\HermesRDP'
 $TaskName = 'Hermes RDP Agent'
+$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'
 $ApiBase = "https://${Server}:${ApiPort}"
 $StartupTimeoutSeconds = 75
 $StartupStableSeconds = 20
@@ -241,7 +242,9 @@ function Stop-HermesProcesses {
             ($_.Name -eq 'ssh.exe' -and $_.CommandLine -and
                 $_.CommandLine.Contains('HermesRDP')) -or
             ($_.CommandLine -and
-                $_.CommandLine.Contains('HermesRdpAgent.ps1'))
+                $_.CommandLine.Contains('HermesRdpAgent.ps1')) -or
+            ($_.CommandLine -and
+                $_.CommandLine.Contains($AccessHostPath))
         } |
         ForEach-Object {
             Stop-Process `
