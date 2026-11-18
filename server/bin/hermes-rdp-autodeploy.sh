@@ -95,14 +95,19 @@ if [[ "$TARGET_SHA" == "$CURRENT_SHA" ]]; then
   exit 0
 fi
 
+CI_JSON="$WORK/ci-runs.json"
+curl -fsSL \
+  -H 'Accept: application/vnd.github+json' \
+  "https://api.github.com/repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=20" \
+  -o "$CI_JSON"
 CI_RESULT="$(
-  curl -fsSL     -H 'Accept: application/vnd.github+json'     "https://api.github.com/repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=20" |
-  python3 - "$TARGET_SHA" <<'PY'
+  python3 - "$CI_JSON" "$TARGET_SHA" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-target = sys.argv[1].lower()
-payload = json.load(sys.stdin)
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+target = sys.argv[2].lower()
 runs = [
     run
     for run in payload.get("workflow_runs", [])
@@ -119,7 +124,6 @@ else:
     print("missing")
 PY
 )"
-
 case "$CI_RESULT" in
   success)
     ;;
