@@ -75,6 +75,73 @@ try {
         $Client.Dispose()
     }
 
+    $SnapshotClient = New-Object Net.Sockets.TcpClient('127.0.0.1', $Port)
+    try {
+        $SnapshotStream = $SnapshotClient.GetStream()
+        try {
+            $Payload = [Text.Encoding]::ASCII.GetBytes("SNAPSHOT`n")
+            $SnapshotStream.Write($Payload, 0, $Payload.Length)
+
+            function Read-TestFrame {
+                param([System.Net.Sockets.NetworkStream]$Stream)
+                $Header = New-Object byte[] 4
+                $Offset = 0
+                while ($Offset -lt 4) {
+                    $Read = $Stream.Read($Header, $Offset, 4 - $Offset)
+                    if ($Read -le 0) { throw 'Snapshot frame header ended early.' }
+                    $Offset += $Read
+                }
+                if (-not [BitConverter]::IsLittleEndian) {
+                    [Array]::Reverse($Header)
+                }
+                $Length = [BitConverter]::ToInt32($Header, 0)
+                if ($Length -lt 1 -or $Length -gt 16777216) {
+                    throw "Invalid snapshot frame length: $Length"
+                }
+                $Body = New-Object byte[] $Length
+                $Offset = 0
+                while ($Offset -lt $Length) {
+                    $Read = $Stream.Read(
+                        $Body,
+                        $Offset,
+                        $Length - $Offset
+                    )
+                    if ($Read -le 0) { throw 'Snapshot frame body ended early.' }
+                    $Offset += $Read
+                }
+                return $Body
+            }
+
+            $MetaBytes = Read-TestFrame -Stream $SnapshotStream
+            $Meta = (
+                [Text.Encoding]::UTF8.GetString($MetaBytes) |
+                ConvertFrom-Json
+            )
+            if (
+                [int]$Meta.width -le 0 -or
+                [int]$Meta.height -le 0
+            ) {
+                throw 'Snapshot metadata has invalid dimensions.'
+            }
+
+            $Jpeg = Read-TestFrame -Stream $SnapshotStream
+            if (
+                $Jpeg.Length -lt 4 -or
+                $Jpeg[0] -ne 0xFF -or
+                $Jpeg[1] -ne 0xD8
+            ) {
+                throw 'Snapshot payload is not a JPEG image.'
+            }
+        }
+        finally {
+            $SnapshotStream.Dispose()
+        }
+    }
+    finally {
+        $SnapshotClient.Dispose()
+    }
+
+    Write-Host 'LIVE_SCREEN_SNAPSHOT_SMOKE=PASS'
     Write-Host 'LIVE_SCREEN_LOOPBACK_SMOKE=PASS'
 }
 finally {
