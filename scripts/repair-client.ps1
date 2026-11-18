@@ -21,6 +21,9 @@ $CertSetupCandidate = Join-Path (
 $SmartRouteSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("BakunityHostSmartRouteRepair-$([Guid]::NewGuid().ToString('N')).ps1")
+$AccessSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityAccessRepair-$([Guid]::NewGuid().ToString('N')).ps1")
 
 function Resolve-RepositorySha {
     param([string]$Ref)
@@ -186,6 +189,10 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
+$AccessSetupUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/scripts/setup-access-host.ps1"
+)
 $NativePowerShell = Get-NativePowerShellPath
 
 try {
@@ -197,8 +204,13 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
+    Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $AccessSetupUrl `
+        -OutFile $AccessSetupCandidate
     Assert-PowerShellFile -Path $CoreCandidate
     Assert-PowerShellFile -Path $CertSetupCandidate
+    Assert-PowerShellFile -Path $AccessSetupCandidate
 
     $TaskBefore = Get-ScheduledTask `
         -TaskName $TaskName `
@@ -258,15 +270,37 @@ try {
     }
 
     try {
-        $CertOutput = & $NativePowerShell `
+        $AccessOutput = & $NativePowerShell `
             -NoProfile `
             -ExecutionPolicy Bypass `
-            -File $CertSetupCandidate `
+            -File $AccessSetupCandidate `
             -RepositoryRef $ResolvedSha 2>&1 |
             Out-String
-        $CertExit = $LASTEXITCODE
-        if ($CertExit -ne 0) {
-            throw "Certificate rotation setup failed with code $CertExit. $($CertOutput.Trim())"
+        $AccessExit = $LASTEXITCODE
+        if ($AccessExit -ne 0) {
+            throw "Live Screen setup failed with code $AccessExit. $($AccessOutput.Trim())"
+        }
+
+        $LocalConfig = Get-Content `
+            -LiteralPath (Join-Path $BaseDir 'device.json') `
+            -Raw |
+            ConvertFrom-Json
+        $RdpSupported = $true
+        if ($LocalConfig.PSObject.Properties['rdp_supported']) {
+            $RdpSupported = [bool]$LocalConfig.rdp_supported
+        }
+
+        if ($RdpSupported) {
+            $CertOutput = & $NativePowerShell `
+                -NoProfile `
+                -ExecutionPolicy Bypass `
+                -File $CertSetupCandidate `
+                -RepositoryRef $ResolvedSha 2>&1 |
+                Out-String
+            $CertExit = $LASTEXITCODE
+            if ($CertExit -ne 0) {
+                throw "Certificate rotation setup failed with code $CertExit. $($CertOutput.Trim())"
+            }
         }
     }
     catch {
@@ -313,12 +347,13 @@ try {
     else {
         Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
     }
-    Write-Host 'CertificateRotation: managed'
+    Write-Host 'LiveScreen: managed'
+    Write-Host ('CertificateRotation: ' + $(if ($RdpSupported) { 'managed' } else { 'not-applicable' }))
     Write-Host 'CERT-013_REPAIR=PASS' -ForegroundColor Green
 }
 finally {
     Remove-Item `
-        -LiteralPath $CoreCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate `
+        -LiteralPath $CoreCandidate, $CertSetupCandidate, $SmartRouteSetupCandidate, $AccessSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
