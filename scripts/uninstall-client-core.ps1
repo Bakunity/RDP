@@ -11,6 +11,7 @@ $RotationTaskName = 'Hermes RDP Certificate Rotation'
 $AgentPath = Join-Path $BaseDir 'HermesRdpAgent.ps1'
 $RotationPath = Join-Path $BaseDir 'HermesRdpCertRotation.ps1'
 $SyncPath = Join-Path $BaseDir 'sync-rdp-certificate.ps1'
+$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'
 $ConfigPath = Join-Path $BaseDir 'device.json'
 $OriginPath = Join-Path $BaseDir 'rdp-certificate-origin.json'
 $LegacyBackupPath = Join-Path $BaseDir 'rdp-certificate-backup.json'
@@ -175,7 +176,9 @@ function Stop-HermesProcesses {
             ($_.CommandLine -and
                 $_.CommandLine.Contains($RotationPath)) -or
             ($_.CommandLine -and
-                $_.CommandLine.Contains($SyncPath))
+                $_.CommandLine.Contains($SyncPath)) -or
+            ($_.CommandLine -and
+                $_.CommandLine.Contains($AccessHostPath))
         } |
         ForEach-Object {
             Stop-Process `
@@ -307,6 +310,10 @@ function Invoke-PinnedRevoke {
 }
 
 $Config = Read-JsonFile -Path $ConfigPath
+$RdpSupported = $true
+if ($Config -and $Config.PSObject.Properties['rdp_supported']) {
+    $RdpSupported = [bool]$Config.rdp_supported
+}
 $RotationBefore = Get-ScheduledTask `
     -TaskName $RotationTaskName `
     -ErrorAction SilentlyContinue
@@ -321,17 +328,26 @@ $CertificateManaged = (
     (Test-Path -LiteralPath $LegacyBackupPath)
 )
 
-$RdpBefore = Get-RdpSetting
-$HermesThumbprint = Normalize-Thumbprint -Value ([string]$RdpBefore.SSLCertificateSHA1Hash)
-$HermesHashType = [int]$RdpBefore.SSLCertificateSHA1HashType
-$RollbackSnapshot = Get-RdpOriginSnapshot
-$RestoredThumbprint = $HermesThumbprint
-$CertificateRollback = 'NOT_NEEDED'
+$RdpBefore = $null
+$HermesThumbprint = ''
+$HermesHashType = 0
+$RollbackSnapshot = $null
+$RestoredThumbprint = ''
+$CertificateRollback = 'NOT_APPLICABLE'
+
+if ($RdpSupported) {
+    $RdpBefore = Get-RdpSetting
+    $HermesThumbprint = Normalize-Thumbprint -Value ([string]$RdpBefore.SSLCertificateSHA1Hash)
+    $HermesHashType = [int]$RdpBefore.SSLCertificateSHA1HashType
+    $RollbackSnapshot = Get-RdpOriginSnapshot
+    $RestoredThumbprint = $HermesThumbprint
+    $CertificateRollback = 'NOT_NEEDED'
+}
 
 try {
     Stop-TaskBounded -Name $RotationTaskName
 
-    if ($RollbackSnapshot) {
+    if ($RdpSupported -and $RollbackSnapshot) {
         $RestoredThumbprint = Restore-RdpBinding `
             -Thumbprint ([string]$RollbackSnapshot.Thumbprint) `
             -HashType ([int]$RollbackSnapshot.HashType)
@@ -349,7 +365,7 @@ try {
                 Remove-Item -Force -ErrorAction Stop
         }
     }
-    elseif ($CertificateManaged -and $HermesHashType -eq 3) {
+    elseif ($RdpSupported -and $CertificateManaged -and $HermesHashType -eq 3) {
         throw (
             'Hermes trusted RDP certificate активен, но rollback snapshot не найден. ' +
             'Удаление остановлено до отзыва credentials.'
@@ -406,15 +422,19 @@ $ProcessesRemaining = @(
             ($_.Name -eq 'ssh.exe' -and $_.CommandLine -and
                 $_.CommandLine.Contains('HermesRDP')) -or
             ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpAgent.ps1')) -or
-            ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpCertRotation.ps1'))
+            ($_.CommandLine -and $_.CommandLine.Contains('HermesRdpCertRotation.ps1')) -or
+            ($_.CommandLine -and $_.CommandLine.Contains('BakunityAccessHost.ps1'))
         }
 )
-$RdpListener = @(
-    Get-NetTCPConnection `
-        -LocalPort 3389 `
-        -State Listen `
-        -ErrorAction SilentlyContinue
-)
+$RdpListener = @()
+if ($RdpSupported) {
+    $RdpListener = @(
+        Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+    )
+}
 
 if ($TasksRemaining.Count -ne 0) {
     throw "После удаления остались Hermes Scheduled Tasks: $($TasksRemaining -join ', ')"
@@ -425,12 +445,17 @@ if ($ProcessesRemaining.Count -ne 0) {
 if (Test-Path -LiteralPath $BaseDir) {
     throw "После удаления остался активный каталог: $BaseDir"
 }
-if ($RdpListener.Count -eq 0) {
+if ($RdpSupported -and $RdpListener.Count -eq 0) {
     throw 'RDP listener 3389 отсутствует после удаления Hermes.'
 }
 
 Write-Host 'LOCAL_TASKS=ABSENT'
 Write-Host 'HERMES_PROCESSES=0'
 Write-Host 'LOCAL_STATE=REMOVED'
-Write-Host 'RDP_3389=LISTEN'
+if ($RdpSupported) {
+    Write-Host 'RDP_3389=LISTEN'
+}
+else {
+    Write-Host 'RDP_3389=NOT_APPLICABLE'
+}
 Write-Host 'UNINSTALL=PASS' -ForegroundColor Green
