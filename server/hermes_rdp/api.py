@@ -393,7 +393,27 @@ class ApiHandler(BaseHTTPRequestHandler):
             )
             return
         body = self._read_json()
-        action = "on" if bool(body.get("enabled")) else "off"
+        enabled = bool(body.get("enabled"))
+        track_ref = str(
+            self.server.config.repository_requested_ref or ""
+        ).strip()
+        immutable = (
+            len(track_ref) == 40
+            and all(ch in "0123456789abcdefABCDEF" for ch in track_ref)
+        )
+        if enabled and (track_ref == "main" or immutable or not track_ref):
+            self._json(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "ok": False,
+                    "error": (
+                        "autodeploy requires a mutable non-main "
+                        "repository_requested_ref"
+                    ),
+                },
+            )
+            return
+        action = "on" if enabled else "off"
         result = subprocess.run(
             [
                 "sudo",
@@ -519,6 +539,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "rdp_port_end": self.server.config.port_end,
                     "device_domain": domain,
                     "repository_ref": self.server.config.repository_ref,
+                    "repository_requested_ref": (
+                        self.server.config.repository_requested_ref
+                    ),
                     "client_ref": self.server.config.client_ref,
                     "telegram_enabled": bool(
                         self.server.config.telegram_token
