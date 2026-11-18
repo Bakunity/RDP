@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 from . import __version__
 from .config import Config
+from .admin_web import ADMIN_HTML
+from .device_certificates import set_device_slug_with_certificate
 from .db import Registry
 from .device_certificates import get_device_certificate_target
 from .native_transport import (
@@ -172,8 +174,62 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _named_access_auth(self) -> dict[str, Any] | None:
         return self.server.registry.authenticate_named_access_token(self._bearer())
 
+    def _admin_auth(self) -> bool:
+        import secrets
+        token = self._bearer()
+        expected = self.server.config.web_admin_token
+        return bool(token and expected and secrets.compare_digest(token, expected))
+
+    def _html(self, status: int, text: str) -> None:
+        data = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _admin_state(self) -> None:
+        if not self._admin_auth():
+            self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+            return
+        now = int(time.time())
+        domain = self.server.registry.get_device_domain()
+        devices = []
+        for device in self.server.registry.list_devices():
+            last_seen = int(device.get("last_seen") or 0)
+            online = last_seen > 0 and now - last_seen <= max(
+                int(self.server.config.online_after_seconds), 45
+            )
+            slug = str(device.get("slug") or "")
+            host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
+            devices.append({
+                "id": str(device["id"]),
+                "name": str(device["display_name"]),
+                "machine_name": str(device["machine_name"]),
+                "slug": slug,
+                "enabled": bool(device.get("enabled", True)),
+                "online": online,
+                "rdp": f"{host}:{int(device['rdp_port'])}",
+            })
+        self._json(HTTPStatus.OK, {
+            "ok": True,
+            "public_host": self.server.config.public_host,
+            "api_port": self.server.config.api_port,
+            "device_domain": domain,
+            "devices": devices,
+        })
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
+        if path in {"/", "/admin", "/admin/"}:
+            self._html(HTTPStatus.OK, ADMIN_HTML)
+            return
+        if path == "/v1/admin/state":
+            self._admin_state()
+            return
         if path == "/healthz":
             self._json(
                 HTTPStatus.OK,
@@ -206,6 +262,45 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/v1/admin/pair":
+                if not self._admin_auth():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+                    return
+                code = self.server.registry.create_pair_code(
+                    ttl_seconds=self.server.config.pair_ttl_seconds
+                )
+                self._json(HTTPStatus.OK, {"ok": True, "code": code, "ttl_seconds": self.server.config.pair_ttl_seconds})
+                return
+            if path.startswith("/v1/admin/device/"):
+                if not self._admin_auth():
+                    self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
+                    return
+                parts = [part for part in path.split("/") if part]
+                if len(parts) != 5:
+                    self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+                    return
+                device_id, action = parts[3], parts[4]
+                body = self._read_json()
+                if action == "rename":
+                    self.server.registry.rename_device(device_id, str(body.get("name") or ""))
+                    self._json(HTTPStatus.OK, {"ok": True})
+                    return
+                if action == "slug":
+                    slug, _ = set_device_slug_with_certificate(
+                        self.server.config, self.server.registry, device_id, str(body.get("slug") or "")
+                    )
+                    domain = self.server.registry.get_device_domain()
+                    host = f"{slug}.{domain}" if domain else slug
+                    device = self.server.registry.get_device(device_id)
+                    self._json(HTTPStatus.OK, {"ok": True, "slug": slug, "rdp": f"{host}:{int(device['rdp_port'])}"})
+                    return
+                if action == "command":
+                    command = str(body.get("action") or "")
+                    seq = self.server.registry.queue_command(device_id, command)
+                    self._json(HTTPStatus.OK, {"ok": True, "seq": seq})
+                    return
+                self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
+                return
             if path == "/v1/pair":
                 self._pair()
                 return
