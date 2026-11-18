@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from server.hermes_rdp.auth import (
+from hermes_rdp.auth import (
     create_session,
     generate_password,
     read_credentials,
