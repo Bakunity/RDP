@@ -102,6 +102,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 paths = [
     "client/HermesRdpAgent.ps1",
+    "client/BakunityAccessHost.ps1",
     "client/HermesRdpMaintenance.ps1",
     "client/HermesRdpCertRotation.ps1",
     "client/BakunityMesh.ps1",
@@ -110,6 +111,7 @@ paths = [
     "client/BakunitySmartRoute.ps1",
     "client/BakunitySmartRouteLaunch.ps1",
     "scripts/setup-smart-route-host.ps1",
+    "scripts/setup-access-host.ps1",
     "scripts/install-smart-route-connector.ps1",
     "native-transport/go.mod",
     "native-transport/cmd/bakunity-transport/main.go",
@@ -255,6 +257,8 @@ test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
 test -f "$ROOT/client/BakunityMesh.ps1"
 test -f "$ROOT/client/BakunityNativeTransport.ps1"
 test -f "$ROOT/client/BakunityHostSmartRoute.ps1"
+test -f "$ROOT/client/BakunityAccessHost.ps1"
+test -f "$ROOT/scripts/setup-access-host.ps1"
 test -f "$ROOT/native-transport/go.mod"
 test -f "$ROOT/native-transport/cmd/bakunity-transport/main.go"
 test -f "$ROOT/scripts/setup-native-transport.sh"
