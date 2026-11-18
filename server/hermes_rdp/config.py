@@ -26,8 +26,8 @@ class Config:
     ssh_host_key_file: Path
     client_installer_url: str
     repository_ref: str
-    repository_requested_ref: str
     close_tunnel_helper: Path
+    repository_requested_ref: str = "main"
     web_admin_token_file: Path = Path("/etc/hermes-rdp/web-admin-token")
     client_repository_ref: str = ""
     client_compatible_refs: tuple[str, ...] = ()
