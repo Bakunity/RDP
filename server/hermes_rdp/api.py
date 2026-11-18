@@ -606,9 +606,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/v1/admin/autodeploy":
-            self._admin_autodeploy()
-            return
-        if path == "/v1/admin/pair":
+                self._admin_autodeploy()
+                return
+            if path == "/v1/admin/pair":
                 if not self._admin_auth():
                     self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
                     return
