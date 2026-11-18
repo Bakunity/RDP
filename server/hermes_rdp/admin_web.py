@@ -116,11 +116,11 @@ button,input{font:inherit}button{color:inherit}
 
     <div class="content">
       <section id="page-overview" class="page active">
-        <div id="incidentBanner" class="incident"><div class="icon">⚠</div><div><strong id="incidentTitle">Есть проблемы с подключением</strong><div id="incidentText"></div></div></div>
+        <div id="incidentBanner" class="incident"><div><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17.5h.01"/></svg></div><div><strong id="incidentTitle">Есть проблемы с подключением</strong><div id="incidentText"></div></div></div>
         <div class="stats">
           <div class="card stat"><div class="stat-label">Компьютеры</div><div id="statDevices" class="stat-value">0</div><div id="statOnline" class="stat-foot">0 агентов онлайн</div></div>
-          <div class="card stat"><div class="stat-label">RDP готов</div><div id="statReady" class="stat-value">0</div><div class="stat-foot">endpoint реально открыт</div></div>
-          <div class="card stat"><div class="stat-label">Требуют внимания</div><div id="statProblems" class="stat-value">0</div><div class="stat-foot">агент онлайн, RDP не готов</div></div>
+          <div class="card stat"><div class="stat-label">Доступны</div><div id="statReady" class="stat-value">0</div><div class="stat-foot">RDP или Live Screen готовы</div></div>
+          <div class="card stat"><div class="stat-label">Требуют внимания</div><div id="statProblems" class="stat-value">0</div><div class="stat-foot">агент онлайн, доступа нет</div></div>
           <div class="card stat"><div class="stat-label">OpenSSH</div><div id="statSsh" class="stat-value">—</div><div class="stat-foot">серверный транспорт</div></div>
         </div>
         <div class="layout">
@@ -148,7 +148,7 @@ button,input{font:inherit}button{color:inherit}
           <div class="steps">
             <div class="step"><div class="step-num">1</div><b>Задай имя</b><div class="section-sub">Имя сразу попадёт в команду — установщик не будет спрашивать его позже.</div></div>
             <div class="step"><div class="step-num">2</div><b>Открой PowerShell</b><div class="section-sub">От имени администратора на подключаемом Windows-ПК.</div></div>
-            <div class="step"><div class="step-num">3</div><b>Вставь одну команду</b><div class="section-sub">Новый endpoint проверяется сервером до завершения установки.</div></div>
+            <div class="step"><div class="step-num">3</div><b>Вставь одну команду</b><div class="section-sub">Pro получает RDP + Live Screen. Home автоматически работает через Live Screen.</div></div>
           </div>
           <div class="add-grid">
             <div class="field"><label>Название компьютера</label><input id="pairName" class="input" placeholder="Например: FSRV" autocomplete="off"></div>
