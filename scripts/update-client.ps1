@@ -17,6 +17,10 @@ $CandidatePath = Join-Path (
 $CertSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpUpdateCertSetup-$([Guid]::NewGuid().ToString('N')).ps1")
+$AccessSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityAccessUpdate-$([Guid]::NewGuid().ToString('N')).ps1")
+$AccessHostPath = Join-Path $BaseDir 'BakunityAccessHost.ps1'
 $SmartRouteSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("BakunityHostSmartRouteUpdate-$([Guid]::NewGuid().ToString('N')).ps1")
@@ -341,6 +345,10 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
+$AccessSetupUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/scripts/setup-access-host.ps1"
+)
 $SmartRouteSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-smart-route-host.ps1"
@@ -355,9 +363,14 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
+    Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $AccessSetupUrl `
+        -OutFile $AccessSetupCandidate
 
     Assert-PowerShellFile -Path $CandidatePath
     Assert-PowerShellFile -Path $CertSetupCandidate
+    Assert-PowerShellFile -Path $AccessSetupCandidate
 
     $BackupRoot = Join-Path $BaseDir 'backups\updates'
     $BackupDir = Join-Path $BackupRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -368,6 +381,8 @@ try {
         Out-Null
 
     $BackupAgent = Join-Path $BackupDir 'HermesRdpAgent.ps1'
+    $BackupAccessHost = Join-Path $BackupDir 'BakunityAccessHost.ps1'
+    $AccessHostExistedBefore = Test-Path -LiteralPath $AccessHostPath
     $BackupTask = Join-Path $BackupDir 'scheduled-task.xml'
     $BackupMetadata = Join-Path $BackupDir 'update-metadata.json'
 
@@ -375,6 +390,12 @@ try {
         -LiteralPath $AgentPath `
         -Destination $BackupAgent `
         -Force
+    if ($AccessHostExistedBefore) {
+        Copy-Item `
+            -LiteralPath $AccessHostPath `
+            -Destination $BackupAccessHost `
+            -Force
+    }
 
     Export-ScheduledTask -TaskName $TaskName |
         Set-Content `
@@ -411,6 +432,16 @@ try {
 
         Assert-PowerShellFile -Path $AgentPath
 
+        $NativePowerShell = Get-NativePowerShellPath
+        & $NativePowerShell `
+            -NoProfile `
+            -ExecutionPolicy Bypass `
+            -File $AccessSetupCandidate `
+            -RepositoryRef $ResolvedSha
+        if ($LASTEXITCODE -ne 0) {
+            throw "Live Screen setup failed with code $LASTEXITCODE"
+        }
+
         Start-ScheduledTask -TaskName $TaskName
         $Ready = Wait-HermesRuntimeReady `
             -KeyPath $KeyPath `
@@ -421,9 +452,15 @@ try {
         # The certificate setup is a transactional sub-operation. If it fails,
         # it restores its own files/task and throws; this outer update then
         # restores the previous main Agent/task below.
-        Invoke-CertificateRotationSetup `
-            -SetupPath $CertSetupCandidate `
-            -ResolvedSha $ResolvedSha
+        $RdpSupported = $true
+        if ($Config.PSObject.Properties['rdp_supported']) {
+            $RdpSupported = [bool]$Config.rdp_supported
+        }
+        if ($RdpSupported) {
+            Invoke-CertificateRotationSetup `
+                -SetupPath $CertSetupCandidate `
+                -ResolvedSha $ResolvedSha
+        }
 
         $SmartRouteManaged = Invoke-OptionalHostSmartRouteSetup `
             -SetupUrl $SmartRouteSetupUrl `
@@ -448,7 +485,8 @@ try {
         Write-Host "Backup: $BackupDir"
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"
-        Write-Host 'CertificateRotation: managed'
+        Write-Host 'LiveScreen: managed'
+        Write-Host ('CertificateRotation: ' + $(if ($RdpSupported) { 'managed' } else { 'not-applicable' }))
     }
     catch {
         $UpdateFailure = $_
@@ -465,6 +503,18 @@ try {
                 -LiteralPath $BackupAgent `
                 -Destination $AgentPath `
                 -Force
+            if ($AccessHostExistedBefore) {
+                Copy-Item `
+                    -LiteralPath $BackupAccessHost `
+                    -Destination $AccessHostPath `
+                    -Force
+            }
+            else {
+                Remove-Item `
+                    -LiteralPath $AccessHostPath `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+            }
 
             Start-ScheduledTask -TaskName $TaskName
             [void](Wait-HermesRuntimeReady `
@@ -498,7 +548,7 @@ try {
 }
 finally {
     Remove-Item `
-        -LiteralPath $CandidatePath, $CertSetupCandidate, $SmartRouteSetupCandidate `
+        -LiteralPath $CandidatePath, $CertSetupCandidate, $AccessSetupCandidate, $SmartRouteSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
