@@ -20,6 +20,7 @@ class AdminCredentials:
     salt: bytes
     password_hash: bytes
     iterations: int
+    updated_at: int
 
 
 def _b64e(value: bytes) -> str:
@@ -99,6 +100,7 @@ def read_credentials(path: Path) -> AdminCredentials | None:
         salt=salt,
         password_hash=password_hash,
         iterations=iterations,
+        updated_at=int(raw.get("updated_at") or 0),
     )
 
 
@@ -160,6 +162,8 @@ def create_session(
 def verify_session(
     signing_secret: str,
     token: str,
+    *,
+    min_issued_at: int = 0,
 ) -> dict[str, object] | None:
     try:
         encoded, signature_text = str(token or "").split(".", 1)
@@ -175,6 +179,8 @@ def verify_session(
         if not isinstance(payload, dict):
             return None
         if int(payload.get("exp") or 0) < int(time.time()):
+            return None
+        if int(payload.get("iat") or 0) < int(min_issued_at):
             return None
         if not str(payload.get("u") or "").strip():
             return None
