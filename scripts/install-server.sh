@@ -443,7 +443,8 @@ echo "ssh_tunnel=$(systemctl is-active hermes-rdp-sshd.service)"
 echo "controller=$(systemctl is-active hermes-rdp.service)"
 echo "autodeploy=$(if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then systemctl is-active hermes-rdp-autodeploy.timer; else echo disabled; fi)"
 echo "web_ui=https://$HOST:$API_PORT/admin/"
-echo "web_admin_token=$(cat /etc/hermes-rdp/web-admin-token)"
+echo "web_admin_login=admin"
+echo "web_admin_password_setup=bakunity-rdpctl admin password --generate"
 if ((TRUSTED_RDP_CERT == 1)); then
   echo "trusted_rdp_certificate=$(systemctl is-active hermes-rdp-cert-renew.timer)"
 fi
