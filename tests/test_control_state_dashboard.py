@@ -8,6 +8,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ControlStateDashboardTests(unittest.TestCase):
+    def test_web_admin_uses_server_truth_and_named_pairing(self) -> None:
+        api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
+        web = (ROOT / "server/hermes_rdp/admin_web.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "endpoint_state = endpoint_listener_state(int(device[\"rdp_port\"]))",
+            api,
+        )
+        self.assertIn('"endpoint_available": endpoint_state', api)
+        self.assertIn('body = self._read_json()', api)
+        self.assertIn('display_name=name', api)
+        self.assertIn("f\"  Name='{ps_quote(name)}'\\n\"", api)
+        self.assertIn("id=\"pairName\"", web)
+        self.assertIn("api('/v1/admin/pair',{name})", web)
+        self.assertIn("function isReady(d)", web)
+        self.assertIn("function hasIncident(d)", web)
+        self.assertIn("Публичный RDP endpoint", web)
+
     def test_agent_uses_unique_key_path_for_ssh_identity(self) -> None:
         text = (ROOT / "client/HermesRdpAgent.ps1").read_text(encoding="utf-8-sig")
         start = text.index("function Get-SshProcesses")
