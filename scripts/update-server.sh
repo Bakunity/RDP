@@ -174,6 +174,7 @@ rollback_update() {
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-renew || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-cert-state-refresh || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-close-tunnel || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-github-ops || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdp-github-dispatch || rollback_ok=0
   restore_optional_file /etc/sudoers.d/bakunity-rdp-mesh-key || rollback_ok=0
@@ -251,6 +252,7 @@ test -f "$ROOT/server/systemd/hermes-rdp.service"
 test -f "$ROOT/server/systemd/hermes-rdp-sshd.service"
 test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
 test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
+test -f "$ROOT/server/bin/hermes-rdp-close-tunnel.sh"
 test -f "$ROOT/server/bin/bakunity-rdp-github-ops.sh"
 test -f "$ROOT/server/bin/bakunity-rdp-github-dispatch.sh"
 test -f "$ROOT/server/sudoers/bakunity-rdp-mesh-key"
@@ -420,6 +422,7 @@ for path in \
   /usr/local/sbin/hermes-rdp-cert-renew \
   /usr/local/sbin/hermes-rdp-cert-state-refresh \
   /usr/local/sbin/bakunity-rdp-mesh-key \
+  /usr/local/sbin/hermes-rdp-close-tunnel \
   /usr/local/sbin/bakunity-rdp-github-ops \
   /usr/local/bin/bakunity-rdp-github-dispatch \
   /etc/sudoers.d/bakunity-rdp-mesh-key \
@@ -545,6 +548,9 @@ install -m 0644 \
 install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-mesh-key.sh" \
   /usr/local/sbin/bakunity-rdp-mesh-key
+install -m 0755 \
+  "$ROOT/server/bin/hermes-rdp-close-tunnel.sh" \
+  /usr/local/sbin/hermes-rdp-close-tunnel
 install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-github-ops.sh" \
   /usr/local/sbin/bakunity-rdp-github-ops
