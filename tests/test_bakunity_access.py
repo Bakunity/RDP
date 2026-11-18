@@ -87,6 +87,8 @@ class BakunityAccessTests(unittest.TestCase):
             "def _admin_screen_input(",
             "if not self._admin_auth():",
             'socket.create_connection(("127.0.0.1", port)',
+            'sock.sendall(b"PING\\n")',
+            'return response == b"OK"',
             '"rdp_endpoint_available": rdp_state',
             '"live_screen_endpoint_available": live_screen_state',
             "screen-input",
