@@ -55,6 +55,7 @@ public static class BakunityAccessInput
     const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     const uint MOUSEEVENTF_WHEEL = 0x0800;
+    const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     const uint KEYEVENTF_KEYUP = 0x0002;
     const uint KEYEVENTF_UNICODE = 0x0004;
@@ -73,7 +74,12 @@ public static class BakunityAccessInput
         if (width <= 1 || height <= 1) return;
         int nx = Math.Max(0, Math.Min(65535, (int)Math.Round(x * 65535.0 / (width - 1))));
         int ny = Math.Max(0, Math.Min(65535, (int)Math.Round(y * 65535.0 / (height - 1))));
-        SendMouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, nx, ny, 0);
+        SendMouse(
+            MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_ABSOLUTE,
+            nx,
+            ny,
+            0
+        );
     }
 
     public static void MouseButton(string button, bool down) {
