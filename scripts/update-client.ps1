@@ -152,9 +152,17 @@ function Get-HermesSshProcesses {
 function Stop-HermesRuntime {
     param([string]$KeyPath)
 
+    $AccessProcesses = @(
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine.Contains($AccessHostPath)
+            }
+    )
     $Processes = @(
         @(Get-HermesAgentProcesses) +
-        @(Get-HermesSshProcesses -KeyPath $KeyPath)
+        @(Get-HermesSshProcesses -KeyPath $KeyPath) +
+        @($AccessProcesses)
     ) |
         Sort-Object ProcessId -Unique
 
