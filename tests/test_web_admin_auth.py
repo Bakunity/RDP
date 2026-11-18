@@ -97,6 +97,8 @@ class WebAdminAuthTests(unittest.TestCase):
         for marker in (
             "__Host-bakunity_admin_session",
             "HttpOnly; Secure; SameSite=Strict",
+            "X-Bakunity-Session",
+            '"session": token',
             'if path == "/v1/admin/auth/login":',
             'if path == "/v1/admin/auth/logout":',
             'if path == "/v1/admin/auth/status":',
@@ -118,6 +120,8 @@ class WebAdminAuthTests(unittest.TestCase):
             "/v1/admin/auth/logout",
             "/v1/admin/auth/status",
             "credentials:'same-origin'",
+            "bakunity_admin_session",
+            "X-Bakunity-Session",
         ):
             self.assertIn(marker, web)
         self.assertNotIn('id="loginToken"', web)
@@ -128,6 +132,18 @@ class WebAdminAuthTests(unittest.TestCase):
         )
         self.assertIn(
             "localStorage.removeItem('bakunity_admin_token')",
+            web,
+        )
+        self.assertIn(
+            "localStorage.getItem('bakunity_admin_session')",
+            web,
+        )
+        self.assertIn(
+            "localStorage.setItem('bakunity_admin_session',SESSION)",
+            web,
+        )
+        self.assertIn(
+            "localStorage.removeItem('bakunity_admin_session')",
             web,
         )
 
