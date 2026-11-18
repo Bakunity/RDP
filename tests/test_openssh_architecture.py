@@ -61,9 +61,13 @@ class OpenSshArchitectureTests(unittest.TestCase):
             self.assertIn(value, text)
         self.assertNotIn("github.com/fatedier/frp", text)
         self.assertNotIn("FRP_VERSION", text)
-        self.assertIn("ACCESS_START=$((START + 1000))", text)
-        self.assertIn("ACCESS_END=$((END + 1000))", text)
-        self.assertIn("port outside Bakunity device tunnel ranges", text)
+
+        helper = (
+            ROOT / "server/bin/hermes-rdp-close-tunnel.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ACCESS_START=$((START + 1000))", helper)
+        self.assertIn("ACCESS_END=$((END + 1000))", helper)
+        self.assertIn("port outside Bakunity device tunnel ranges", helper)
 
         auth = (ROOT / "server/hermes_rdp/authorized_keys.py").read_text(
             encoding="utf-8"
