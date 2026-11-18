@@ -486,7 +486,12 @@ try {
         Write-Host "AgentPID: $($Ready.AgentPid)"
         Write-Host "HermesSshCount: $($Ready.SshCount)"
         Write-Host 'LiveScreen: managed'
-        Write-Host ('CertificateRotation: ' + $(if ($RdpSupported) { 'managed' } else { 'not-applicable' }))
+        if ($RdpSupported) {
+            Write-Host 'CertificateRotation: managed'
+        }
+        else {
+            Write-Host 'CertificateRotation: not-applicable'
+        }
     }
     catch {
         $UpdateFailure = $_
