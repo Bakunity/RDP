@@ -348,7 +348,12 @@ try {
         Write-Host 'ClientRef: deferred until Smart Route Host setup succeeds' -ForegroundColor Yellow
     }
     Write-Host 'LiveScreen: managed'
-    Write-Host ('CertificateRotation: ' + $(if ($RdpSupported) { 'managed' } else { 'not-applicable' }))
+    if ($RdpSupported) {
+        Write-Host 'CertificateRotation: managed'
+    }
+    else {
+        Write-Host 'CertificateRotation: not-applicable'
+    }
     Write-Host 'CERT-013_REPAIR=PASS' -ForegroundColor Green
 }
 finally {
