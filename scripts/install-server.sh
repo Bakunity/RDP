@@ -138,7 +138,9 @@ for path in \
   /etc/systemd/system/hermes-rdp-autodeploy.service \
   /etc/systemd/system/hermes-rdp-autodeploy.timer \
   /usr/local/sbin/hermes-rdp-autodeploy \
+  /usr/local/sbin/hermes-rdp-autodeploy-control \
   /usr/local/sbin/hermes-rdp-cert-renew \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control \
   /etc/sudoers.d/hermes-rdp; do
   if [[ -e "$path" ]]; then
     cp -a --parents "$path" "$BACKUP_DIR/"
@@ -365,6 +367,15 @@ install \
   -m 0755 \
   "$SOURCE_ROOT/server/bin/hermes-rdp-autodeploy.sh" \
   /usr/local/sbin/hermes-rdp-autodeploy
+install \
+  -m 0755 \
+  "$SOURCE_ROOT/server/bin/hermes-rdp-autodeploy-control.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy-control
+install \
+  -m 0440 \
+  "$SOURCE_ROOT/server/sudoers/hermes-rdp-autodeploy-control" \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control
+visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null
 
 if ((MIGRATE == 1)); then
   rm -f /etc/systemd/system/frps.service /usr/local/bin/frps
