@@ -29,6 +29,9 @@ class Config:
     close_tunnel_helper: Path
     repository_requested_ref: str = "main"
     web_admin_token_file: Path = Path("/etc/hermes-rdp/web-admin-token")
+    web_admin_credentials_file: Path = Path(
+        "/etc/hermes-rdp/web-admin-credentials.json"
+    )
     client_repository_ref: str = ""
     client_compatible_refs: tuple[str, ...] = ()
     online_after_seconds: int = 15
@@ -102,6 +105,12 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
         telegram_chat_id=str(data.get("telegram_chat_id", "")),
         web_admin_token_file=Path(
             data.get("web_admin_token_file", "/etc/hermes-rdp/web-admin-token")
+        ),
+        web_admin_credentials_file=Path(
+            data.get(
+                "web_admin_credentials_file",
+                "/etc/hermes-rdp/web-admin-credentials.json",
+            )
         ),
         tls_cert_file=Path(data.get("tls_cert_file", "/etc/hermes-rdp/tls/api.crt")),
         tls_key_file=Path(data.get("tls_key_file", "/etc/hermes-rdp/tls/api.key")),
