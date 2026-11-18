@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import ssl
+import socket
+import struct
 import subprocess
 import time
 from http import HTTPStatus
@@ -153,6 +155,157 @@ class ApiHandler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
 
+    def _image(
+        self,
+        data: bytes,
+        *,
+        width: int,
+        height: int,
+        left: int,
+        top: int,
+    ) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Bakunity-Width", str(width))
+        self.send_header("X-Bakunity-Height", str(height))
+        self.send_header("X-Bakunity-Left", str(left))
+        self.send_header("X-Bakunity-Top", str(top))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _access_port(device: dict[str, Any]) -> int:
+        return int(device["rdp_port"]) + 1000
+
+    @staticmethod
+    def _read_access_frame(
+        sock: socket.socket,
+        *,
+        max_size: int,
+    ) -> bytes:
+        header = b""
+        while len(header) < 4:
+            chunk = sock.recv(4 - len(header))
+            if not chunk:
+                raise ConnectionError("live screen tunnel closed")
+            header += chunk
+        length = struct.unpack("<I", header)[0]
+        if length > max_size:
+            raise ValueError("live screen frame is too large")
+        data = bytearray()
+        while len(data) < length:
+            chunk = sock.recv(min(65536, length - len(data)))
+            if not chunk:
+                raise ConnectionError("live screen frame ended early")
+            data.extend(chunk)
+        return bytes(data)
+
+    def _access_snapshot(
+        self,
+        device: dict[str, Any],
+    ) -> tuple[dict[str, Any], bytes]:
+        port = self._access_port(device)
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+            sock.settimeout(5)
+            sock.sendall(b"SNAPSHOT\n")
+            meta_raw = self._read_access_frame(sock, max_size=64 * 1024)
+            image = self._read_access_frame(sock, max_size=16 * 1024 * 1024)
+        meta = json.loads(meta_raw.decode("utf-8"))
+        if not isinstance(meta, dict):
+            raise ValueError("invalid live screen metadata")
+        width = int(meta.get("width") or 0)
+        height = int(meta.get("height") or 0)
+        if width <= 0 or height <= 0:
+            raise ValueError("invalid live screen dimensions")
+        return meta, image
+
+    def _access_input(
+        self,
+        device: dict[str, Any],
+        body: dict[str, Any],
+    ) -> None:
+        kind = str(body.get("kind") or "").strip().lower()
+        if kind not in {"move", "button", "wheel", "key", "text"}:
+            raise ValueError("unsupported live screen input")
+        raw = json.dumps(
+            body,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(raw) > 64 * 1024:
+            raise ValueError("live screen input is too large")
+        port = self._access_port(device)
+        with socket.create_connection(("127.0.0.1", port), timeout=4) as sock:
+            sock.settimeout(5)
+            sock.sendall(f"INPUT {len(raw)}\n".encode("ascii"))
+            sock.sendall(raw)
+            response = self._read_access_frame(sock, max_size=64 * 1024)
+        if response != b"OK":
+            detail = response.decode("utf-8", errors="replace")
+            raise RuntimeError(detail[:500] or "live screen input failed")
+
+    def _admin_screen(self, device_id: str) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        device = self.server.registry.get_device(device_id)
+        if not device:
+            self._json(
+                HTTPStatus.NOT_FOUND,
+                {"ok": False, "error": "device not found"},
+            )
+            return
+        if endpoint_listener_state(self._access_port(device)) is not True:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "live screen is unavailable"},
+            )
+            return
+        meta, image = self._access_snapshot(device)
+        self._image(
+            image,
+            width=int(meta.get("width") or 0),
+            height=int(meta.get("height") or 0),
+            left=int(meta.get("left") or 0),
+            top=int(meta.get("top") or 0),
+        )
+
+    def _admin_screen_input(self, device_id: str) -> None:
+        if not self._admin_auth():
+            self._json(
+                HTTPStatus.UNAUTHORIZED,
+                {"ok": False, "error": "unauthorized"},
+            )
+            return
+        device = self.server.registry.get_device(device_id)
+        if not device:
+            self._json(
+                HTTPStatus.NOT_FOUND,
+                {"ok": False, "error": "device not found"},
+            )
+            return
+        if endpoint_listener_state(self._access_port(device)) is not True:
+            self._json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"ok": False, "error": "live screen is unavailable"},
+            )
+            return
+        body = self._read_json()
+        self._access_input(device, body)
+        LOG.info(
+            "live screen input device=%s kind=%s",
+            device_id,
+            str(body.get("kind") or ""),
+        )
+        self._json(HTTPStatus.OK, {"ok": True})
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0 or length > MAX_BODY:
@@ -208,7 +361,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             slug = str(device.get("slug") or "")
             host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
             telemetry = device.get("telemetry") or {}
-            endpoint_state = endpoint_listener_state(int(device["rdp_port"]))
+            rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+            live_screen_state = endpoint_listener_state(
+                self._access_port(device)
+            )
             smart = get_host_smart_route(self.server.registry, str(device["id"]))
             native = get_native_transport_host(self.server.registry, str(device["id"]))
             sessions = telemetry.get("sessions") or []
@@ -233,6 +389,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "last_result": device.get("last_result") or {},
                     "telemetry": {
                         "os": str(telemetry.get("os") or ""),
+                        "windows_edition": str(
+                            telemetry.get("windows_edition") or ""
+                        ),
+                        "rdp_supported": bool(
+                            telemetry.get("rdp_supported", True)
+                        ),
+                        "live_screen_capable": bool(
+                            telemetry.get("live_screen_capable")
+                        ),
+                        "live_screen_running": bool(
+                            telemetry.get("live_screen_running")
+                        ),
                         "user": interactive_user,
                         "cpu_percent": float(telemetry.get("cpu_percent") or 0),
                         "ram_percent": float(telemetry.get("ram_percent") or 0),
@@ -247,9 +415,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                         "access_enabled": telemetry.get("access_enabled"),
                         "ssh_tunnel_running": telemetry.get("ssh_tunnel_running"),
                         "ssh_process_count": telemetry.get("ssh_process_count"),
-                        "endpoint_available": endpoint_state,
+                        "endpoint_available": rdp_state,
+                        "rdp_endpoint_available": rdp_state,
+                        "live_screen_endpoint_available": live_screen_state,
                         "endpoint_source": (
-                            "server_listener" if endpoint_state is not None else "unknown"
+                            "server_listener" if rdp_state is not None else "unknown"
                         ),
                         "rdp_hermes_connections": telemetry.get("rdp_hermes_connections"),
                         "rdp_direct_connections": telemetry.get("rdp_direct_connections"),
@@ -295,6 +465,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             return
         if path == "/v1/admin/state":
             self._admin_state()
+            return
+        parts = [part for part in path.split("/") if part]
+        if (
+            len(parts) == 5
+            and parts[:3] == ["v1", "admin", "device"]
+            and parts[4] == "screen"
+        ):
+            self._admin_screen(parts[3])
             return
         if path == "/healthz":
             self._json(
@@ -378,6 +556,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                     self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
                     return
                 device_id, action = parts[3], parts[4]
+                if action == "screen-input":
+                    self._admin_screen_input(device_id)
+                    return
                 body = self._read_json()
                 if action == "rename":
                     self.server.registry.rename_device(device_id, str(body.get("name") or ""))
@@ -405,10 +586,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                     return
                 if action == "delete":
                     device = self.server.registry.get_device(device_id)
-                    try:
-                        close_tunnel(self.server.config, int(device["rdp_port"]))
-                    except Exception as exc:
-                        LOG.warning("admin tunnel close before delete failed: %s", exc)
+                    for port in (
+                        int(device["rdp_port"]),
+                        self._access_port(device),
+                    ):
+                        try:
+                            close_tunnel(self.server.config, port)
+                        except Exception as exc:
+                            LOG.warning(
+                                "admin tunnel close before delete failed port=%s: %s",
+                                port,
+                                exc,
+                            )
                     self.server.registry.revoke_device(device_id)
                     self._json(HTTPStatus.OK, {"ok": True})
                     return
@@ -915,14 +1104,20 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
             return
         self._read_json()
-        state = endpoint_listener_state(int(device["rdp_port"]))
+        rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+        live_screen_state = endpoint_listener_state(
+            self._access_port(device)
+        )
         self._json(
             HTTPStatus.OK,
             {
                 "ok": True,
-                "endpoint_available": state,
+                "endpoint_available": rdp_state,
+                "rdp_endpoint_available": rdp_state,
+                "live_screen_endpoint_available": live_screen_state,
                 "rdp_port": int(device["rdp_port"]),
-                "source": "server_listener" if state is not None else "unknown",
+                "live_screen_port": self._access_port(device),
+                "source": "server_listener",
             },
         )
 
@@ -948,13 +1143,22 @@ class ApiHandler(BaseHTTPRequestHandler):
         # can be a false positive behind VPN/TUN/proxy routing, so never trust
         # the client value for the public Hermes listener.
         telemetry = dict(telemetry)
-        endpoint_state = endpoint_listener_state(int(device["rdp_port"]))
-        if endpoint_state is None:
+        rdp_state = endpoint_listener_state(int(device["rdp_port"]))
+        live_screen_state = endpoint_listener_state(
+            self._access_port(device)
+        )
+        if rdp_state is None:
             telemetry.pop("endpoint_available", None)
+            telemetry.pop("rdp_endpoint_available", None)
             telemetry["endpoint_source"] = "unknown"
         else:
-            telemetry["endpoint_available"] = endpoint_state
+            telemetry["endpoint_available"] = rdp_state
+            telemetry["rdp_endpoint_available"] = rdp_state
             telemetry["endpoint_source"] = "server_listener"
+        if live_screen_state is None:
+            telemetry.pop("live_screen_endpoint_available", None)
+        else:
+            telemetry["live_screen_endpoint_available"] = live_screen_state
 
         command = self.server.registry.update_telemetry(device_id, telemetry)
         if command and command.get("action") in {"repair", "update"}:
@@ -1026,10 +1230,18 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
             return
         self.server.registry.revoke_device(device_id)
-        try:
-            close_tunnel(self.server.config, int(device["rdp_port"]))
-        except Exception as exc:
-            LOG.warning("self-revoke tunnel close failed: %s", exc)
+        for port in (
+            int(device["rdp_port"]),
+            self._access_port(device),
+        ):
+            try:
+                close_tunnel(self.server.config, port)
+            except Exception as exc:
+                LOG.warning(
+                    "self-revoke tunnel close failed port=%s: %s",
+                    port,
+                    exc,
+                )
         self._json(HTTPStatus.OK, {"ok": True})
 
     def _device_certificate_mode(
