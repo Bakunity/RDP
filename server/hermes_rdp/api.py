@@ -19,6 +19,7 @@ from .db import Registry
 from .device_certificates import get_device_certificate_target
 from .native_transport import (
     authorize_native_transport_peer,
+    get_native_transport_host,
     native_transport_bootstrap,
     native_transport_enabled,
     native_transport_host_manifest,
@@ -200,27 +201,88 @@ class ApiHandler(BaseHTTPRequestHandler):
         devices = []
         for device in self.server.registry.list_devices():
             last_seen = int(device.get("last_seen") or 0)
-            online = last_seen > 0 and now - last_seen <= max(
+            age = max(0, now - last_seen) if last_seen else None
+            online = last_seen > 0 and age <= max(
                 int(self.server.config.online_after_seconds), 45
             )
             slug = str(device.get("slug") or "")
             host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
-            devices.append({
-                "id": str(device["id"]),
-                "name": str(device["display_name"]),
-                "machine_name": str(device["machine_name"]),
-                "slug": slug,
-                "enabled": bool(device.get("enabled", True)),
-                "online": online,
-                "rdp": f"{host}:{int(device['rdp_port'])}",
-            })
-        self._json(HTTPStatus.OK, {
-            "ok": True,
-            "public_host": self.server.config.public_host,
-            "api_port": self.server.config.api_port,
-            "device_domain": domain,
-            "devices": devices,
-        })
+            telemetry = device.get("telemetry") or {}
+            smart = get_host_smart_route(self.server.registry, str(device["id"]))
+            native = get_native_transport_host(self.server.registry, str(device["id"]))
+            sessions = telemetry.get("sessions") or []
+            interactive_user = str(
+                telemetry.get("interactive_user")
+                or (sessions[0] if sessions else "")
+                or ""
+            )
+            devices.append(
+                {
+                    "id": str(device["id"]),
+                    "name": str(device["display_name"]),
+                    "machine_name": str(device["machine_name"]),
+                    "slug": slug,
+                    "enabled": bool(device.get("enabled", True)),
+                    "online": online,
+                    "last_seen": last_seen,
+                    "last_seen_age": age,
+                    "rdp_port": int(device["rdp_port"]),
+                    "rdp": f"{host}:{int(device['rdp_port'])}",
+                    "pending_command": str(device.get("pending_command") or ""),
+                    "last_result": device.get("last_result") or {},
+                    "telemetry": {
+                        "os": str(telemetry.get("os") or ""),
+                        "user": interactive_user,
+                        "cpu_percent": float(telemetry.get("cpu_percent") or 0),
+                        "ram_percent": float(telemetry.get("ram_percent") or 0),
+                        "ram_used_bytes": int(telemetry.get("ram_used_bytes") or 0),
+                        "ram_total_bytes": int(telemetry.get("ram_total_bytes") or 0),
+                        "disk_percent": float(telemetry.get("disk_percent") or 0),
+                        "disk_used_bytes": int(telemetry.get("disk_used_bytes") or 0),
+                        "disk_total_bytes": int(telemetry.get("disk_total_bytes") or 0),
+                        "network_received_bytes": int(telemetry.get("network_received_bytes") or 0),
+                        "network_sent_bytes": int(telemetry.get("network_sent_bytes") or 0),
+                        "route": str(telemetry.get("route") or ""),
+                        "access_enabled": telemetry.get("access_enabled"),
+                        "ssh_tunnel_running": telemetry.get("ssh_tunnel_running"),
+                        "ssh_process_count": telemetry.get("ssh_process_count"),
+                        "endpoint_available": telemetry.get("endpoint_available"),
+                        "rdp_hermes_connections": telemetry.get("rdp_hermes_connections"),
+                        "rdp_direct_connections": telemetry.get("rdp_direct_connections"),
+                        "maintenance_capable": bool(telemetry.get("maintenance_capable")),
+                        "client_repository_ref": str(telemetry.get("client_repository_ref") or ""),
+                        "certificate_lifecycle_ok": telemetry.get("certificate_lifecycle_ok"),
+                        "maintenance_status": telemetry.get("maintenance_status") or {},
+                    },
+                    "smart_route": smart,
+                    "native_transport": native,
+                }
+            )
+        self._json(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "server": {
+                    "public_host": self.server.config.public_host,
+                    "api_port": self.server.config.api_port,
+                    "ssh_port": self.server.config.ssh_bind_port,
+                    "rdp_port_start": self.server.config.port_start,
+                    "rdp_port_end": self.server.config.port_end,
+                    "device_domain": domain,
+                    "repository_ref": self.server.config.repository_ref,
+                    "client_ref": self.server.config.client_ref,
+                    "telegram_enabled": bool(
+                        self.server.config.telegram_token
+                        and self.server.config.telegram_chat_id
+                    ),
+                    "smart_route_enabled": mesh_enabled(self.server.registry),
+                    "smart_route_control_url": mesh_control_url(self.server.registry),
+                    "native_transport_enabled": native_transport_enabled(self.server.registry),
+                    "native_transport_relay_addr": native_transport_relay_addr(self.server.registry),
+                },
+                "devices": devices,
+            },
+        )
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -318,7 +380,22 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if action == "command":
                     command = str(body.get("action") or "")
                     seq = self.server.registry.queue_command(device_id, command)
+                    if command == "off":
+                        try:
+                            device = self.server.registry.get_device(device_id)
+                            close_tunnel(self.server.config, int(device["rdp_port"]))
+                        except Exception as exc:
+                            LOG.warning("admin tunnel close failed: %s", exc)
                     self._json(HTTPStatus.OK, {"ok": True, "seq": seq})
+                    return
+                if action == "delete":
+                    device = self.server.registry.get_device(device_id)
+                    try:
+                        close_tunnel(self.server.config, int(device["rdp_port"]))
+                    except Exception as exc:
+                        LOG.warning("admin tunnel close before delete failed: %s", exc)
+                    self.server.registry.revoke_device(device_id)
+                    self._json(HTTPStatus.OK, {"ok": True})
                     return
                 self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
                 return
