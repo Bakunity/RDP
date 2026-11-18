@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 PBKDF2_ITERATIONS = 310_000
-SESSION_TTL_SECONDS = 12 * 60 * 60
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -194,6 +194,5 @@ def generate_password(length: int = 24) -> str:
         "ABCDEFGHJKLMNPQRSTUVWXYZ"
         "abcdefghijkmnopqrstuvwxyz"
         "23456789"
-        "!@#$%_-"
     )
     return "".join(secrets.choice(alphabet) for _ in range(max(16, length)))
