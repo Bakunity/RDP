@@ -310,12 +310,20 @@ for attempt in 1 2 3; do
   TG_TOKEN=""
   warn "Telegram bot token не прошёл проверку getMe. Проверьте токен и повторите ($attempt/3)."
 done
-[[ -n "$BOT_INFO" ]] || die "Telegram bot token не удалось подтвердить после 3 попыток."
+TELEGRAM_AVAILABLE=1
+if [[ -z "$BOT_INFO" ]]; then
+  TELEGRAM_AVAILABLE=0
+  TG_TOKEN=""
+  warn "Telegram API недоступен. Продолжаю установку в WEB-режиме без Telegram."
+fi
 
 BOT_USERNAME="$(printf '%s' "$BOT_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("username", ""))')"
-[[ -n "$BOT_USERNAME" ]] || die "Telegram getMe не вернул username бота."
-pass "Telegram bot: @$BOT_USERNAME"
+if ((TELEGRAM_AVAILABLE == 1)); then
+  [[ -n "$BOT_USERNAME" ]] || die "Telegram getMe не вернул username бота."
+  pass "Telegram bot: @$BOT_USERNAME"
+fi
 
+if ((TELEGRAM_AVAILABLE == 1)); then
 WEBHOOK_INFO="$(telegram_call getWebhookInfo '{}')" || die "Не удалось проверить Telegram webhook."
 WEBHOOK_URL="$(printf '%s' "$WEBHOOK_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url", ""))')"
 [[ -z "$WEBHOOK_URL" ]] || die "У @${BOT_USERNAME} уже настроен webhook. Используйте отдельного бота Bakunity RDP или сначала освободите этого бота."
@@ -395,6 +403,9 @@ PY
 [[ "$OWNER_ID" =~ ^-?[0-9]+$ ]] || die "Telegram owner ID имеет неожиданный формат."
 pass "Telegram owner confirmed"
 unset CLAIM_CODE
+else
+  OWNER_ID=""
+fi
 
 SOURCE_ARCHIVE="$WORK_DIR/source.tar.gz"
 curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" -o "$SOURCE_ARCHIVE"
@@ -405,10 +416,11 @@ pass "Bakunity RDP source: $REF"
 
 say
 say "Устанавливаю Bakunity RDP..."
-"$SOURCE_ROOT/scripts/install-server.sh" \
-  --host "$PUBLIC_IPV4" \
-  --telegram-token "$TG_TOKEN" \
-  --telegram-chat-id "$OWNER_ID"
+INSTALL_ARGS=(--host "$PUBLIC_IPV4")
+if ((TELEGRAM_AVAILABLE == 1)); then
+  INSTALL_ARGS+=(--telegram-token "$TG_TOKEN" --telegram-chat-id "$OWNER_ID")
+fi
+"$SOURCE_ROOT/scripts/install-server.sh" "${INSTALL_ARGS[@]}"
 
 pass "Bakunity RDP core installed"
 
@@ -428,9 +440,19 @@ fi
 say
 say "=== BAKUNITY RDP READY ==="
 say "Server: $PUBLIC_IPV4"
-say "Telegram: @$BOT_USERNAME"
-say "Owner: confirmed"
+if ((TELEGRAM_AVAILABLE == 1)); then
+  say "Telegram: @$BOT_USERNAME"
+  say "Owner: confirmed"
+else
+  say "Telegram: unavailable on this server"
+fi
+say "Web UI: https://$PUBLIC_IPV4:7443/admin/"
+say "Web token: $(cat /etc/hermes-rdp/web-admin-token)"
 say "Transport: OpenSSH"
 say "Trusted RDP TLS: $TRUSTED_STATUS"
 say
-say "Откройте Telegram и отправьте /start боту @$BOT_USERNAME."
+if ((TELEGRAM_AVAILABLE == 1)); then
+  say "Откройте Telegram и отправьте /start боту @$BOT_USERNAME."
+else
+  say "Откройте Web UI и войдите с Web token."
+fi
