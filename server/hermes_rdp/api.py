@@ -208,6 +208,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             slug = str(device.get("slug") or "")
             host = f"{slug}.{domain}" if domain and slug else self.server.config.public_host
             telemetry = device.get("telemetry") or {}
+            endpoint_state = endpoint_listener_state(int(device["rdp_port"]))
             smart = get_host_smart_route(self.server.registry, str(device["id"]))
             native = get_native_transport_host(self.server.registry, str(device["id"]))
             sessions = telemetry.get("sessions") or []
@@ -246,7 +247,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                         "access_enabled": telemetry.get("access_enabled"),
                         "ssh_tunnel_running": telemetry.get("ssh_tunnel_running"),
                         "ssh_process_count": telemetry.get("ssh_process_count"),
-                        "endpoint_available": telemetry.get("endpoint_available"),
+                        "endpoint_available": endpoint_state,
+                        "endpoint_source": (
+                            "server_listener" if endpoint_state is not None else "unknown"
+                        ),
                         "rdp_hermes_connections": telemetry.get("rdp_hermes_connections"),
                         "rdp_direct_connections": telemetry.get("rdp_direct_connections"),
                         "maintenance_capable": bool(telemetry.get("maintenance_capable")),
@@ -328,17 +332,27 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not self._admin_auth():
                     self._json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"})
                     return
+                body = self._read_json()
+                name = str(body.get("name") or "").strip()
+                if not name:
+                    raise ValueError("computer name is required")
                 code = self.server.registry.create_pair_code(
-                    ttl_seconds=self.server.config.pair_ttl_seconds
+                    display_name=name,
+                    ttl_seconds=self.server.config.pair_ttl_seconds,
                 )
+
+                def ps_quote(value: str) -> str:
+                    return str(value).replace("'", "''")
+
                 command = (
-                    "$u='" + self.server.config.client_installer_url + "'\n"
+                    "$u='" + ps_quote(self.server.config.client_installer_url) + "'\n"
                     "$s=(irm $u).TrimStart([char]0xFEFF)\n"
                     "$p=@{\n"
-                    f"  Server='{self.server.config.public_host}'\n"
-                    f"  PairCode='{code}'\n"
-                    f"  Fingerprint='{self.server.config.tls_fingerprint}'\n"
-                    f"  RepositoryRef='{self.server.config.client_ref}'\n"
+                    f"  Server='{ps_quote(self.server.config.public_host)}'\n"
+                    f"  PairCode='{ps_quote(code)}'\n"
+                    f"  Fingerprint='{ps_quote(self.server.config.tls_fingerprint)}'\n"
+                    f"  RepositoryRef='{ps_quote(self.server.config.client_ref)}'\n"
+                    f"  Name='{ps_quote(name)}'\n"
                     "}\n"
                     "& ([scriptblock]::Create($s)) @p"
                 )
@@ -351,6 +365,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                         "command": command,
                         "fingerprint": self.server.config.tls_fingerprint,
                         "repository_ref": self.server.config.client_ref,
+                        "name": name,
                     },
                 )
                 return
