@@ -131,6 +131,27 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
             text,
         )
 
+    def test_update_keeps_sqlite_runtime_files_owned_by_service_user(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'for sqlite_path in "$DB" "$DB-wal" "$DB-shm"; do',
+            text,
+        )
+        self.assertIn('chown "$DB_UID:$DB_GID" "$sqlite_path"', text)
+        self.assertIn('chmod "$DB_MODE" "$sqlite_path"', text)
+        self.assertIn(
+            "/usr/sbin/runuser -u hermes-rdp -- env "
+            "PYTHONPATH=/opt/hermes-rdp/app",
+            text,
+        )
+        self.assertIn(
+            'if [[ "$(id -u)" -eq 0 && ! ( "${1:-}" == "admin" '
+            '&& "${2:-}" == "password" ) ]]; then',
+            text,
+        )
+
     def test_plain_updater_refuses_major_frp_migration(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("This server still uses FRP.", text)
