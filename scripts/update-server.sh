@@ -179,6 +179,7 @@ rollback_update() {
   restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
   restore_optional_file /etc/hermes-rdp/trusted-rdp-cert-state.json || rollback_ok=0
+  restore_optional_file /etc/hermes-rdp/web-admin-token || rollback_ok=0
 
   if [[ -s "$BACKUP/var/lib/hermes-rdp/state.sqlite3" ]]; then
     rm -f "$DB" "$DB-wal" "$DB-shm"
@@ -421,7 +422,8 @@ for path in \
   /usr/local/bin/hermes-rdpctl \
   /usr/local/bin/bakunity-rdpctl \
   /etc/sudoers.d/hermes-rdp-cert-package \
-  /etc/hermes-rdp/trusted-rdp-cert-state.json; do
+  /etc/hermes-rdp/trusted-rdp-cert-state.json \
+  /etc/hermes-rdp/web-admin-token; do
   [[ -e "$path" ]] && cp -a --parents "$path" "$BACKUP/"
 done
 
@@ -596,6 +598,12 @@ path.write_text(
 PY
 chmod 0640 /etc/hermes-rdp/config.json
 chown root:hermes-rdp /etc/hermes-rdp/config.json
+
+if [[ ! -s /etc/hermes-rdp/web-admin-token ]]; then
+  openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token
+fi
+chmod 0640 /etc/hermes-rdp/web-admin-token
+chown root:hermes-rdp /etc/hermes-rdp/web-admin-token
 
 ufw allow "3389/tcp" comment 'Bakunity RDP default device' >/dev/null || true
 
