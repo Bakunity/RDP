@@ -121,6 +121,16 @@ class ServerUpdateBehaviorTests(unittest.TestCase):
             2,
         )
 
+    def test_update_server_migrates_and_preserves_web_admin_token(self) -> None:
+        text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
+        self.assertIn("/etc/hermes-rdp/web-admin-token", text)
+        self.assertIn("openssl rand -hex 32 > /etc/hermes-rdp/web-admin-token", text)
+        self.assertIn("chown root:hermes-rdp /etc/hermes-rdp/web-admin-token", text)
+        self.assertIn(
+            "restore_optional_file /etc/hermes-rdp/web-admin-token",
+            text,
+        )
+
     def test_plain_updater_refuses_major_frp_migration(self) -> None:
         text = (ROOT / "scripts/update-server.sh").read_text(encoding="utf-8")
         self.assertIn("This server still uses FRP.", text)
