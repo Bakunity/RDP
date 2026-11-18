@@ -20,6 +20,7 @@ class Config:
     db_path: Path
     telegram_token_file: Path
     telegram_chat_id: str
+    web_admin_token_file: Path
     tls_cert_file: Path
     tls_key_file: Path
     tls_fingerprint_file: Path
@@ -60,7 +61,14 @@ class Config:
 
     @property
     def telegram_token(self) -> str:
-        return self.read_secret(self.telegram_token_file)
+        try:
+            return self.read_secret(self.telegram_token_file)
+        except FileNotFoundError:
+            return ""
+
+    @property
+    def web_admin_token(self) -> str:
+        return self.read_secret(self.web_admin_token_file)
 
     @property
     def tls_fingerprint(self) -> str:
@@ -90,7 +98,10 @@ def load_config(path: str | Path = DEFAULT_CONFIG) -> Config:
         telegram_token_file=Path(
             data.get("telegram_token_file", "/etc/hermes-rdp/telegram-token")
         ),
-        telegram_chat_id=str(data["telegram_chat_id"]),
+        telegram_chat_id=str(data.get("telegram_chat_id", "")),
+        web_admin_token_file=Path(
+            data.get("web_admin_token_file", "/etc/hermes-rdp/web-admin-token")
+        ),
         tls_cert_file=Path(data.get("tls_cert_file", "/etc/hermes-rdp/tls/api.crt")),
         tls_key_file=Path(data.get("tls_key_file", "/etc/hermes-rdp/tls/api.key")),
         tls_fingerprint_file=Path(
