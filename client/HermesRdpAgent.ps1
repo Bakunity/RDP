@@ -234,8 +234,7 @@ namespace HermesRdp
 if (-not ('HermesRdp.InteractiveProcessLauncher' -as [type])) {
     Add-Type `
         -TypeDefinition $AccessLauncherSource `
-        -Language CSharp `
-        -ReferencedAssemblies 'userenv.dll'
+        -Language CSharp
 }
 
 function Write-AgentLog {
