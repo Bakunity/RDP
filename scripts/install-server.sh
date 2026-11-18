@@ -276,6 +276,7 @@ cat > /etc/hermes-rdp/config.json <<EOF
   "port_end": $PORT_END,
   "telegram_chat_id": "$TELEGRAM_CHAT_ID",
   "web_admin_token_file": "/etc/hermes-rdp/web-admin-token",
+  "web_admin_credentials_file": "/etc/hermes-rdp/web-admin-credentials.json",
   "ssh_host_key_file": "/etc/hermes-rdp/ssh-host-key.pub",
   "close_tunnel_helper": "/usr/local/sbin/hermes-rdp-close-tunnel",
   "client_installer_url": "https://raw.githubusercontent.com/$REPO/$REF/scripts/install-client.ps1",
