@@ -191,7 +191,9 @@ function Get-Snapshot {
                 Select-Object -First 1
             $Encoder = [Drawing.Imaging.Encoder]::Quality
             $Params = New-Object Drawing.Imaging.EncoderParameters 1
-            $Params.Param[0] = New-Object Drawing.Imaging.EncoderParameter($Encoder, [long]72)
+            $Params.Param[0] = New-Object `
+                -TypeName Drawing.Imaging.EncoderParameter `
+                -ArgumentList @($Encoder, [long]72)
             try {
                 $Bitmap.Save($Memory, $Codec, $Params)
             }
