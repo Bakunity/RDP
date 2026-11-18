@@ -317,8 +317,9 @@ if [[ -z "$BOT_INFO" ]]; then
   warn "Telegram API недоступен. Продолжаю установку в WEB-режиме без Telegram."
 fi
 
-BOT_USERNAME="$(printf '%s' "$BOT_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("username", ""))')"
+BOT_USERNAME=""
 if ((TELEGRAM_AVAILABLE == 1)); then
+  BOT_USERNAME="$(printf '%s' "$BOT_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("username", ""))')"
   [[ -n "$BOT_USERNAME" ]] || die "Telegram getMe не вернул username бота."
   pass "Telegram bot: @$BOT_USERNAME"
 fi
