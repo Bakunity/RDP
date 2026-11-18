@@ -340,8 +340,13 @@ with open("/etc/hermes-rdp/config.json", encoding="utf-8") as handle:
 print(int(data["port_start"]), int(data["port_end"]))
 PY
 )
-if ((PORT < START || PORT > END)); then
-  echo "port outside Hermes RDP range" >&2
+ACCESS_START=$((START + 1000))
+ACCESS_END=$((END + 1000))
+if ! (
+  ((PORT >= START && PORT <= END)) ||
+  ((PORT >= ACCESS_START && PORT <= ACCESS_END))
+); then
+  echo "port outside Bakunity device tunnel ranges" >&2
   exit 2
 fi
 
