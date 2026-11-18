@@ -83,10 +83,11 @@ button,input{font:inherit}button{color:inherit}
 <div id="login" class="login hidden">
   <div class="card">
     <div class="brand" style="padding:0 0 18px"><div class="logo" aria-hidden="true"><svg viewBox="0 0 64 64"><defs><linearGradient id="bg" x1="8" y1="4" x2="56" y2="60"><stop stop-color="#75f1c0"/><stop offset="1" stop-color="#39c991"/></linearGradient></defs><rect width="64" height="64" rx="18" fill="#07110f"/><path d="M32 8 53 18.5v14.2c0 11.5-7.3 19.7-21 23.8-13.7-4.1-21-12.3-21-23.8V18.5L32 8Z" fill="url(#bg)" opacity=".18"/><path d="M32 11.5 49 20v11.7c0 9.4-5.8 16.1-17 19.6-11.2-3.5-17-10.2-17-19.6V20l17-8.5Z" fill="none" stroke="url(#bg)" stroke-width="3"/><path d="M23 32h18M32 23v18" stroke="url(#bg)" stroke-width="3" stroke-linecap="round"/></svg></div><div><div class="brand-title">Bakunity RDP</div><div class="brand-sub">Server Control</div></div></div>
-    <h1>Вход в панель</h1>
-    <p style="color:var(--muted);margin-top:6px">Используй Web Admin Token, который показал установщик сервера.</p>
-    <div class="field"><label>Web Admin Token</label><input id="loginToken" class="input mono" type="password" autocomplete="current-password" placeholder="Вставь токен"></div>
-    <button class="btn primary" style="width:100%" onclick="login()">Войти</button>
+    <h1>Вход в Bakunity</h1>
+    <p id="loginHint" style="color:var(--muted);margin-top:6px">Введи логин и пароль администратора.</p>
+    <div class="field"><label>Логин</label><input id="loginUser" class="input" type="text" autocomplete="username" value="admin"></div>
+    <div class="field"><label>Пароль</label><input id="loginPassword" class="input" type="password" autocomplete="current-password" placeholder="Пароль"></div>
+    <button id="loginButton" class="btn primary" style="width:100%" onclick="login()">Войти</button>
   </div>
 </div>
 
@@ -257,14 +258,16 @@ button,input{font:inherit}button{color:inherit}
 <div id="toast" class="toast">Готово</div>
 
 <script>
-let TOKEN=localStorage.getItem('bakunity_admin_token')||'',STATE=null,PAIR=null,SELECTED=null,EDIT=null,CURRENT='overview';
+localStorage.removeItem('bakunity_admin_token');
+let STATE=null,PAIR=null,SELECTED=null,EDIT=null,CURRENT='overview';
 let LIVE=false,LIVE_CONTROL=false,LIVE_TIMER=null,LIVE_META={width:0,height:0,left:0,top:0},LIVE_MOVE_AT=0,LIVE_URL=null;
 const $=id=>document.getElementById(id);
-const H=()=>({'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'});
-async function api(path,body){const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:H(),body:body===undefined?undefined:JSON.stringify(body)});let j={};try{j=await r.json()}catch{}if(!r.ok)throw Error(j.error||('HTTP '+r.status));return j}
+const H=()=>({'Content-Type':'application/json'});
+async function api(path,body){const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:H(),credentials:'same-origin',body:body===undefined?undefined:JSON.stringify(body)});let j={};try{j=await r.json()}catch{}if(!r.ok)throw Error(j.error||('HTTP '+r.status));return j}
 function toast(s){$('toast').textContent=s;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),1800)}
-function login(){TOKEN=$('loginToken').value.trim();if(!TOKEN)return;localStorage.setItem('bakunity_admin_token',TOKEN);load()}
-function logout(){stopLive();localStorage.removeItem('bakunity_admin_token');TOKEN='';location.reload()}
+async function login(){const username=$('loginUser').value.trim(),password=$('loginPassword').value;if(!username||!password)return;try{await api('/v1/admin/auth/login',{username,password});$('loginPassword').value='';await load()}catch(e){toast(e.message)}}
+async function logout(){stopLive();try{await api('/v1/admin/auth/logout',{})}catch{}location.reload()}
+async function boot(){try{const a=await api('/v1/admin/auth/status');if(!a.configured){$('loginHint').textContent='Администратор ещё не настроен. На сервере выполни: bakunity-rdpctl admin password --generate';$('loginButton').disabled=true;$('login').classList.remove('hidden');return}if(a.username)$('loginUser').value=a.username;if(a.authenticated){await load()}else{$('login').classList.remove('hidden')}}catch(e){$('login').classList.remove('hidden');toast(e.message)}}
 function fmtBytes(v){v=Number(v||0);if(!v)return '0 Б';const u=['Б','КБ','МБ','ГБ','ТБ'];let i=0;while(v>=1024&&i<u.length-1){v/=1024;i++}return (v>=10||i===0?v.toFixed(0):v.toFixed(1))+' '+u[i]}
 function pct(v){return Math.max(0,Math.min(100,Number(v||0)))}
 function ago(s){if(s===null||s===undefined)return 'нет данных';s=Number(s);if(s<60)return s+' сек. назад';if(s<3600)return Math.floor(s/60)+' мин. назад';if(s<86400)return Math.floor(s/3600)+' ч. назад';return Math.floor(s/86400)+' дн. назад'}
@@ -274,7 +277,7 @@ function go(page){if(page!=='device')stopLive();CURRENT=page;document.querySelec
 function toggleMenu(){$('sidebar').classList.toggle('open')}
 function accessReady(d){const t=d.telemetry||{};const rdp=!!(t.rdp_supported!==false&&t.rdp_endpoint_available===true);const live=!!(t.live_screen_endpoint_available===true);return !!(d.online&&d.enabled&&(rdp||live))}
 function hasIncident(d){const t=d.telemetry||{};if(!d.online||!d.enabled)return false;return !accessReady(d)}
-async function load(){try{STATE=await api('/v1/admin/state');$('login').classList.add('hidden');$('app').classList.remove('hidden');if(SELECTED){SELECTED=(STATE.devices||[]).find(d=>d.id===SELECTED.id)||null;if(!SELECTED&&CURRENT==='device')go('computers')}renderAll();if(SELECTED&&CURRENT==='device')renderDevice()}catch(e){if(e.message==='unauthorized'||e.message.includes('401')){$('app').classList.add('hidden');$('login').classList.remove('hidden')}if(TOKEN)toast(e.message)}}
+async function load(){try{STATE=await api('/v1/admin/state');$('login').classList.add('hidden');$('app').classList.remove('hidden');if(SELECTED){SELECTED=(STATE.devices||[]).find(d=>d.id===SELECTED.id)||null;if(!SELECTED&&CURRENT==='device')go('computers')}renderAll();if(SELECTED&&CURRENT==='device')renderDevice()}catch(e){if(e.message==='unauthorized'||e.message.includes('401')){$('app').classList.add('hidden');$('login').classList.remove('hidden')}else{toast(e.message)}}}
 function renderAll(){const s=STATE.server,ds=STATE.devices||[],online=ds.filter(d=>d.online).length,ready=ds.filter(accessReady).length,problems=ds.filter(hasIncident);$('sideHost').textContent=s.public_host+':'+s.api_port;$('statDevices').textContent=ds.length;$('statOnline').textContent=online+' агентов онлайн';$('statReady').textContent=ready;$('statProblems').textContent=problems.length;$('statSsh').textContent=':'+s.ssh_port;const ib=$('incidentBanner');if(problems.length){ib.classList.add('show');$('incidentTitle').textContent='Есть компьютеры без рабочего доступа';$('incidentText').textContent=problems.map(d=>d.name).join(', ')+' — агент онлайн, но ни RDP, ни Live Screen не готовы.';$('topStatus').className='pill warn';$('topStatus').innerHTML=stateDot(null)+'Есть проблемы: '+problems.length}else{ib.classList.remove('show');$('topStatus').className='pill';$('topStatus').innerHTML=stateDot(true)+'Система работает'}renderDeviceList($('overviewDevices'),ds.slice(0,6));renderComputers();renderQuick();renderServer()}
 function renderDeviceList(root,ds){root.innerHTML='';if(!ds.length){root.innerHTML='<div class="empty"><strong>Компьютеров пока нет</strong>Добавь первый Windows-ПК.</div>';return}for(const d of ds)root.appendChild(deviceNode(d))}
 function stateChip(label,value,unknownWarn=false){let cls='bad',txt='нет';if(value===true){cls='ok';txt='да'}else if(value===null||value===undefined){cls=unknownWarn?'warn':'';txt='?'}return '<span class="state-chip '+cls+'"><i></i>'+esc(label)+' '+txt+'</span>'}
@@ -307,7 +310,7 @@ async function saveEdit(){if(!SELECTED||!EDIT)return;const v=$('modalInput').val
 async function deviceCommand(action){if(!SELECTED)return;try{await api('/v1/admin/device/'+encodeURIComponent(SELECTED.id)+'/command',{action});await load();toast('Команда отправлена')}catch(e){toast(e.message)}}
 function toggleAccess(){deviceCommand(SELECTED&&SELECTED.enabled?'off':'on')}
 async function deleteSelected(){if(!SELECTED)return;if(!confirm('Удалить '+SELECTED.name+'? Для повторного доступа компьютер нужно будет подключить заново.'))return;try{await api('/v1/admin/device/'+encodeURIComponent(SELECTED.id)+'/delete',{});stopLive();SELECTED=null;await load();go('computers');toast('Компьютер удалён')}catch(e){toast(e.message)}}
-async function fetchLiveFrame(){if(!LIVE||!SELECTED)return;try{const r=await fetch('/v1/admin/device/'+encodeURIComponent(SELECTED.id)+'/screen',{headers:{'Authorization':'Bearer '+TOKEN},cache:'no-store'});if(!r.ok){let m='Live Screen HTTP '+r.status;try{const j=await r.json();m=j.error||m}catch{}throw Error(m)}LIVE_META={width:Number(r.headers.get('X-Bakunity-Width')||0),height:Number(r.headers.get('X-Bakunity-Height')||0),left:Number(r.headers.get('X-Bakunity-Left')||0),top:Number(r.headers.get('X-Bakunity-Top')||0)};const b=await r.blob();if(LIVE_URL)URL.revokeObjectURL(LIVE_URL);LIVE_URL=URL.createObjectURL(b);$('liveImage').src=LIVE_URL;$('liveImage').classList.remove('hidden');$('liveEmpty').classList.add('hidden')}catch(e){$('liveEmpty').classList.remove('hidden');$('liveEmpty').textContent=e.message}finally{if(LIVE)LIVE_TIMER=setTimeout(fetchLiveFrame,500)}}
+async function fetchLiveFrame(){if(!LIVE||!SELECTED)return;try{const r=await fetch('/v1/admin/device/'+encodeURIComponent(SELECTED.id)+'/screen',{credentials:'same-origin',cache:'no-store'});if(!r.ok){let m='Live Screen HTTP '+r.status;try{const j=await r.json();m=j.error||m}catch{}throw Error(m)}LIVE_META={width:Number(r.headers.get('X-Bakunity-Width')||0),height:Number(r.headers.get('X-Bakunity-Height')||0),left:Number(r.headers.get('X-Bakunity-Left')||0),top:Number(r.headers.get('X-Bakunity-Top')||0)};const b=await r.blob();if(LIVE_URL)URL.revokeObjectURL(LIVE_URL);LIVE_URL=URL.createObjectURL(b);$('liveImage').src=LIVE_URL;$('liveImage').classList.remove('hidden');$('liveEmpty').classList.add('hidden')}catch(e){$('liveEmpty').classList.remove('hidden');$('liveEmpty').textContent=e.message}finally{if(LIVE)LIVE_TIMER=setTimeout(fetchLiveFrame,500)}}
 function startLive(control){if(!SELECTED||SELECTED.telemetry?.live_screen_endpoint_available!==true){toast('Live Screen недоступен');return}LIVE=true;$('liveWrap').classList.add('show');setLiveControl(!!control);$('liveEmpty').textContent='Подключение к экрану…';$('liveEmpty').classList.remove('hidden');$('liveImage').classList.add('hidden');clearTimeout(LIVE_TIMER);fetchLiveFrame();setTimeout(()=>$('liveStage').scrollIntoView({behavior:'smooth',block:'center'}),80)}
 function stopLive(){LIVE=false;LIVE_CONTROL=false;clearTimeout(LIVE_TIMER);LIVE_TIMER=null;if(LIVE_URL){URL.revokeObjectURL(LIVE_URL);LIVE_URL=null}const w=$('liveWrap');if(w)w.classList.remove('show');const st=$('liveStage');if(st)st.classList.remove('control')}
 function setLiveControl(v){LIVE_CONTROL=!!v;$('viewModeBtn').className='btn small '+(!LIVE_CONTROL?'primary':'');$('controlModeBtn').className='btn small '+(LIVE_CONTROL?'primary':'');$('liveModeText').textContent=LIVE_CONTROL?'Control · ввод отправляется на ПК':'View Only · ввод заблокирован';$('liveStage').classList.toggle('control',LIVE_CONTROL);if(LIVE_CONTROL)$('liveStage').focus()}
@@ -321,8 +324,8 @@ $('liveStage').addEventListener('wheel',e=>{if(!LIVE_CONTROL)return;e.preventDef
 $('liveStage').addEventListener('keydown',e=>{if(!LIVE_CONTROL)return;e.preventDefault();sendLiveInput({kind:'key',vk:e.keyCode||e.which||0,down:true})});
 $('liveStage').addEventListener('keyup',e=>{if(!LIVE_CONTROL)return;e.preventDefault();sendLiveInput({kind:'key',vk:e.keyCode||e.which||0,down:false})});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(LIVE)stopLive();closeModal()}if(e.key==='Enter'&&$('modalBack').classList.contains('show'))saveEdit()});
-if(TOKEN)load();else $('login').classList.remove('hidden');
-setInterval(()=>{if(TOKEN&&!document.hidden&&!LIVE)load()},15000);
+boot();
+setInterval(()=>{if(STATE&&!document.hidden&&!LIVE)load()},15000);
 </script>
 </body>
 </html>"""
