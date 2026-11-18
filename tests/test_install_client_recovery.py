@@ -32,7 +32,9 @@ class InstallClientRecoveryTests(unittest.TestCase):
         text = self.text
         self.assertIn("function Wait-HermesEndpointReady", text)
         self.assertIn("/endpoint-status", text)
-        self.assertIn("endpoint_available -eq $true", text)
+        self.assertIn("rdp_endpoint_available", text)
+        self.assertIn("live_screen_endpoint_available", text)
+        self.assertIn("-RequireRdp $RdpSupported", text)
         tunnel = text.index("$TunnelProcess = Wait-HermesTunnelReady")
         endpoint = text.index("Wait-HermesEndpointReady", tunnel)
         certificate = text.index("Invoke-CertificateRotationSetup", endpoint)
