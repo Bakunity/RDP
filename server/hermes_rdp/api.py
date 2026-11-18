@@ -368,8 +368,15 @@ class ApiHandler(BaseHTTPRequestHandler):
         morsel = cookie.get(name)
         return "" if morsel is None else str(morsel.value or "")
 
+    def _session_header(self) -> str:
+        value = str(self.headers.get("X-Bakunity-Session", "") or "").strip()
+        return value
+
     def _admin_session(self) -> dict[str, object] | None:
-        token = self._cookie_value(ADMIN_SESSION_COOKIE)
+        token = (
+            self._cookie_value(ADMIN_SESSION_COOKIE)
+            or self._session_header()
+        )
         if not token:
             return None
         secret = self.server.config.web_admin_token
@@ -435,6 +442,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             username=username,
             password=password,
         ):
+            LOG.warning(
+                "admin login rejected username=%s credentials=%s",
+                username[:64],
+                self.server.config.web_admin_credentials_file,
+            )
             time.sleep(0.35)
             self._json(
                 HTTPStatus.UNAUTHORIZED,
@@ -452,6 +464,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "username": username,
                 "expires_in": SESSION_TTL_SECONDS,
+                "session": token,
             },
             ensure_ascii=False,
             separators=(",", ":"),
