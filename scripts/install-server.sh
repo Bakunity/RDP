@@ -86,6 +86,7 @@ apt-get update -qq
 apt-get install -y -qq \
   ca-certificates \
   curl \
+  git \
   openssl \
   openssh-server \
   python3 \
