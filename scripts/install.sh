@@ -297,24 +297,26 @@ read_masked_telegram_token() {
 }
 
 say
+say "Telegram необязателен. Нажмите Enter без токена, чтобы установить только WEB-интерфейс."
 BOT_INFO=""
+TELEGRAM_AVAILABLE=1
 for attempt in 1 2 3; do
   read_masked_telegram_token || die "Не удалось прочитать Telegram bot token из /dev/tty."
   if [[ -z "$TG_TOKEN" ]]; then
-    warn "Telegram bot token пустой. Попробуйте ещё раз ($attempt/3)."
-    continue
+    TELEGRAM_AVAILABLE=0
+    warn "Telegram пропущен. Продолжаю установку в WEB-режиме."
+    break
   fi
   if BOT_INFO="$(telegram_call getMe '{}')"; then
     break
   fi
   TG_TOKEN=""
-  warn "Telegram bot token не прошёл проверку getMe. Проверьте токен и повторите ($attempt/3)."
+  warn "Telegram bot token не прошёл проверку getMe. Повторите или нажмите Enter для WEB-only ($attempt/3)."
 done
-TELEGRAM_AVAILABLE=1
 if [[ -z "$BOT_INFO" ]]; then
   TELEGRAM_AVAILABLE=0
   TG_TOKEN=""
-  warn "Telegram API недоступен. Продолжаю установку в WEB-режиме без Telegram."
+  warn "Telegram недоступен или пропущен. Продолжаю установку в WEB-режиме."
 fi
 
 BOT_USERNAME=""
