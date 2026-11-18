@@ -291,7 +291,8 @@ class SmartRouteMeshTests(unittest.TestCase):
         self.assertIn("$LauncherPortStart + $Index", worker)
         self.assertIn("$Target.hostname", launcher)
         self.assertIn("$Target.local_port", launcher)
-        self.assertIn("Write-ManagedHosts -Mappings $Mappings", worker)
+        self.assertIn("Write-ManagedHosts -Mappings $AppliedMappings", worker)
+        self.assertIn("Write-ManagedHosts -Mappings @()", worker)
 
     def test_connector_fails_open_if_local_proxy_is_unavailable(self) -> None:
         worker = (
