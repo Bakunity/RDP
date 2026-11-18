@@ -557,6 +557,9 @@ cat > /usr/local/bin/hermes-rdpctl <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 export PYTHONPATH=/opt/hermes-rdp/app
+if [[ "$(id -u)" -eq 0 && ! ( "${1:-}" == "admin" && "${2:-}" == "password" ) ]]; then
+  exec /usr/sbin/runuser -u hermes-rdp -- env PYTHONPATH="$PYTHONPATH" /usr/bin/python3 -m hermes_rdp.cli "$@"
+fi
 exec /usr/bin/python3 -m hermes_rdp.cli "$@"
 EOF
 chmod 0755 /usr/local/bin/hermes-rdpctl
@@ -564,8 +567,7 @@ chmod 0755 /usr/local/bin/hermes-rdpctl
 cat > /usr/local/bin/bakunity-rdpctl <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-export PYTHONPATH=/opt/hermes-rdp/app
-exec /usr/bin/python3 -m hermes_rdp.cli "$@"
+exec /usr/local/bin/hermes-rdpctl "$@"
 EOF
 chmod 0755 /usr/local/bin/bakunity-rdpctl
 
@@ -676,6 +678,13 @@ PYTHONPATH=/opt/hermes-rdp/app \
   python3 -m compileall -q /opt/hermes-rdp/app/hermes_rdp
 /usr/sbin/sshd -t -f /etc/hermes-rdp/sshd_config
 
+for sqlite_path in "$DB" "$DB-wal" "$DB-shm"; do
+  if [[ -e "$sqlite_path" ]]; then
+    chown "$DB_UID:$DB_GID" "$sqlite_path"
+    chmod "$DB_MODE" "$sqlite_path"
+  fi
+done
+
 systemctl daemon-reload
 systemctl restart hermes-rdp-sshd.service hermes-rdp.service
 if ((DEFAULT_RDP_CONFIGURED == 1)); then
@@ -692,7 +701,8 @@ if [[ -e /etc/hermes-rdp/autodeploy.enabled ]]; then
 else
   systemctl disable --now hermes-rdp-autodeploy.timer >/dev/null 2>&1 || true
 fi
-PYTHONPATH=/opt/hermes-rdp/app python3 -m hermes_rdp.cli doctor >/dev/null
+/usr/sbin/runuser -u hermes-rdp -- env PYTHONPATH=/opt/hermes-rdp/app \
+  /usr/bin/python3 -m hermes_rdp.cli doctor >/dev/null
 /usr/local/bin/hermes-rdpctl doctor >/dev/null
 /usr/local/bin/bakunity-rdpctl doctor >/dev/null
 python3 - "$DB" <<'PY'
