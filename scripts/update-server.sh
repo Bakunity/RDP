@@ -185,9 +185,11 @@ rollback_update() {
   restore_optional_file /usr/local/sbin/bakunity-rdp-mesh-key || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-close-tunnel || rollback_ok=0
   restore_optional_file /usr/local/sbin/hermes-rdp-autodeploy || rollback_ok=0
+  restore_optional_file /usr/local/sbin/hermes-rdp-autodeploy-control || rollback_ok=0
   restore_optional_file /usr/local/sbin/bakunity-rdp-github-ops || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdp-github-dispatch || rollback_ok=0
   restore_optional_file /etc/sudoers.d/bakunity-rdp-mesh-key || rollback_ok=0
+  restore_optional_file /etc/sudoers.d/hermes-rdp-autodeploy-control || rollback_ok=0
   restore_optional_file /usr/local/bin/hermes-rdpctl || rollback_ok=0
   restore_optional_file /usr/local/bin/bakunity-rdpctl || rollback_ok=0
   restore_optional_file /etc/sudoers.d/hermes-rdp-cert-package || rollback_ok=0
@@ -214,6 +216,9 @@ rollback_update() {
   fi
   if [[ -e /etc/sudoers.d/bakunity-rdp-mesh-key ]]; then
     visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null || rollback_ok=0
+  fi
+  if [[ -e /etc/sudoers.d/hermes-rdp-autodeploy-control ]]; then
+    visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null || rollback_ok=0
   fi
   systemctl restart hermes-rdp-sshd.service hermes-rdp.service || rollback_ok=0
   if ((DEFAULT_RDP_CONFIGURED == 1)); then
@@ -270,6 +275,8 @@ test -f "$ROOT/server/systemd/bakunity-rdp-default.service"
 test -f "$ROOT/server/systemd/hermes-rdp-autodeploy.service"
 test -f "$ROOT/server/systemd/hermes-rdp-autodeploy.timer"
 test -f "$ROOT/server/bin/hermes-rdp-autodeploy.sh"
+test -f "$ROOT/server/bin/hermes-rdp-autodeploy-control.sh"
+test -f "$ROOT/server/sudoers/hermes-rdp-autodeploy-control"
 test -f "$ROOT/server/bin/bakunity-rdp-mesh-key.sh"
 test -f "$ROOT/server/bin/hermes-rdp-close-tunnel.sh"
 test -f "$ROOT/server/bin/bakunity-rdp-github-ops.sh"
@@ -445,9 +452,11 @@ for path in \
   /usr/local/sbin/bakunity-rdp-mesh-key \
   /usr/local/sbin/hermes-rdp-close-tunnel \
   /usr/local/sbin/hermes-rdp-autodeploy \
+  /usr/local/sbin/hermes-rdp-autodeploy-control \
   /usr/local/sbin/bakunity-rdp-github-ops \
   /usr/local/bin/bakunity-rdp-github-dispatch \
   /etc/sudoers.d/bakunity-rdp-mesh-key \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control \
   /usr/local/bin/hermes-rdpctl \
   /usr/local/bin/bakunity-rdpctl \
   /etc/sudoers.d/hermes-rdp-cert-package \
@@ -584,6 +593,9 @@ install -m 0755 \
   "$ROOT/server/bin/hermes-rdp-autodeploy.sh" \
   /usr/local/sbin/hermes-rdp-autodeploy
 install -m 0755 \
+  "$ROOT/server/bin/hermes-rdp-autodeploy-control.sh" \
+  /usr/local/sbin/hermes-rdp-autodeploy-control
+install -m 0755 \
   "$ROOT/server/bin/bakunity-rdp-github-ops.sh" \
   /usr/local/sbin/bakunity-rdp-github-ops
 install -m 0755 \
@@ -592,7 +604,11 @@ install -m 0755 \
 install -m 0440 \
   "$ROOT/server/sudoers/bakunity-rdp-mesh-key" \
   /etc/sudoers.d/bakunity-rdp-mesh-key
+install -m 0440 \
+  "$ROOT/server/sudoers/hermes-rdp-autodeploy-control" \
+  /etc/sudoers.d/hermes-rdp-autodeploy-control
 visudo -cf /etc/sudoers.d/bakunity-rdp-mesh-key >/dev/null
+visudo -cf /etc/sudoers.d/hermes-rdp-autodeploy-control >/dev/null
 
 if ((TRUSTED_CERT_ENABLED == 1)); then
   install -m 0755 \
