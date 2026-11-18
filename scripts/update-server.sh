@@ -20,6 +20,11 @@ if [[ ! -s "$DB" ]]; then
   echo "Bakunity RDP database is missing or empty." >&2
   exit 1
 fi
+if [[ "$AUTODEPLOY_REQUESTED" == "1" ]] && ! command -v git >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq git >/dev/null
+fi
 if ! python3 - <<'PY'
 import json
 with open("/etc/hermes-rdp/config.json", encoding="utf-8") as handle:
@@ -475,7 +480,7 @@ chmod 0600 "$BACKUP/var/lib/hermes-rdp/state.sqlite3"
 
 python3 - \
   "$BACKUP/update-metadata.json" \
-  "$REF" \
+  "$TRACK_REF" \
   "$RESOLVED_SHA" \
   "$PREVIOUS_REF" \
   "$PREVIOUS_CLIENT_REF" \
