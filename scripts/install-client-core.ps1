@@ -30,6 +30,9 @@ $AgentCandidate = Join-Path (
 $CertSetupCandidate = Join-Path (
     [IO.Path]::GetTempPath()
 ) ("HermesRdpInstallCertSetup-$([Guid]::NewGuid().ToString('N')).ps1")
+$AccessSetupCandidate = Join-Path (
+    [IO.Path]::GetTempPath()
+) ("BakunityAccessSetup-$([Guid]::NewGuid().ToString('N')).ps1")
 $ExpectedFingerprint = (
     $Fingerprint -replace '[^0-9A-Fa-f]', ''
 ).ToUpperInvariant()
@@ -331,6 +334,7 @@ function Wait-HermesEndpointReady {
         [string]$DeviceId,
         [string]$Token,
         [int]$Port,
+        [bool]$RequireRdp = $true,
         [int]$TimeoutSeconds = 30
     )
 
@@ -343,11 +347,20 @@ function Wait-HermesEndpointReady {
                 -Url "$ApiBase/v1/devices/$DeviceId/endpoint-status" `
                 -Token $Token `
                 -Body @{}
-            if ($Status -and $Status.endpoint_available -eq $true) {
-                return
-            }
-            if ($Status -and $Status.PSObject.Properties['endpoint_available']) {
-                $LastDetail = "server endpoint_available=$($Status.endpoint_available)"
+            if ($Status) {
+                $Ready = if ($RequireRdp) {
+                    [bool]$Status.rdp_endpoint_available
+                }
+                else {
+                    [bool]$Status.live_screen_endpoint_available
+                }
+                if ($Ready) {
+                    return
+                }
+                $LastDetail = (
+                    "server rdp=$($Status.rdp_endpoint_available) " +
+                    "live_screen=$($Status.live_screen_endpoint_available)"
+                )
             }
         }
         catch {
@@ -496,17 +509,25 @@ $IsServerWindows = [int]$Os.ProductType -in @(2, 3)
 if (-not ($IsClientWindows -or $IsServerWindows)) {
     throw "Неподдерживаемый тип Windows: ProductType=$($Os.ProductType)."
 }
-if (
-    $IsClientWindows -and
-    $Os.Caption -notmatch 'Pro|Enterprise|Education'
-) {
-    throw "Редакция '$($Os.Caption)' не поддерживает входящие RDP-подключения."
-}
+$RdpSupported = [bool](
+    $IsServerWindows -or
+    (
+        $IsClientWindows -and
+        $Os.Caption -match 'Pro|Enterprise|Education'
+    )
+)
 if (
     $IsServerWindows -and
     $Os.Caption -notmatch 'Windows Server'
 ) {
     throw "Серверная редакция '$($Os.Caption)' не распознана как Windows Server."
+}
+if (-not $RdpSupported) {
+    Write-Host (
+        "Редакция '$($Os.Caption)' не поддерживает входящий Microsoft RDP. " +
+        'Будет установлен Bakunity Live Screen: просмотр и управление ' +
+        'текущей локальной сессией без её завершения.'
+    ) -ForegroundColor Yellow
 }
 
 # "Добавить ПК" is a fresh-pairing flow. Never stop a working Hermes client
@@ -560,6 +581,10 @@ $CertSetupUrl = (
     "https://raw.githubusercontent.com/$Repo/" +
     "$ResolvedSha/scripts/setup-client-cert-rotation.ps1"
 )
+$AccessSetupUrl = (
+    "https://raw.githubusercontent.com/$Repo/" +
+    "$ResolvedSha/scripts/setup-access-host.ps1"
+)
 try {
     Invoke-WebRequest `
         -UseBasicParsing `
@@ -569,12 +594,17 @@ try {
         -UseBasicParsing `
         -Uri $CertSetupUrl `
         -OutFile $CertSetupCandidate
+    Invoke-WebRequest `
+        -UseBasicParsing `
+        -Uri $AccessSetupUrl `
+        -OutFile $AccessSetupCandidate
     Assert-PowerShellFile -Path $AgentCandidate
     Assert-PowerShellFile -Path $CertSetupCandidate
+    Assert-PowerShellFile -Path $AccessSetupCandidate
 }
 catch {
     Remove-Item `
-        -LiteralPath $AgentCandidate, $CertSetupCandidate `
+        -LiteralPath $AgentCandidate, $CertSetupCandidate, $AccessSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
     throw
@@ -729,6 +759,9 @@ try {
         api_base_url = $ApiBase
         api_fingerprint = $ExpectedFingerprint
         rdp_port = [int]$Pair.device.rdp_port
+        rdp_supported = [bool]$RdpSupported
+        live_screen_local_port = 48400
+        live_screen_server_port = ([int]$Pair.device.rdp_port + 1000)
         ssh_path = $SshPath
         ssh_port = [int]$Pair.ssh.port
         ssh_user = [string]$Pair.ssh.user
@@ -741,16 +774,28 @@ try {
         ConvertTo-Json -Depth 5 |
         Set-Content -LiteralPath $ConfigPath -Encoding UTF8
 
-    Set-ItemProperty `
-        -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-        -Name fDenyTSConnections `
-        -Value 0
-    Get-NetFirewallRule `
-        -Name 'RemoteDesktop-*' `
-        -ErrorAction SilentlyContinue |
-        Enable-NetFirewallRule
-    Set-Service -Name TermService -StartupType Automatic
-    Start-Service -Name TermService
+    if ($RdpSupported) {
+        Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name fDenyTSConnections `
+            -Value 0
+        Get-NetFirewallRule `
+            -Name 'RemoteDesktop-*' `
+            -ErrorAction SilentlyContinue |
+            Enable-NetFirewallRule
+        Set-Service -Name TermService -StartupType Automatic
+        Start-Service -Name TermService
+    }
+
+    $NativePowerShell = Get-NativePowerShellPath
+    & $NativePowerShell `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $AccessSetupCandidate `
+        -RepositoryRef $ResolvedSha
+    if ($LASTEXITCODE -ne 0) {
+        throw "Live Screen setup failed with code $LASTEXITCODE"
+    }
 
     $Action = New-ScheduledTaskAction `
         -Execute 'powershell.exe' `
@@ -812,19 +857,28 @@ try {
         -DeviceId ([string]$Pair.device.id) `
         -Token ([string]$Pair.device.token) `
         -Port ([int]$Pair.device.rdp_port) `
+        -RequireRdp $RdpSupported `
         -TimeoutSeconds 30
 
-    Invoke-CertificateRotationSetup `
-        -SetupPath $CertSetupCandidate `
-        -ResolvedSha $ResolvedSha
+    if ($RdpSupported) {
+        Invoke-CertificateRotationSetup `
+            -SetupPath $CertSetupCandidate `
+            -ResolvedSha $ResolvedSha
+    }
 
     Write-Host
     Write-Host '=== ГОТОВО ===' -ForegroundColor Green
     Write-Host "Компьютер: $($Pair.device.name)"
-    Write-Host "RDP: ${Server}:$($Pair.device.rdp_port)"
+    if ($RdpSupported) {
+        Write-Host "RDP: ${Server}:$($Pair.device.rdp_port)"
+        Write-Host 'Сертификат RDP: автоматическое управление'
+    }
+    else {
+        Write-Host 'RDP: недоступен в Windows Home; используй Live Screen'
+    }
+    Write-Host 'Live Screen: доступен через Web Admin'
     Write-Host "Туннель: OpenSSH"
     Write-Host "Задача: $TaskName"
-    Write-Host 'Сертификат RDP: автоматическое управление'
     Write-Host "Лог: $BaseDir\agent.log"
 }
 catch {
@@ -878,7 +932,7 @@ finally {
         $Http.Dispose()
     }
     Remove-Item `
-        -LiteralPath $AgentCandidate, $CertSetupCandidate `
+        -LiteralPath $AgentCandidate, $CertSetupCandidate, $AccessSetupCandidate `
         -Force `
         -ErrorAction SilentlyContinue
 }
