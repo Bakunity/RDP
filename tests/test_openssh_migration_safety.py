@@ -79,12 +79,20 @@ class OpenSshMigrationSafetyTests(unittest.TestCase):
         self.assertNotIn("-N ''", installer)
 
     def test_tunnel_close_helper_matches_sshd_executable(self) -> None:
+        helper = (
+            ROOT / "server/bin/hermes-rdp-close-tunnel.sh"
+        ).read_text(encoding="utf-8")
         installer = (ROOT / "scripts/install-server.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn('readlink -f "/proc/$PID/exe"', installer)
-        self.assertIn('"$EXE" == /usr/sbin/sshd', installer)
-        self.assertNotIn('COMMAND="$(tr', installer)
+        updater = (ROOT / "scripts/update-server.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('readlink -f "/proc/$PID/exe"', helper)
+        self.assertIn('"$EXE" == /usr/sbin/sshd', helper)
+        self.assertNotIn('COMMAND="$(tr', helper)
+        self.assertIn("server/bin/hermes-rdp-close-tunnel.sh", installer)
+        self.assertIn("server/bin/hermes-rdp-close-tunnel.sh", updater)
 
     def test_proc_net_listener_parser_uses_listen_state(self) -> None:
         proc_net = """\
@@ -98,7 +106,12 @@ class OpenSshMigrationSafetyTests(unittest.TestCase):
     def test_api_overwrites_client_endpoint_with_server_listener(self) -> None:
         api = (ROOT / "server/hermes_rdp/api.py").read_text(encoding="utf-8")
         self.assertIn("endpoint_listener_state", api)
-        self.assertIn('telemetry["endpoint_available"] = endpoint_state', api)
+        self.assertIn('telemetry["endpoint_available"] = rdp_state', api)
+        self.assertIn('telemetry["rdp_endpoint_available"] = rdp_state', api)
+        self.assertIn(
+            'telemetry["live_screen_endpoint_available"] = live_screen_state',
+            api,
+        )
         self.assertIn('telemetry["endpoint_source"] = "server_listener"', api)
 
 
